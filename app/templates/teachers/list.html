@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}Enseignants · Chronos{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Enseignants</h1>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-7">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5">Liste</h2>
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Email</th>
+                <th>Téléphone</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for teacher in teachers %}
+                <tr>
+                  <td>{{ teacher.full_name }}</td>
+                  <td>{{ teacher.email }}</td>
+                  <td>{{ teacher.phone_number or '—' }}</td>
+                  <td class="text-end">
+                    <a href="{{ url_for('main.teacher_detail', teacher_id=teacher.id) }}" class="btn btn-sm btn-outline-primary">Ouvrir</a>
+                  </td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="4" class="text-muted">Aucun enseignant</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5">Ajouter un enseignant</h2>
+          <form method="post">
+            <div class="mb-3">
+              <label class="form-label">Nom complet</label>
+              <input type="text" name="full_name" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Adresse email</label>
+              <input type="email" name="email" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Téléphone</label>
+              <input type="text" name="phone_number" class="form-control">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Disponibilités</label>
+              <textarea name="availability" class="form-control" rows="3" placeholder="Ex: Lundi matin, Jeudi après-midi"></textarea>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Volume horaire max. hebdomadaire</label>
+              <input type="number" min="1" name="max_weekly_hours" class="form-control" value="20">
+            </div>
+            <button type="submit" class="btn btn-primary">Créer</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

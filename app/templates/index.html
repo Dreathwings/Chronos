@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block title %}Tableau de bord · Chronos{% endblock %}
+{% block content %}
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Enseignants</h5>
+          <p class="display-6">{{ teachers_count }}</p>
+          <a href="{{ url_for('main.teachers_list') }}" class="btn btn-outline-primary btn-sm">Gérer</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Salles</h5>
+          <p class="display-6">{{ rooms_count }}</p>
+          <a href="{{ url_for('main.rooms_list') }}" class="btn btn-outline-primary btn-sm">Gérer</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Cours</h5>
+          <p class="display-6">{{ courses_count }}</p>
+          <a href="{{ url_for('main.courses_list') }}" class="btn btn-outline-primary btn-sm">Gérer</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <form method="post" action="{{ url_for('main.build_schedule') }}" class="mb-4">
+    <button type="submit" class="btn btn-success">Générer l'emploi du temps</button>
+  </form>
+
+  <h2 class="h4 mb-3">Calendrier global</h2>
+  {% if sessions_by_day %}
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Jour</th>
+            <th>Créneaux</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for day, sessions in sessions_by_day.items() %}
+          <tr>
+            <th scope="row">{{ day }}</th>
+            <td>
+              {% if sessions %}
+                <ul class="list-unstyled mb-0">
+                  {% for session in sessions %}
+                    <li class="mb-2">
+                      <span class="badge bg-primary">{{ session.start_time.strftime('%H:%M') }} – {{ session.end_time.strftime('%H:%M') }}</span>
+                      <strong>{{ session.course.title }}</strong>
+                      <small class="text-muted">• {{ session.room.name }} • {{ session.teacher.full_name }}</small>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <span class="text-muted">Aucune séance planifiée</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-muted">Aucun créneau n'a encore été généré.</p>
+  {% endif %}
+{% endblock %}

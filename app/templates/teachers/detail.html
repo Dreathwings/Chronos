@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block title %}{{ teacher.full_name }} · Enseignant{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">{{ teacher.full_name }}</h1>
+    <div>
+      <a href="{{ url_for('main.teachers_list') }}" class="btn btn-outline-secondary btn-sm">Retour</a>
+      <form method="post" class="d-inline" onsubmit="return confirm('Supprimer cet enseignant ?');">
+        <input type="hidden" name="_method" value="DELETE">
+        <button type="submit" class="btn btn-outline-danger btn-sm">Supprimer</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-6">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5">Profil</h2>
+          <form method="post">
+            <div class="mb-3">
+              <label class="form-label">Nom complet</label>
+              <input type="text" name="full_name" class="form-control" value="{{ teacher.full_name }}" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Email</label>
+              <input type="email" name="email" class="form-control" value="{{ teacher.email }}" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Téléphone</label>
+              <input type="text" name="phone_number" class="form-control" value="{{ teacher.phone_number }}">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Disponibilités</label>
+              <textarea name="availability" class="form-control" rows="3">{{ teacher.availability }}</textarea>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Volume horaire max. hebdomadaire</label>
+              <input type="number" min="1" name="max_weekly_hours" class="form-control" value="{{ teacher.max_weekly_hours }}">
+            </div>
+            <button type="submit" class="btn btn-primary">Enregistrer</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5">Emploi du temps</h2>
+          {% if sessions_by_day %}
+            {% for day, sessions in sessions_by_day.items() %}
+              <div class="mb-3">
+                <h3 class="h6">{{ day }}</h3>
+                {% if sessions %}
+                  <ul class="list-unstyled">
+                    {% for session in sessions %}
+                      <li>
+                        <span class="badge bg-primary">{{ session.start_time.strftime('%H:%M') }} – {{ session.end_time.strftime('%H:%M') }}</span>
+                        {{ session.course.title }} ({{ session.room.name }})
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <p class="text-muted">Aucun cours</p>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% else %}
+            <p class="text-muted">Aucun cours planifié</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

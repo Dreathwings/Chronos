@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+{% block title %}{{ course.title }} · Cours{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">{{ course.title }}</h1>
+    <div>
+      <a href="{{ url_for('main.courses_list') }}" class="btn btn-outline-secondary btn-sm">Retour</a>
+      <form method="post" class="d-inline" onsubmit="return confirm('Supprimer ce cours ?');">
+        <input type="hidden" name="_method" value="DELETE">
+        <button type="submit" class="btn btn-outline-danger btn-sm">Supprimer</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-7">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5">Informations</h2>
+          <form method="post">
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label">Code</label>
+                <input type="text" name="code" class="form-control" value="{{ course.code }}" required>
+              </div>
+              <div class="col-md-8">
+                <label class="form-label">Titre</label>
+                <input type="text" name="title" class="form-control" value="{{ course.title }}" required>
+              </div>
+            </div>
+            <div class="mb-3 mt-3">
+              <label class="form-label">Description</label>
+              <textarea name="description" class="form-control" rows="3">{{ course.description }}</textarea>
+            </div>
+            <div class="row">
+              <div class="col">
+                <div class="mb-3">
+                  <label class="form-label">Durée (heures)</label>
+                  <input type="number" min="1" name="duration_hours" class="form-control" value="{{ course.duration_hours }}">
+                </div>
+              </div>
+              <div class="col">
+                <div class="mb-3">
+                  <label class="form-label">Taille du groupe</label>
+                  <input type="number" min="1" name="group_size" class="form-control" value="{{ course.group_size }}">
+                </div>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Équipements requis</label>
+              <input type="text" name="required_equipments" class="form-control" value="{{ course.required_equipments }}">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Priorité (1=haute)</label>
+              <input type="number" min="1" max="10" name="priority" class="form-control" value="{{ course.priority }}">
+            </div>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">Enseignant</label>
+                <select name="teacher_id" class="form-select">
+                  <option value="">—</option>
+                  {% for teacher in teachers %}
+                    <option value="{{ teacher.id }}" {% if course.teacher and teacher.id == course.teacher.id %}selected{% endif %}>{{ teacher.full_name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Salle</label>
+                <select name="room_id" class="form-select">
+                  <option value="">—</option>
+                  {% for room in rooms %}
+                    <option value="{{ room.id }}" {% if course.room and room.id == course.room.id %}selected{% endif %}>{{ room.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="row mt-3">
+              <div class="col">
+                <label class="form-label">Date de début</label>
+                <input type="date" name="start_date" class="form-control" value="{{ course.start_date }}">
+              </div>
+              <div class="col">
+                <label class="form-label">Date de fin</label>
+                <input type="date" name="end_date" class="form-control" value="{{ course.end_date }}">
+              </div>
+            </div>
+            <div class="mt-3">
+              <button type="submit" class="btn btn-primary">Enregistrer</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5">Emploi du temps</h2>
+          {% if sessions_by_day %}
+            {% for day, sessions in sessions_by_day.items() %}
+              <div class="mb-3">
+                <h3 class="h6">{{ day }}</h3>
+                {% if sessions %}
+                  <ul class="list-unstyled">
+                    {% for session in sessions %}
+                      <li>
+                        <span class="badge bg-primary">{{ session.start_time.strftime('%H:%M') }} – {{ session.end_time.strftime('%H:%M') }}</span>
+                        {{ session.teacher.full_name }} — {{ session.room.name }}
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <p class="text-muted">Aucun créneau planifié</p>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% else %}
+            <p class="text-muted">Ce cours n'a pas encore de séance assignée.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

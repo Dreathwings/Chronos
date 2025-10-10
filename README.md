@@ -7,13 +7,22 @@ Gestion et optimisation automatisée d’emplois du temps selon:
 - besoins des cours (Taille creneau, fenêtres de dates, logiciels, PC,priorité de placement dans l'emploi du temps)
 - Pour chaque pages génére un calendrier contenant tout les cours assigner a cette element
 
-## Architecture cible
-- **ORM**: SQLAlchemy + Alembic
-- **DB**: MariaDB 10.6+
-- **Optimisation**: OR-Tools (CP-SAT)
-- **Config**: `.env`
-- **Conteneurs**: Docker + docker-compose
-- **Tests**: pytest
+## Architecture
+- **Framework web** : Flask 2
+- **ORM** : SQLAlchemy 2 + Flask-SQLAlchemy
+- **Migrations** : Alembic (via Flask-Migrate)
+- **Base de données** : MariaDB 10.6+ (SQLite possible pour le développement)
+- **Optimisation** : OR-Tools (CP-SAT)
+- **Configuration** : Variables d'environnement via `.env`
+- **Interface** : Templates Bootstrap 5
+
+La logique métier est regroupée dans le paquet `app/` :
+
+- `app/models.py` — Modèles SQLAlchemy (enseignants, salles, cours, séances planifiées)
+- `app/scheduling.py` — Génération d'emploi du temps avec OR-Tools et contraintes de créneaux
+- `app/routes.py` — Routage Flask et écrans HTML (CRUD + calendriers)
+- `app/templates/` — Vues HTML pour le tableau de bord et les entités
+- `migrations/` — Scripts Alembic pour versionner le schéma
 
 ## Démarrage rapide
 
@@ -21,7 +30,7 @@ Gestion et optimisation automatisée d’emplois du temps selon:
 ```bash
 cp .env.example .env
 docker compose up --build
-# Swagger: http://localhost:8000/api/docs
+# Application: http://localhost:8000
 ```
 
 ### Option B — Local (sans Docker)
@@ -34,6 +43,8 @@ alembic upgrade head
 python seed.py
 flask --app app run --debug --port 8000
 ```
+
+La commande `seed.py` injecte quelques enseignants, salles et cours de démonstration.
 
 ## Variables d’environnement (`.env.example`)
 ```
@@ -60,9 +71,6 @@ ORIGIN=http://localhost:8000
         Pause matin: 10H a 10H15
         Pause midi: 1H15 entre 12H et 14H
         Pause aprés-midi: 15H15 a 15H30
-
-## Génération du code avec Codex
-(voir le README complet fourni précédemment)
 
 ## Licence
 MIT.

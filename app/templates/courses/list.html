@@ -1,0 +1,119 @@
+{% extends 'base.html' %}
+{% block title %}Cours · Chronos{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Cours</h1>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5">Liste</h2>
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Titre</th>
+                <th>Enseignant</th>
+                <th>Salle</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for course in courses %}
+                <tr>
+                  <td>{{ course.code }}</td>
+                  <td>{{ course.title }}</td>
+                  <td>{{ course.teacher.full_name if course.teacher else '—' }}</td>
+                  <td>{{ course.room.name if course.room else '—' }}</td>
+                  <td class="text-end"><a href="{{ url_for('main.course_detail', course_id=course.id) }}" class="btn btn-sm btn-outline-primary">Ouvrir</a></td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="5" class="text-muted">Aucun cours enregistré</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h5">Ajouter un cours</h2>
+          <form method="post">
+            <div class="mb-3">
+              <label class="form-label">Code</label>
+              <input type="text" name="code" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Titre</label>
+              <input type="text" name="title" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Description</label>
+              <textarea name="description" class="form-control" rows="3"></textarea>
+            </div>
+            <div class="row">
+              <div class="col">
+                <div class="mb-3">
+                  <label class="form-label">Durée (heures)</label>
+                  <input type="number" min="1" name="duration_hours" class="form-control" value="1">
+                </div>
+              </div>
+              <div class="col">
+                <div class="mb-3">
+                  <label class="form-label">Taille du groupe</label>
+                  <input type="number" min="1" name="group_size" class="form-control" value="10">
+                </div>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Équipements requis</label>
+              <input type="text" name="required_equipments" class="form-control" placeholder="Projecteur, Tableau...">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Priorité (1=haute)</label>
+              <input type="number" min="1" max="10" name="priority" class="form-control" value="1">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Enseignant</label>
+              <select name="teacher_id" class="form-select">
+                <option value="">—</option>
+                {% for teacher in teachers %}
+                  <option value="{{ teacher.id }}">{{ teacher.full_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Salle</label>
+              <select name="room_id" class="form-select">
+                <option value="">—</option>
+                {% for room in rooms %}
+                  <option value="{{ room.id }}">{{ room.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="row">
+              <div class="col">
+                <div class="mb-3">
+                  <label class="form-label">Date de début</label>
+                  <input type="date" name="start_date" class="form-control">
+                </div>
+              </div>
+              <div class="col">
+                <div class="mb-3">
+                  <label class="form-label">Date de fin</label>
+                  <input type="date" name="end_date" class="form-control">
+                </div>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Créer</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
