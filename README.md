@@ -17,7 +17,6 @@ Gestion et optimisation automatisée d’emplois du temps selon:
 ## Démarrage rapide (en local)
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 # Adapter DATABASE_URL si besoin (voir section XAMPP ci-dessous)
@@ -32,7 +31,7 @@ L'API est disponible sous `http://localhost:8000/api` et la documentation Swagge
 ```
 FLASK_ENV=development
 SECRET_KEY=change_me
-DATABASE_URL=mysql+pymysql://root:@127.0.0.1:3306/chronos
+DATABASE_URL=mysql+pymysql://warren:@127.0.0.1:3306/chronos
 DB_ECHO=false
 API_TITLE=Chronos API
 API_VERSION=0.1.0
