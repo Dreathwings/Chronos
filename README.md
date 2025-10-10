@@ -14,36 +14,43 @@ Gestion et optimisation automatisée d’emplois du temps selon:
 - **Conteneurs**: Docker + docker-compose
 - **Tests**: pytest
 
-## Démarrage rapide
+## Démarrage rapide (en local)
 
-### Option A — Docker
-```bash
-cp .env.example .env
-docker compose up --build
-# Swagger: http://localhost:8000/api/docs
-```
-
-### Option B — Local (sans Docker)
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Adapter DATABASE_URL si besoin
-alembic upgrade head
+# Adapter DATABASE_URL si besoin (voir section XAMPP ci-dessous)
+flask --app app db upgrade
 python seed.py
 flask --app app run --debug --port 8000
 ```
+
+L'API est disponible sous `http://localhost:8000/api` et la documentation Swagger sur `http://localhost:8000/api/docs`.
 
 ## Variables d’environnement (`.env.example`)
 ```
 FLASK_ENV=development
 SECRET_KEY=change_me
-DATABASE_URL=mariadb+mariadbconnector://user:password@localhost:3306/chrono
+DATABASE_URL=mysql+pymysql://root:@127.0.0.1:3306/chronos
 DB_ECHO=false
 API_TITLE=Chronos API
 API_VERSION=0.1.0
 ORIGIN=http://localhost:8000
 ```
+
+## Connexion à MariaDB via XAMPP
+
+1. Lancez le panneau de contrôle XAMPP et démarrez les services **Apache** et **MySQL**.
+2. Ouvrez [http://localhost/phpmyadmin](http://localhost/phpmyadmin) puis créez une base `chronos` (utf8mb4 recommandé).
+3. (Optionnel mais conseillé) Créez un utilisateur dédié `chronos` avec un mot de passe et tous les privilèges sur la base.
+4. Ajustez `DATABASE_URL` dans `.env` selon vos identifiants. Exemples :
+   - `mysql+pymysql://root:@127.0.0.1:3306/chronos`
+   - `mysql+pymysql://chronos:motdepasse@127.0.0.1:3306/chronos`
+5. Depuis votre terminal, appliquez le schéma avec `flask --app app db upgrade`.
+6. Exécutez `python seed.py` pour charger des données de démonstration (enseignants, salles, classes, créneaux horaires, etc.).
+
+> 💡 Le connecteur Python utilisé par défaut est `PyMySQL` (pur Python, compatible MariaDB/MySQL). Aucun composant natif n'est requis. Vous pouvez néanmoins utiliser un autre driver SQLAlchemy (`mariadb+mariadbconnector`, `mysql+mysqlclient`, etc.) en adaptant `DATABASE_URL` et les dépendances si besoin.
 
 ## Schéma de données (résumé)
 

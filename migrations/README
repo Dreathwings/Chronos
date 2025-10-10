@@ -1,0 +1,2 @@
+This directory contains Alembic migration scripts. Use the Flask-Migrate
+integration via the `flask db` commands to manage schema upgrades.

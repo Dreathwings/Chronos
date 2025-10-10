@@ -32,7 +32,9 @@ class TeacherAvailability(db.Model):
     __tablename__ = "teacher_availabilities"
 
     id = Column(Integer, primary_key=True)
-    teacher_id = Column(Integer, ForeignKey("teachers.id", ondelete="CASCADE"))
+    teacher_id = Column(
+        Integer, ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False
+    )
     weekday = Column(Integer, nullable=False)
     start_time = Column(db.Time, nullable=False)
     end_time = Column(db.Time, nullable=False)
@@ -48,7 +50,9 @@ class TeacherUnavailability(db.Model):
     __tablename__ = "teacher_unavailabilities"
 
     id = Column(Integer, primary_key=True)
-    teacher_id = Column(Integer, ForeignKey("teachers.id", ondelete="CASCADE"))
+    teacher_id = Column(
+        Integer, ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False
+    )
     date = Column(db.Date, nullable=False)
     start_time = Column(db.Time, nullable=False)
     end_time = Column(db.Time, nullable=False)
@@ -77,7 +81,9 @@ class RoomEquipment(db.Model):
     __tablename__ = "room_equipment"
 
     id = Column(Integer, primary_key=True)
-    room_id = Column(Integer, ForeignKey("rooms.id", ondelete="CASCADE"))
+    room_id = Column(
+        Integer, ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False
+    )
     key = Column(String(120), nullable=False)
     value = Column(String(120), nullable=False)
 
@@ -124,7 +130,9 @@ class CourseRequirement(db.Model):
     __tablename__ = "course_requirements"
 
     id = Column(Integer, primary_key=True)
-    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"))
+    course_id = Column(
+        Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
+    )
     key = Column(String(120), nullable=False)
     value = Column(String(120), nullable=False)
 
@@ -147,7 +155,9 @@ class Assignment(db.Model):
     __tablename__ = "assignments"
 
     id = Column(Integer, primary_key=True)
-    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"))
+    course_id = Column(
+        Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
+    )
     session_index = Column(Integer, nullable=False)
     timeslot_id = Column(Integer, ForeignKey("timeslots.id"), nullable=False)
     room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False)
