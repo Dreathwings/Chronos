@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}Chronos — {{ teacher.full_name }}{% endblock %}
+
+{% block content %}
+  {% set weekday_labels = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'] %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3">{{ teacher.full_name }}</h1>
+    <a href="{{ url_for('teacher.index') }}" class="btn btn-outline-secondary">← Retour</a>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-4">
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">Informations</div>
+        <div class="card-body">
+          <form method="post">
+            <input type="hidden" name="action" value="update_teacher" />
+            <div class="mb-3">
+              <label class="form-label">Prénom</label>
+              <input class="form-control" name="first_name" value="{{ teacher.first_name }}" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Nom</label>
+              <input class="form-control" name="last_name" value="{{ teacher.last_name }}" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-control" name="email" value="{{ teacher.email }}" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Heures max / semaine</label>
+              <input
+                type="number"
+                class="form-control"
+                name="max_hours_per_week"
+                value="{{ teacher.max_hours_per_week }}"
+              />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Notes</label>
+              <textarea class="form-control" name="notes" rows="3">{{ teacher.notes or '' }}</textarea>
+            </div>
+            <div class="d-grid">
+              <button class="btn btn-primary" type="submit">Mettre à jour</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-light">Disponibilités hebdomadaires</div>
+        <div class="card-body">
+          <form method="post" class="row g-2 align-items-end">
+            <input type="hidden" name="action" value="add_availability" />
+            <div class="col-12">
+              <label class="form-label">Jour</label>
+              <select class="form-select" name="weekday">
+                {% for day, label in [(0,'Lundi'),(1,'Mardi'),(2,'Mercredi'),(3,'Jeudi'),(4,'Vendredi'),(5,'Samedi'),(6,'Dimanche')] %}
+                  <option value="{{ day }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label">Début</label>
+              <input type="time" class="form-control" name="start_time" required />
+            </div>
+            <div class="col-6">
+              <label class="form-label">Fin</label>
+              <input type="time" class="form-control" name="end_time" required />
+            </div>
+            <div class="col-12 d-grid">
+              <button class="btn btn-outline-primary" type="submit">Ajouter</button>
+            </div>
+          </form>
+          <ul class="list-group list-group-flush mt-3">
+            {% for availability in teacher.availabilities %}
+              <li class="list-group-item">
+                {{ weekday_labels[availability.weekday] }} — {{ availability.start_time.strftime('%H:%M') }} - {{ availability.end_time.strftime('%H:%M') }}
+              </li>
+            {% else %}
+              <li class="list-group-item text-muted">Aucune disponibilité définie</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+
+      <div class="card shadow-sm">
+        <div class="card-header bg-light">Indisponibilités ponctuelles</div>
+        <div class="card-body">
+          <form method="post" class="row g-2 align-items-end">
+            <input type="hidden" name="action" value="add_unavailability" />
+            <div class="col-8">
+              <label class="form-label">Date</label>
+              <input type="date" class="form-control" name="date" required />
+            </div>
+            <div class="col-12">
+              <label class="form-label">Raison</label>
+              <input class="form-control" name="reason" />
+            </div>
+            <div class="col-12 d-grid">
+              <button class="btn btn-outline-primary" type="submit">Ajouter</button>
+            </div>
+          </form>
+          <ul class="list-group list-group-flush mt-3">
+            {% for unavailability in teacher.unavailabilities %}
+              <li class="list-group-item">
+                {{ unavailability.date.strftime('%d/%m/%Y') }} — {{ unavailability.reason or 'Indisponible' }}
+              </li>
+            {% else %}
+              <li class="list-group-item text-muted">Aucune indisponibilité renseignée</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-header bg-light">Séances planifiées</div>
+        <div class="card-body">
+          <div id="teacher-calendar" data-events='{{ events|tojson }}'></div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      ChronosCalendar.mount('teacher-calendar');
+    });
+  </script>
+{% endblock %}

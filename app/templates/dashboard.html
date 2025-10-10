@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Chronos — Tableau de bord{% endblock %}
+
+{% block content %}
+  <div class="row g-4">
+    <div class="col-lg-4">
+      <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white">Planification rapide</div>
+        <div class="card-body">
+          <form method="post">
+            <div class="mb-3">
+              <label class="form-label">Cours</label>
+              <select class="form-select" name="course_id" required>
+                {% for course in courses %}
+                  <option value="{{ course.id }}">{{ course.title }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Enseignant</label>
+              <select class="form-select" name="teacher_id">
+                <option value="">-- À assigner --</option>
+                {% for teacher in teachers %}
+                  <option value="{{ teacher.id }}">{{ teacher.full_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Salle</label>
+              <select class="form-select" name="room_id">
+                <option value="">-- À assigner --</option>
+                {% for room in rooms %}
+                  <option value="{{ room.id }}">{{ room.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="row">
+              <div class="col-6 mb-3">
+                <label class="form-label">Date</label>
+                <input type="date" class="form-control" name="start_date" required />
+              </div>
+              <div class="col-6 mb-3">
+                <label class="form-label">Heure</label>
+                <input type="time" class="form-control" name="start_time" required />
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Durée (heures)</label>
+              <input
+                type="number"
+                class="form-control"
+                name="duration_hours"
+                min="1"
+                max="8"
+                value="2"
+              />
+            </div>
+            <div class="d-grid">
+              <button type="submit" class="btn btn-primary">Planifier</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-header bg-light">Calendrier global</div>
+        <div class="card-body">
+          <div id="dashboard-calendar" data-events='{{ events|tojson }}'></div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      ChronosCalendar.mount('dashboard-calendar');
+    });
+  </script>
+{% endblock %}

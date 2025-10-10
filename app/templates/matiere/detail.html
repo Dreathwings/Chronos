@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Chronos — {{ course.title }}{% endblock %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3">{{ course.title }}</h1>
+    <a href="{{ url_for('course.index') }}" class="btn btn-outline-secondary">← Retour</a>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-5">
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">Paramètres</div>
+        <div class="card-body">
+          <form method="post">
+            <input type="hidden" name="action" value="update_course" />
+            <div class="mb-3">
+              <label class="form-label">Titre</label>
+              <input class="form-control" name="title" value="{{ course.title }}" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Description</label>
+              <textarea class="form-control" name="description" rows="3">{{ course.description or '' }}</textarea>
+            </div>
+            <div class="row">
+              <div class="col-6 mb-3">
+                <label class="form-label">Séances requises</label>
+                <input type="number" class="form-control" name="sessions_required" value="{{ course.sessions_required }}" />
+              </div>
+              <div class="col-6 mb-3">
+                <label class="form-label">Durée d'une séance (h)</label>
+                <input type="number" class="form-control" name="session_duration_hours" value="{{ course.session_duration_hours }}" />
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Priorité</label>
+              <input type="number" class="form-control" name="priority" value="{{ course.priority }}" />
+            </div>
+            <div class="row">
+              <div class="col-6 mb-3">
+                <label class="form-label">Début</label>
+                <input type="date" class="form-control" name="start_date" value="{{ course.start_date|default('', true) }}" />
+              </div>
+              <div class="col-6 mb-3">
+                <label class="form-label">Fin</label>
+                <input type="date" class="form-control" name="end_date" value="{{ course.end_date|default('', true) }}" />
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Matériels</label>
+              <input
+                class="form-control"
+                name="materials"
+                value="{{ course.materials | map(attribute='name') | join(', ') }}"
+              />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Logiciels</label>
+              <input
+                class="form-control"
+                name="software"
+                value="{{ course.software | map(attribute='name') | join(', ') }}"
+              />
+            </div>
+            <div class="d-grid">
+              <button class="btn btn-primary" type="submit">Mettre à jour</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card shadow-sm">
+        <div class="card-header bg-light">Créer une séance</div>
+        <div class="card-body">
+          <form method="post">
+            <input type="hidden" name="action" value="add_session" />
+            <div class="mb-3">
+              <label class="form-label">Enseignant</label>
+              <select class="form-select" name="teacher_id">
+                <option value="">-- À assigner --</option>
+                {% for teacher in teachers %}
+                  <option value="{{ teacher.id }}">{{ teacher.full_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Salle</label>
+              <select class="form-select" name="room_id">
+                <option value="">-- À assigner --</option>
+                {% for room in rooms %}
+                  <option value="{{ room.id }}">{{ room.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="row">
+              <div class="col-6 mb-3">
+                <label class="form-label">Date</label>
+                <input type="date" class="form-control" name="start_date" required />
+              </div>
+              <div class="col-6 mb-3">
+                <label class="form-label">Heure</label>
+                <input type="time" class="form-control" name="start_time" required />
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Durée (h)</label>
+              <input type="number" class="form-control" name="duration_hours" value="{{ course.session_duration_hours }}" />
+            </div>
+            <div class="d-grid">
+              <button class="btn btn-outline-primary" type="submit">Ajouter</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card shadow-sm">
+        <div class="card-header bg-light">Séances</div>
+        <div class="card-body">
+          <div id="course-calendar" data-events='{{ events|tojson }}'></div>
+        </div>
+        <div class="table-responsive border-top">
+          <table class="table mb-0">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Début</th>
+                <th>Fin</th>
+                <th>Enseignant</th>
+                <th>Salle</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for session in course.sessions %}
+                <tr>
+                  <td>{{ session.start_datetime.strftime('%d/%m/%Y') }}</td>
+                  <td>{{ session.start_datetime.strftime('%H:%M') }}</td>
+                  <td>{{ session.end_datetime.strftime('%H:%M') }}</td>
+                  <td>{{ session.teacher.full_name if session.teacher else '—' }}</td>
+                  <td>{{ session.room.name if session.room else '—' }}</td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="5" class="text-center py-4">Aucune séance planifiée</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      ChronosCalendar.mount('course-calendar');
+    });
+  </script>
+{% endblock %}

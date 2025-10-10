@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Chronos — Salles{% endblock %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3">Salles</h1>
+    <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">← Retour</a>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-4">
+      <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white">Nouvelle salle</div>
+        <div class="card-body">
+          <form method="post">
+            <div class="mb-3">
+              <label class="form-label">Nom</label>
+              <input class="form-control" name="name" required />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Capacité</label>
+              <input type="number" class="form-control" name="capacity" required />
+            </div>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" role="switch" name="has_computers" />
+              <label class="form-check-label">Postes informatiques</label>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Équipements complémentaires</label>
+              <textarea class="form-control" name="equipment_notes" rows="2"></textarea>
+            </div>
+            <div class="d-grid">
+              <button class="btn btn-primary" type="submit">Créer</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-header bg-light">Liste</div>
+        <div class="table-responsive">
+          <table class="table table-striped mb-0">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Capacité</th>
+                <th>Informatique</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for room in rooms %}
+                <tr>
+                  <td>{{ room.name }}</td>
+                  <td>{{ room.capacity }}</td>
+                  <td>
+                    {% if room.has_computers %}
+                      <span class="badge bg-success">Oui</span>
+                    {% else %}
+                      <span class="badge bg-secondary">Non</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('room.detail', room_id=room.id) }}">
+                      Ouvrir
+                    </a>
+                  </td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="4" class="text-center py-4">Aucune salle enregistrée</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

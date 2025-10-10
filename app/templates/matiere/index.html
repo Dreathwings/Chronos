@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Chronos — Cours{% endblock %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3">Cours</h1>
+    <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">← Retour</a>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-5">
+      <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white">Nouveau cours</div>
+        <div class="card-body">
+          <form method="post">
+            <div class="mb-3">
+              <label class="form-label">Titre</label>
+              <input class="form-control" name="title" required />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Description</label>
+              <textarea class="form-control" name="description" rows="3"></textarea>
+            </div>
+            <div class="row">
+              <div class="col-6 mb-3">
+                <label class="form-label">Séances requises</label>
+                <input type="number" class="form-control" name="sessions_required" value="1" min="1" />
+              </div>
+              <div class="col-6 mb-3">
+                <label class="form-label">Durée d'une séance (h)</label>
+                <input type="number" class="form-control" name="session_duration_hours" value="2" min="1" />
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Priorité</label>
+              <input type="number" class="form-control" name="priority" value="1" min="1" />
+            </div>
+            <div class="row">
+              <div class="col-6 mb-3">
+                <label class="form-label">Début</label>
+                <input type="date" class="form-control" name="start_date" />
+              </div>
+              <div class="col-6 mb-3">
+                <label class="form-label">Fin</label>
+                <input type="date" class="form-control" name="end_date" />
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Matériels (séparés par des virgules)</label>
+              <input class="form-control" name="materials" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Logiciels (séparés par des virgules)</label>
+              <input class="form-control" name="software" />
+            </div>
+            <div class="d-grid">
+              <button class="btn btn-primary" type="submit">Créer</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card shadow-sm">
+        <div class="card-header bg-light">Liste</div>
+        <div class="table-responsive">
+          <table class="table table-striped mb-0">
+            <thead>
+              <tr>
+                <th>Titre</th>
+                <th>Priorité</th>
+                <th>Sessions</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for course in courses %}
+                <tr>
+                  <td>{{ course.title }}</td>
+                  <td>{{ course.priority }}</td>
+                  <td>{{ course.sessions_required }}</td>
+                  <td class="text-end">
+                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('course.detail', course_id=course.id) }}">
+                      Ouvrir
+                    </a>
+                  </td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="4" class="text-center py-4">Aucun cours enregistré</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -45,11 +45,12 @@ docker compose up --build
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Adapter DATABASE_URL si besoin
-alembic upgrade head
-python seed.py
+# Adapter DATABASE_URL si besoin (MariaDB ou SQLite)
+python -m app.seed  # initialise la base et ajoute des données de démonstration
 flask --app app run --debug --port 8000
 ```
+
+L'application Flask expose les pages HTML décrites ci-dessus avec formulaires CRUD, calendriers interactifs FullCalendar et sérialisation SQLAlchemy.
 
 ## Variables d’environnement (`.env.example`)
 ```
