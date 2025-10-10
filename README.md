@@ -38,35 +38,22 @@ flask --app app run --debug --port 8000
 ```
 FLASK_ENV=development
 SECRET_KEY=change_me
-DATABASE_URL=mariadb+mariadbconnector://user:password@localhost:3306/chrono
+DATABASE_URL=mariadb+mariadbconnector://warren@localhost:3306/chrono
 DB_ECHO=false
 API_TITLE=Chronos API
 API_VERSION=0.1.0
 ORIGIN=http://localhost:8000
 ```
 
-## Schéma de données (résumé)
-
-- **teachers**: id, name, max_weekly_load_hrs  
-- **teacher_availabilities**: id, teacher_id, weekday, start_time, end_time  
-- **teacher_unavailabilities**: id, teacher_id, date, start_time, end_time  
-- **rooms**: id, name, capacity, building  
-- **room_equipment**: id, room_id, key, value  
-- **courses**: id, name, group_id, size, teacher_id, sessions_count, session_minutes, window_start, window_end  
-- **course_requirements**: id, course_id, key, value  
-- **timeslots**: id, date, start_time, end_time, minutes  
-- **assignments**: id, course_id, session_index, timeslot_id, room_id, teacher_id, status
-
 ## Endpoints principaux
+- `GET /`
+- `GET /enseignant` Listing enseignants
+- `GET /enseignant/<id>` CRUD enseignant
+- `GET /salle` Listing salles
+- `GET /salle/<id>` CRUD salles  
+- `GET /matiere` Listing cours
+- `GET /matiere/<id>` CRUD cours  
 
-- `POST /api/teachers` CRUD enseignants  
-- `POST /api/rooms` CRUD salles  
-- `POST /api/courses` CRUD cours  
-- `POST /api/timeslots/generate` génère les créneaux potentiels  
-- `POST /api/solve` lance l’optimiseur  
-- `GET /api/timetable?scope=teacher|group|room&id=...` vue filtrée  
-- `PATCH /api/assignments/{id}` ajustement manuel  
-- `GET /api/health` statut
 
 ## Génération du code avec Codex
 (voir le README complet fourni précédemment)
