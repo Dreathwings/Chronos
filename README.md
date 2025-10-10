@@ -50,7 +50,8 @@ ORIGIN=http://localhost:8000
 - **teachers**: id, name, max_weekly_load_hrs  
 - **teacher_availabilities**: id, teacher_id, weekday, start_time, end_time  
 - **teacher_unavailabilities**: id, teacher_id, date, start_time, end_time  
-- **rooms**: id, name, capacity, building  
+- **class_groups**: id, code, name, size, notes
+- **rooms**: id, name, capacity, building
 - **room_equipment**: id, room_id, key, value  
 - **courses**: id, name, group_id, size, teacher_id, sessions_count, session_minutes, window_start, window_end  
 - **course_requirements**: id, course_id, key, value  
@@ -64,9 +65,21 @@ ORIGIN=http://localhost:8000
 - `POST /api/courses` CRUD cours  
 - `POST /api/timeslots/generate` génère les créneaux potentiels  
 - `POST /api/solve` lance l’optimiseur  
-- `GET /api/timetable?scope=teacher|group|room&id=...` vue filtrée  
-- `PATCH /api/assignments/{id}` ajustement manuel  
+- `GET /api/timetable?scope=teacher|group|room&id=...` vue filtrée
+- `PATCH /api/assignments/{id}` ajustement manuel
 - `GET /api/health` statut
+
+## Interface Web d'administration
+
+En complément de l'API, Chronos fournit une interface HTML responsive accessible sur `http://localhost:8000/`. Elle permet de :
+
+- Visualiser un tableau de bord (effectifs, dernières créations).
+- Gérer les **salles** (création, suppression, équipements sous forme `clé=valeur`).
+- Gérer les **enseignants** (création, suppression, charge hebdomadaire maximale).
+- Gérer les **classes** (code, intitulé, effectif, notes). La suppression est bloquée si des cours sont associés.
+- Gérer les **cours** (sélection d'une classe et d'un enseignant, fenêtres de dates, exigences `clé=valeur`).
+
+Les formulaires intègrent des validations basiques et des messages de confirmation/erreur. Les actions reposent sur la même base de données que l'API, ce qui permet d'enchaîner gestion manuelle et appels programmatiques sans désynchronisation.
 
 ## Génération du code avec Codex
 (voir le README complet fourni précédemment)

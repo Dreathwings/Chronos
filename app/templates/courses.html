@@ -1,0 +1,118 @@
+{% extends "layout.html" %}
+{% block title %}Gestion des cours — Chronos{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h3 class="card-title">Nouveau cours</h3>
+        <form method="post" class="mt-3">
+          <div class="mb-3">
+            <label class="form-label" for="name">Nom</label>
+            <input type="text" class="form-control" id="name" name="name" value="{{ request.form.get('name', '') }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="group_id">Classe</label>
+            <select class="form-select" id="group_id" name="group_id" required>
+              <option value="">Choisir...</option>
+              {% for class_group in class_groups %}
+                <option value="{{ class_group.code }}" {% if request.form.get('group_id') == class_group.code %}selected{% endif %}>{{ class_group.code }} — {{ class_group.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="teacher_id">Enseignant</label>
+            <select class="form-select" id="teacher_id" name="teacher_id" required>
+              <option value="">Choisir...</option>
+              {% for teacher in teachers %}
+                <option value="{{ teacher.id }}" {% if request.form.get('teacher_id') == teacher.id|string %}selected{% endif %}>{{ teacher.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="row g-2">
+            <div class="col">
+              <label class="form-label" for="size">Effectif</label>
+              <input type="number" min="1" class="form-control" id="size" name="size" value="{{ request.form.get('size', '') }}" required>
+            </div>
+            <div class="col">
+              <label class="form-label" for="sessions_count">Séances</label>
+              <input type="number" min="1" class="form-control" id="sessions_count" name="sessions_count" value="{{ request.form.get('sessions_count', '') }}" required>
+            </div>
+            <div class="col">
+              <label class="form-label" for="session_minutes">Durée (min)</label>
+              <input type="number" min="30" step="15" class="form-control" id="session_minutes" name="session_minutes" value="{{ request.form.get('session_minutes', '') }}" required>
+            </div>
+          </div>
+          <div class="row g-2 mt-3">
+            <div class="col">
+              <label class="form-label" for="window_start">Début</label>
+              <input type="date" class="form-control" id="window_start" name="window_start" value="{{ request.form.get('window_start', '') }}" required>
+            </div>
+            <div class="col">
+              <label class="form-label" for="window_end">Fin</label>
+              <input type="date" class="form-control" id="window_end" name="window_end" value="{{ request.form.get('window_end', '') }}" required>
+            </div>
+          </div>
+          <div class="mb-3 mt-3">
+            <label class="form-label" for="requirements">Exigences (clé=valeur)</label>
+            <textarea class="form-control" id="requirements" name="requirements" rows="3" placeholder="projector=true" spellcheck="false">{{ request.form.get('requirements', '') }}</textarea>
+            <div class="form-text">Une ligne par exigence. Exemple : logiciel=AutoCAD</div>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">Créer</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h3 class="card-title mb-3">Cours</h3>
+        {% if courses %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Classe</th>
+                <th>Enseignant</th>
+                <th>Sessions</th>
+                <th>Fenêtre</th>
+                <th>Exigences</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for course in courses %}
+              <tr>
+                <td>{{ course.name }}</td>
+                <td>{{ course.class_group.name if course.class_group else course.group_id }}</td>
+                <td>{{ course.teacher.name }}</td>
+                <td>{{ course.sessions_count }} × {{ course.session_minutes }} min</td>
+                <td>{{ course.window_start|datetime }} - {{ course.window_end|datetime }}</td>
+                <td>
+                  {% if course.requirements %}
+                    {% for requirement in course.requirements %}
+                      <span class="badge text-bg-light border">{{ requirement.key }}={{ requirement.value }}</span>
+                    {% endfor %}
+                  {% else %}
+                    <span class="text-muted">Aucune</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  <form method="post" action="{{ url_for('web.delete_course', course_id=course.id) }}" onsubmit="return confirm('Supprimer {{ course.name }} ?');">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Supprimer</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted">Aucun cours enregistré.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "layout.html" %}
+{% block title %}Chronos — Tableau de bord{% endblock %}
+{% block content %}
+<div class="row g-4 mb-4">
+  <div class="col-md-3">
+    <div class="card shadow-sm border-0">
+      <div class="card-body text-center">
+        <h2 class="card-title">{{ stats.teachers }}</h2>
+        <p class="card-text text-muted">Enseignants</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card shadow-sm border-0">
+      <div class="card-body text-center">
+        <h2 class="card-title">{{ stats.rooms }}</h2>
+        <p class="card-text text-muted">Salles</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card shadow-sm border-0">
+      <div class="card-body text-center">
+        <h2 class="card-title">{{ stats.classes }}</h2>
+        <p class="card-text text-muted">Classes</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card shadow-sm border-0">
+      <div class="card-body text-center">
+        <h2 class="card-title">{{ stats.courses }}</h2>
+        <p class="card-text text-muted">Cours</p>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="row">
+  <div class="col-12">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h3 class="card-title mb-3">Derniers cours créés</h3>
+        {% if latest_courses %}
+        <div class="table-responsive">
+          <table class="table table-striped align-middle">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Classe</th>
+                <th>Enseignant</th>
+                <th>Fenêtre</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for course in latest_courses %}
+              <tr>
+                <td>{{ course.name }}</td>
+                <td>{{ course.class_group.name if course.class_group else course.group_id }}</td>
+                <td>{{ course.teacher.name }}</td>
+                <td>{{ course.window_start|datetime }} - {{ course.window_end|datetime }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted">Aucun cours enregistré pour le moment.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
