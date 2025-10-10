@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Chronos — Tableau de bord{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3">Tableau de bord</h1>
+    <form action="{{ url_for('chronos.schedule') }}" method="post">
+      <button class="btn btn-success" type="submit">Générer un planning</button>
+    </form>
+  </div>
+  <div class="row g-4">
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="h5">Enseignants</h2>
+          <p class="display-6">{{ enseignants|length }}</p>
+          <a class="btn btn-outline-primary" href="{{ url_for('chronos.enseignants') }}">Gérer</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="h5">Salles</h2>
+          <p class="display-6">{{ salles|length }}</p>
+          <a class="btn btn-outline-primary" href="{{ url_for('chronos.salles_view') }}">Gérer</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <h2 class="h5">Matières</h2>
+          <p class="display-6">{{ matieres|length }}</p>
+          <a class="btn btn-outline-primary" href="{{ url_for('chronos.matieres_view') }}">Gérer</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="mt-5">
+    <h2 class="h4">Planning généré</h2>
+    {% if creneaux %}
+      <div class="table-responsive">
+        <table class="table table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Horaire</th>
+              <th>Matière</th>
+              <th>Enseignant</th>
+              <th>Salle</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for creneau in creneaux %}
+              <tr>
+                <td>{{ creneau.date.strftime('%d/%m/%Y') }}</td>
+                <td>{{ creneau.debut.strftime('%H:%M') }} – {{ creneau.fin.strftime('%H:%M') }}</td>
+                <td>{{ creneau.matiere.nom }}</td>
+                <td>{{ creneau.enseignant.nom }}</td>
+                <td>{{ creneau.salle.nom }}</td>
+                <td class="text-end">
+                  <form method="post" action="{{ url_for('chronos.delete_creneau', creneau_id=creneau.id) }}">
+                    <button class="btn btn-sm btn-outline-danger" type="submit">Supprimer</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted">Aucun créneau planifié pour le moment.</p>
+    {% endif %}
+  </section>
+{% endblock %}

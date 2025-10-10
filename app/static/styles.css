@@ -1,0 +1,16 @@
+body {
+  background-color: #f7f9fb;
+}
+
+.card {
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.05);
+}
+
+.flash-container .alert {
+  margin-bottom: 0.5rem;
+}
+
+.table td,
+.table th {
+  vertical-align: middle;
+}

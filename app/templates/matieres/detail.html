@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ matiere.nom }} — Matière{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3">{{ matiere.nom }}</h1>
+    <a class="btn btn-outline-secondary" href="{{ url_for('chronos.matieres_view') }}">Retour</a>
+  </div>
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <form method="post" class="card card-body">
+        <input type="hidden" name="action" value="update" />
+        <div class="mb-3">
+          <label class="form-label" for="nom">Nom</label>
+          <input class="form-control" type="text" name="nom" id="nom" value="{{ matiere.nom }}" required />
+        </div>
+        <div class="row">
+          <div class="col-md-4 mb-3">
+            <label class="form-label" for="duree">Durée</label>
+            <input class="form-control" type="number" name="duree" id="duree" min="1" value="{{ matiere.duree }}" />
+          </div>
+          <div class="col-md-4 mb-3">
+            <label class="form-label" for="capacite_requise">Capacité requise</label>
+            <input class="form-control" type="number" name="capacite_requise" id="capacite_requise" min="1" value="{{ matiere.capacite_requise }}" />
+          </div>
+          <div class="col-md-4 mb-3">
+            <label class="form-label" for="priorite">Priorité</label>
+            <input class="form-control" type="number" name="priorite" id="priorite" min="0" value="{{ matiere.priorite }}" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="fenetre_debut">Fenêtre de début</label>
+            <input class="form-control" type="date" name="fenetre_debut" id="fenetre_debut" value="{{ matiere.fenetre_debut.isoformat() if matiere.fenetre_debut else '' }}" />
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="fenetre_fin">Fenêtre de fin</label>
+            <input class="form-control" type="date" name="fenetre_fin" id="fenetre_fin" value="{{ matiere.fenetre_fin.isoformat() if matiere.fenetre_fin else '' }}" />
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="enseignant_id">Enseignant</label>
+          <select class="form-select" name="enseignant_id" id="enseignant_id">
+            <option value="">— Non assigné —</option>
+            {% for enseignant in enseignants %}
+              <option value="{{ enseignant.id }}" {% if matiere.enseignant_id == enseignant.id %}selected{% endif %}>{{ enseignant.nom }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="besoins">Besoins spécifiques</label>
+          <textarea class="form-control" name="besoins" id="besoins" rows="3">{{ matiere.besoins }}</textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="logiciels">Logiciels nécessaires</label>
+          <input class="form-control" type="text" name="logiciels" id="logiciels" value="{{ matiere.logiciels }}" />
+        </div>
+        <button class="btn btn-primary" type="submit">Mettre à jour</button>
+      </form>
+    </div>
+    <div class="col-lg-4">
+      <div class="card border-danger">
+        <div class="card-body">
+          <h2 class="h5 text-danger">Supprimer</h2>
+          <p class="text-muted">Cette action supprime aussi les créneaux associés.</p>
+          <form method="post">
+            <input type="hidden" name="action" value="delete" />
+            <button class="btn btn-outline-danger" type="submit">Supprimer</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  <section class="mt-5">
+    <h2 class="h4">Créneaux planifiés</h2>
+    <ul class="list-group">
+      {% for creneau in matiere.creneaux %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <span>{{ creneau.date.strftime('%d/%m/%Y') }} · {{ creneau.debut.strftime('%H:%M') }} – {{ creneau.fin.strftime('%H:%M') }} — {{ creneau.salle.nom }}</span>
+          <form method="post" action="{{ url_for('chronos.delete_creneau', creneau_id=creneau.id) }}">
+            <button class="btn btn-sm btn-outline-danger" type="submit">Supprimer</button>
+          </form>
+        </li>
+      {% else %}
+        <li class="list-group-item text-muted">Aucun créneau planifié pour cette matière.</li>
+      {% endfor %}
+    </ul>
+  </section>
+{% endblock %}

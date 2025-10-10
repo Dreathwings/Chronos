@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ salle.nom }} — Salle{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3">{{ salle.nom }}</h1>
+    <a class="btn btn-outline-secondary" href="{{ url_for('chronos.salles_view') }}">Retour</a>
+  </div>
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <form method="post" class="card card-body">
+        <div class="mb-3">
+          <label class="form-label" for="nom">Nom</label>
+          <input class="form-control" type="text" id="nom" name="nom" value="{{ salle.nom }}" required />
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="capacite">Capacité</label>
+          <input class="form-control" type="number" id="capacite" name="capacite" min="1" value="{{ salle.capacite }}" required />
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="equipements">Équipements</label>
+          <textarea class="form-control" id="equipements" name="equipements" rows="3">{{ salle.equipements }}</textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="disponibilites">Disponibilités</label>
+          <textarea class="form-control" id="disponibilites" name="disponibilites" rows="3">{{ salle.disponibilites }}</textarea>
+        </div>
+        <button class="btn btn-primary" type="submit">Mettre à jour</button>
+      </form>
+    </div>
+    <div class="col-lg-4">
+      <div class="card border-danger">
+        <div class="card-body">
+          <h2 class="h5 text-danger">Supprimer</h2>
+          <p class="text-muted">La suppression de la salle entraînera la suppression de ses créneaux associés.</p>
+          <form method="post">
+            <input type="hidden" name="action" value="delete" />
+            <button class="btn btn-outline-danger" type="submit">Supprimer</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  <section class="mt-5">
+    <h2 class="h4">Créneaux programmés</h2>
+    <ul class="list-group">
+      {% for creneau in salle.creneaux %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <span>{{ creneau.date.strftime('%d/%m/%Y') }} · {{ creneau.debut.strftime('%H:%M') }} – {{ creneau.fin.strftime('%H:%M') }} — {{ creneau.matiere.nom }}</span>
+          <form method="post" action="{{ url_for('chronos.delete_creneau', creneau_id=creneau.id) }}">
+            <button class="btn btn-sm btn-outline-danger" type="submit">Supprimer</button>
+          </form>
+        </li>
+      {% else %}
+        <li class="list-group-item text-muted">Aucun créneau planifié pour cette salle.</li>
+      {% endfor %}
+    </ul>
+  </section>
+{% endblock %}

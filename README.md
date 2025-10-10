@@ -1,68 +1,49 @@
-# Planificateur d’emplois du temps — Flask + MariaDB
+# Planificateur d’emplois du temps — Flask + OR-Tools
 
-Chaque endpoint dispose d'une page HTML qui permet la gestion des elements
-Gestion et optimisation automatisée d’emplois du temps selon:
-- disponibilités enseignants  
-- capacités ,disponibilité et équipements des salles  
-- besoins des cours (Taille creneau, fenêtres de dates, logiciels, PC,priorité de placement dans l'emploi du temps)
-- Pour chaque pages génére un calendrier contenant tout les cours assigner a cette element
+Application web permettant de gérer les enseignants, salles et matières puis de générer automatiquement un planning optimisé selon les contraintes décrites dans le cahier des charges.
 
-## Architecture cible
-- **ORM**: SQLAlchemy + Alembic
-- **DB**: MariaDB 10.6+
-- **Optimisation**: OR-Tools (CP-SAT)
-- **Config**: `.env`
-- **Conteneurs**: Docker + docker-compose
-- **Tests**: pytest
+## Fonctionnalités
 
-## Démarrage rapide
+- Interfaces HTML complètes pour créer, modifier et supprimer enseignants, salles et matières.
+- Visualisation des cours planifiés directement depuis le tableau de bord et depuis les pages de détail de chaque ressource.
+- Génération automatique des créneaux avec OR-Tools (CP-SAT) en tenant compte :
+  - de la disponibilité des enseignants,
+  - des capacités et équipements des salles,
+  - de la durée, de la fenêtre de dates et de la priorité des matières.
+- Créneaux d’1 heure entre 8h et 18h avec pauses intégrées (10h-10h15, 12h15-13h30, 15h30-15h45).
 
-### Option A — Docker
+## Prérequis
+
+- Python 3.11+
+- Une base MariaDB ou SQLite (SQLite utilisée par défaut via `DATABASE_URL`)
+
+## Installation
+
 ```bash
-cp .env.example .env
-docker compose up --build
-# Swagger: http://localhost:8000/api/docs
-```
-
-### Option B — Local (sans Docker)
-```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Adapter DATABASE_URL si besoin
-alembic upgrade head
-python seed.py
+python seed.py  # optionnel : ajoute des données de démonstration
 flask --app app run --debug --port 8000
 ```
 
-## Variables d’environnement (`.env.example`)
-```
-FLASK_ENV=development
-SECRET_KEY=change_me
-DATABASE_URL=mariadb+mariadbconnector://warren@localhost:3306/chronos
-DB_ECHO=false
-API_TITLE=Chronos API
-API_VERSION=0.1.0
-ORIGIN=http://localhost:8000
-```
+Les paramètres (clé secrète, URL de base de données, etc.) se configurent via le fichier `.env`.
 
-## Pages principals
-- `GET /`
-- `GET /enseignant` Listing enseignants
-- `GET /enseignant/<id>` CRUD enseignant
-- `GET /salle` Listing salles
-- `GET /salle/<id>` CRUD salles  
-- `GET /matiere` Listing cours
-- `GET /matiere/<id>` CRUD cours  
+## Structure des pages
 
-## Calendrier
-    Plage Horaire: 8H a 18H en creneau de 1H
-        Pause matin: 10H a 10H15
-        Pause midi: 1H15 entre 12H et 14H
-        Pause aprés-midi: 15H15 a 15H30
+- `/` : tableau de bord et planning généré
+- `/enseignant` : listing + création d’enseignants
+- `/enseignant/<id>` : édition d’un enseignant et consultation de ses cours
+- `/salle` : listing + création de salles
+- `/salle/<id>` : édition d’une salle et calendrier associé
+- `/matiere` : listing + création de matières
+- `/matiere/<id>` : édition d’une matière et créneaux programmés
 
-## Génération du code avec Codex
-(voir le README complet fourni précédemment)
+## Génération du planning
+
+Depuis le tableau de bord, utiliser le bouton « Générer un planning ». Les créneaux existants sont effacés puis recalculés selon les règles d’optimisation. Chaque suppression d’enseignant, salle ou matière retire également les créneaux liés.
 
 ## Licence
-MIT.
+
+MIT

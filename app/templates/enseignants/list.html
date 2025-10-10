@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Enseignants — Chronos{% endblock %}
+{% block content %}
+  <div class="row g-4">
+    <div class="col-md-6">
+      <h1 class="h3">Enseignants</h1>
+      <div class="list-group">
+        {% for enseignant in enseignants %}
+          <a class="list-group-item list-group-item-action" href="{{ url_for('chronos.enseignant_detail', enseignant_id=enseignant.id) }}">
+            <div class="d-flex w-100 justify-content-between">
+              <h2 class="h5 mb-1">{{ enseignant.nom }}</h2>
+              <small>{{ enseignant.email }}</small>
+            </div>
+            <p class="mb-1 text-muted">{{ enseignant.disponibilites or 'Disponibilités non renseignées' }}</p>
+          </a>
+        {% else %}
+          <p class="text-muted">Aucun enseignant pour le moment.</p>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="col-md-6">
+      <h2 class="h4">Ajouter un enseignant</h2>
+      <form method="post" class="card card-body">
+        <div class="mb-3">
+          <label for="nom" class="form-label">Nom</label>
+          <input class="form-control" type="text" id="nom" name="nom" required />
+        </div>
+        <div class="mb-3">
+          <label for="email" class="form-label">Email</label>
+          <input class="form-control" type="email" id="email" name="email" required />
+        </div>
+        <div class="mb-3">
+          <label for="disponibilites" class="form-label">Disponibilités</label>
+          <textarea class="form-control" id="disponibilites" name="disponibilites" rows="3"></textarea>
+        </div>
+        <button class="btn btn-primary" type="submit">Créer</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

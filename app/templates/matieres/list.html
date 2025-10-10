@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Matières — Chronos{% endblock %}
+{% block content %}
+  <div class="row g-4">
+    <div class="col-lg-7">
+      <h1 class="h3">Matières</h1>
+      <div class="list-group">
+        {% for matiere in matieres %}
+          <a class="list-group-item list-group-item-action" href="{{ url_for('chronos.matiere_detail', matiere_id=matiere.id) }}">
+            <div class="d-flex w-100 justify-content-between">
+              <h2 class="h5 mb-1">{{ matiere.nom }}</h2>
+              <span class="badge bg-info">Priorité {{ matiere.priorite }}</span>
+            </div>
+            <p class="mb-1 text-muted">{{ matiere.enseignant.nom if matiere.enseignant else 'Aucun enseignant assigné' }}</p>
+            <small>Durée: {{ matiere.duree }} h · Capacité requise: {{ matiere.capacite_requise }}</small>
+          </a>
+        {% else %}
+          <p class="text-muted">Aucune matière définie.</p>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <h2 class="h4">Ajouter une matière</h2>
+      <form method="post" class="card card-body">
+        <div class="mb-3">
+          <label class="form-label" for="nom">Nom</label>
+          <input class="form-control" type="text" name="nom" id="nom" required />
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="duree">Durée (heures)</label>
+            <input class="form-control" type="number" name="duree" id="duree" min="1" value="1" />
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="capacite_requise">Capacité requise</label>
+            <input class="form-control" type="number" name="capacite_requise" id="capacite_requise" min="1" value="1" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="fenetre_debut">Fenêtre de début</label>
+            <input class="form-control" type="date" name="fenetre_debut" id="fenetre_debut" />
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="fenetre_fin">Fenêtre de fin</label>
+            <input class="form-control" type="date" name="fenetre_fin" id="fenetre_fin" />
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="enseignant_id">Enseignant</label>
+          <select class="form-select" name="enseignant_id" id="enseignant_id">
+            <option value="">— Non assigné —</option>
+            {% for enseignant in enseignants %}
+              <option value="{{ enseignant.id }}">{{ enseignant.nom }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="besoins">Besoins spécifiques</label>
+          <textarea class="form-control" name="besoins" id="besoins" rows="3"></textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="logiciels">Logiciels nécessaires</label>
+          <input class="form-control" type="text" name="logiciels" id="logiciels" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="priorite">Priorité</label>
+          <input class="form-control" type="number" name="priorite" id="priorite" min="0" value="1" />
+        </div>
+        <button class="btn btn-primary" type="submit">Créer</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}
