@@ -1,78 +1,82 @@
-# Planificateur d’emplois du temps — Flask + MariaDB
+# Chronos — Planificateur d'emplois du temps
 
-Chaque endpoint dispose d'une page HTML qui permet la gestion des elements
-Gestion et optimisation automatisée d’emplois du temps selon:
-- disponibilités enseignants  
-- capacités ,disponibilité et équipements des salles  
-- besoins des cours (Taille creneau, fenêtres de dates, logiciels, PC,priorité de placement dans l'emploi du temps)
-- Pour chaque pages génére un calendrier contenant tout les cours assigner a cette element
+Application web Flask permettant de piloter la construction d'emplois du temps en centralisant enseignants, salles, cours et ressources pédagogiques. L'interface propose un tableau de bord global avec calendrier FullCalendar et des pages de gestion avec création/édition en ligne.
 
-- Tableau de bord `/` avec visualisation globale du calendrier et formulaire rapide de planification.
-- Gestion des enseignants `/enseignant` + fiche détaillée `/enseignant/<id>` avec édition inline et calendrier dédié(disponibilité dans les creneaux Horaire, indisponibilité a la journée, nombre d'heure maximum).
-- Gestion des salles `/salle` + fiche `/salle/<id>` avec calendrier des réservations(nombre de place, nbr PC, Materiel).
-- Gestion des cours `/matiere` + fiche `/matiere/<id>` pour modifier contraintes et visualiser les séances(Besoin en materiel, Logiciel,nombre de seances, nbr creneaux / seance, plages de dates pour le placement automatique du cours, priorité de placement du cours).
+## Fonctionnalités
 
-Chaque page fiche intègre un formulaire de création, les fiches détaillées permettent l'édition et affichent automatiquement les séances planifiées.
-Generer les calendrier avec FullCalendar.js
-Plusieur enseignent peuvent être sur le meme cours
-Les élement comme [Logiciel,Materiel] sont generer avec une page CRUD et stocké en base de donnée pour standardisé les entrées
+- Tableau de bord (`/`) avec statistiques, calendrier global (FullCalendar) et formulaire de planification rapide.
+- Gestion des enseignants (`/enseignant`) avec fiche détaillée (`/enseignant/<id>`) affichant les séances assignées et permettant la mise à jour instantanée des informations de disponibilité.
+- Gestion des salles (`/salle`) et fiche détaillée (`/salle/<id>`) listant les réservations.
+- Gestion des cours (`/matiere`) et fiche (`/matiere/<id>`) pour paramétrer contraintes (durée, priorité, besoins) et ajouter des séances avec affectation des enseignants et des salles.
+- Gestion des ressources normalisées : logiciels (`/logiciel`) et matériels (`/materiel`).
+- Base de données SQLAlchemy (MariaDB ou SQLite fallback) avec migrations via Flask-Migrate et script de peuplement `seed.py`.
 
-## Organisation de Horaire
-    Plage Horaire: 8H a 18H en creneau de 1H
-        Pause matin: 10H a 10H15
-        Pause midi: 1H15 entre 12H et 14H
-        Pause aprés-midi: 15H15 a 15H30
+## Prérequis
 
-## Architecture cible
-- **ORM**: SQLAlchemy + Alembic
-- **DB**: MariaDB 10.6+
-- **Optimisation**: OR-Tools (CP-SAT)
-- **Config**: `.env`
-- **Conteneurs**: Docker + docker-compose
-- **Tests**: pytest
+- Python 3.11+
+- MariaDB 10.6+ (ou SQLite pour le développement local rapide)
+- Docker / docker-compose (optionnel)
 
-## Démarrage rapide
+## Installation
 
 ### Option A — Docker
+
 ```bash
 cp .env.example .env
 docker compose up --build
-# Swagger: http://localhost:8000/api/docs
+# Application disponible sur http://localhost:8000
 ```
 
-### Option B — Local (sans Docker)
+### Option B — Environnement local
+
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Adapter DATABASE_URL si besoin
-alembic upgrade head
+# Adapter DATABASE_URL si besoin (SQLite par défaut)
+flask --app app db upgrade  # si migrations configurées
 python seed.py
 flask --app app run --debug --port 8000
 ```
 
-## Variables d’environnement (`.env.example`)
+Le script `seed.py` crée des données d'exemple (enseignants, salles, cours, ressources et une séance planifiée).
+
+## Configuration (`.env`)
+
+Voir `.env.example` pour les variables disponibles :
+
 ```
 FLASK_ENV=development
 SECRET_KEY=change_me
-DATABASE_URL=mariadb+mariadbconnector://warren@localhost:3306/chronos
+DATABASE_URL=mariadb+mariadbconnector://user:password@localhost:3306/chronos
 DB_ECHO=false
 API_TITLE=Chronos API
 API_VERSION=0.1.0
 ORIGIN=http://localhost:8000
 ```
 
-## Pages principals
-- `GET /`
-- `GET /enseignant` Listing enseignants
-- `GET /enseignant/<id>` CRUD enseignant
-- `GET /salle` Listing salles
-- `GET /salle/<id>` CRUD salles  
-- `GET /matiere` Listing cours
-- `GET /matiere/<id>` CRUD cours
+## Structure des pages
 
-## Génération du code avec Codex
-(voir le README complet fourni précédemment)
+| Page | Description |
+|------|-------------|
+| `/` | Tableau de bord avec statistiques et calendrier global. |
+| `/enseignant` | Liste/Création des enseignants. |
+| `/enseignant/<id>` | Edition détaillée, visualisation des séances attribuées. |
+| `/salle` | Liste/Création des salles. |
+| `/salle/<id>` | Détails et réservations de la salle. |
+| `/matiere` | Liste/Création des cours. |
+| `/matiere/<id>` | Paramétrage des contraintes et ajout de séances. |
+| `/logiciel` | CRUD simple des logiciels pédagogiques. |
+| `/materiel` | CRUD simple des matériels. |
+
+## Notes d'architecture
+
+- ORM : SQLAlchemy 2.x avec annotations `Mapped`.
+- Migrations : Flask-Migrate (Alembic) — initialisation : `flask --app app db init` puis `flask --app app db migrate`.
+- Optimisation : un module `QuickScheduler` prépare le terrain pour l'intégration d'OR-Tools (statistiques et point d'extension pour la planification automatisée).
+- Frontend : Bootstrap 5 + FullCalendar via CDN.
 
 ## Licence
-MIT.
+
+MIT

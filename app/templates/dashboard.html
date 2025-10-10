@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Chronos — Tableau de bord{% endblock %}
+
+{% block content %}
+<div class="row g-4 mb-4">
+  {% for item in stats %}
+  <div class="col-sm-6 col-lg-3">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-body">
+        <h6 class="text-muted text-uppercase">{{ item.label }}</h6>
+        <p class="fs-3 fw-bold mb-0">{{ item.value }}</p>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h2 class="h5">Calendrier global</h2>
+        <div id="calendar" data-events='{{ events|tojson }}'></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h2 class="h5">Planification rapide</h2>
+        <form method="post" class="vstack gap-3">
+          <div>
+            <label class="form-label">Cours</label>
+            <select class="form-select" name="matiere_id" required>
+              <option value="">Sélectionner</option>
+              {% for matiere in matieres %}
+              <option value="{{ matiere.id }}">{{ matiere.nom }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Salle</label>
+            <select class="form-select" name="salle_id">
+              <option value="">Sans salle</option>
+              {% for salle in salles %}
+              <option value="{{ salle.id }}">{{ salle.nom }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Enseignants</label>
+            <select class="form-select" name="enseignant_ids" multiple>
+              {% for enseignant in enseignants %}
+              <option value="{{ enseignant.id }}">{{ enseignant.nom }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Maintenir Ctrl/⌘ pour multi-sélection</div>
+          </div>
+          <div>
+            <label class="form-label">Début</label>
+            <input type="datetime-local" name="debut" class="form-control" required>
+          </div>
+          <div>
+            <label class="form-label">Durée (heures)</label>
+            <input type="number" name="duree" class="form-control" value="2" min="1" max="8">
+          </div>
+          <div class="d-grid">
+            <button class="btn btn-primary" type="submit">Planifier</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const calendarEl = document.getElementById('calendar');
+    if (!calendarEl) return;
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+      initialView: 'timeGridWeek',
+      slotMinTime: '08:00:00',
+      slotMaxTime: '18:00:00',
+      allDaySlot: false,
+      locale: 'fr',
+      events: JSON.parse(calendarEl.dataset.events || '[]'),
+    });
+    calendar.render();
+  });
+</script>
+{% endblock %}

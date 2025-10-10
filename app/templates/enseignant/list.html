@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Enseignants{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1 class="h3 mb-0">Enseignants</h1>
+</div>
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm border-0">
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Nom</th>
+              <th>Email</th>
+              <th>Max h/sem</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for enseignant in enseignants %}
+            <tr>
+              <td>{{ enseignant.nom }}</td>
+              <td>{{ enseignant.email or '—' }}</td>
+              <td>{{ enseignant.max_heures_semaine }}</td>
+              <td class="text-end"><a class="btn btn-outline-primary btn-sm" href="{{ url_for('enseignant.detail_enseignant', enseignant_id=enseignant.id) }}">Ouvrir</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-center text-muted">Aucun enseignant enregistré</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h2 class="h5">Nouvel enseignant</h2>
+        <form method="post" class="vstack gap-3">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" class="form-control" name="nom" required>
+          </div>
+          <div>
+            <label class="form-label">Email</label>
+            <input type="email" class="form-control" name="email" placeholder="exemple@ecole.fr">
+          </div>
+          <div>
+            <label class="form-label">Max heures/semaine</label>
+            <input type="number" class="form-control" name="max_heures_semaine" value="20" min="1" max="40">
+          </div>
+          <div>
+            <label class="form-label">Disponibilités</label>
+            <textarea class="form-control" name="disponibilites" rows="3" placeholder="Ex. Lundi à jeudi 8h-17h"></textarea>
+          </div>
+          <div>
+            <label class="form-label">Indisponibilités</label>
+            <textarea class="form-control" name="indisponibilites" rows="2"></textarea>
+          </div>
+          <div class="d-grid">
+            <button class="btn btn-primary" type="submit">Enregistrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

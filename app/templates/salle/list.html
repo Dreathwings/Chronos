@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Salles{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1 class="h3 mb-0">Salles</h1>
+</div>
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm border-0">
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Nom</th>
+              <th>Capacité</th>
+              <th>PC</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for salle in salles %}
+            <tr>
+              <td>{{ salle.nom }}</td>
+              <td>{{ salle.capacite }}</td>
+              <td>{{ salle.nombre_pc }}</td>
+              <td class="text-end"><a class="btn btn-outline-primary btn-sm" href="{{ url_for('salle.detail_salle', salle_id=salle.id) }}">Ouvrir</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-center text-muted">Aucune salle enregistrée</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h2 class="h5">Nouvelle salle</h2>
+        <form method="post" class="vstack gap-3">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" class="form-control" name="nom" required>
+          </div>
+          <div>
+            <label class="form-label">Capacité</label>
+            <input type="number" class="form-control" name="capacite" value="30" min="1">
+          </div>
+          <div>
+            <label class="form-label">Nombre de PC</label>
+            <input type="number" class="form-control" name="nombre_pc" value="0" min="0">
+          </div>
+          <div>
+            <label class="form-label">Équipements</label>
+            <textarea class="form-control" name="equipements" rows="3"></textarea>
+          </div>
+          <div class="d-grid">
+            <button class="btn btn-primary" type="submit">Enregistrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

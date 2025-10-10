@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}{{ matiere.nom }} — Cours{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-5">
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body">
+        <h1 class="h4">{{ matiere.nom }}</h1>
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="action" value="update">
+          <div>
+            <label class="form-label">Nom</label>
+            <input class="form-control" name="nom" value="{{ matiere.nom }}">
+          </div>
+          <div>
+            <label class="form-label">Description</label>
+            <textarea class="form-control" name="description" rows="3">{{ matiere.description }}</textarea>
+          </div>
+          <div class="row g-2">
+            <div class="col">
+              <label class="form-label">Sessions à planifier</label>
+              <input class="form-control" type="number" name="sessions_a_planifier" value="{{ matiere.sessions_a_planifier }}">
+            </div>
+            <div class="col">
+              <label class="form-label">Durée (h)</label>
+              <input class="form-control" type="number" name="duree_par_session" value="{{ matiere.duree_par_session }}">
+            </div>
+            <div class="col">
+              <label class="form-label">Priorité</label>
+              <input class="form-control" type="number" name="priorite" value="{{ matiere.priorite }}" min="1" max="5">
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Besoins matériel</label>
+            <textarea class="form-control" name="besoins_materiel" rows="2">{{ matiere.besoins_materiel }}</textarea>
+          </div>
+          <div>
+            <label class="form-label">Besoins logiciel</label>
+            <textarea class="form-control" name="besoins_logiciel" rows="2">{{ matiere.besoins_logiciel }}</textarea>
+          </div>
+          <div>
+            <label class="form-label">Couleur</label>
+            <input class="form-control form-control-color" type="color" name="couleur" value="{{ matiere.couleur or '#2563eb' }}">
+          </div>
+          <button class="btn btn-primary" type="submit">Mettre à jour</button>
+        </form>
+      </div>
+    </div>
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h2 class="h5">Nouvelle séance</h2>
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="action" value="session">
+          <div>
+            <label class="form-label">Salle</label>
+            <select class="form-select" name="salle_id">
+              <option value="">Sans salle</option>
+              {% for salle in salles %}
+              <option value="{{ salle.id }}">{{ salle.nom }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Enseignants</label>
+            <select class="form-select" name="enseignant_ids" multiple>
+              {% for enseignant in enseignants %}
+              <option value="{{ enseignant.id }}">{{ enseignant.nom }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Début</label>
+            <input type="datetime-local" class="form-control" name="debut" required>
+          </div>
+          <div>
+            <label class="form-label">Durée (heures)</label>
+            <input type="number" class="form-control" name="duree" value="{{ matiere.duree_par_session }}" min="1">
+          </div>
+          <button class="btn btn-primary" type="submit">Ajouter</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h2 class="h5">Séances planifiées</h2>
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Début</th>
+                <th>Fin</th>
+                <th>Salle</th>
+                <th>Enseignants</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for session in sessions %}
+              <tr>
+                <td>{{ session.debut.strftime('%d/%m/%Y %H:%M') }}</td>
+                <td>{{ session.fin.strftime('%H:%M') }}</td>
+                <td>{{ session.salle.nom if session.salle else '—' }}</td>
+                <td>
+                  {% if session.enseignants %}
+                    {{ session.enseignants | map(attribute='nom') | join(', ') }}
+                  {% else %}
+                    <span class="text-muted">Aucun</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="text-center text-muted">Aucune séance planifiée</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{{ enseignant.nom }} — Enseignant{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-5">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h1 class="h4">{{ enseignant.nom }}</h1>
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="action" value="update">
+          <div>
+            <label class="form-label">Nom</label>
+            <input class="form-control" name="nom" value="{{ enseignant.nom }}">
+          </div>
+          <div>
+            <label class="form-label">Email</label>
+            <input class="form-control" name="email" value="{{ enseignant.email }}">
+          </div>
+          <div>
+            <label class="form-label">Max heures/semaine</label>
+            <input class="form-control" type="number" name="max_heures_semaine" value="{{ enseignant.max_heures_semaine }}">
+          </div>
+          <div>
+            <label class="form-label">Disponibilités</label>
+            <textarea class="form-control" name="disponibilites" rows="3">{{ enseignant.disponibilites }}</textarea>
+          </div>
+          <div>
+            <label class="form-label">Indisponibilités</label>
+            <textarea class="form-control" name="indisponibilites" rows="3">{{ enseignant.indisponibilites }}</textarea>
+          </div>
+          <button class="btn btn-primary" type="submit">Mettre à jour</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h2 class="h5">Séances assignées</h2>
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Cours</th>
+                <th>Début</th>
+                <th>Fin</th>
+                <th>Salle</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for session in sessions %}
+              <tr>
+                <td><a href="{{ url_for('matiere.detail_matiere', matiere_id=session.matiere_id) }}">{{ session.matiere.nom }}</a></td>
+                <td>{{ session.debut.strftime('%d/%m/%Y %H:%M') }}</td>
+                <td>{{ session.fin.strftime('%H:%M') }}</td>
+                <td>{{ session.salle.nom if session.salle else '—' }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="text-center text-muted">Aucune séance assignée</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ salle.nom }} — Salle{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-5">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h1 class="h4">{{ salle.nom }}</h1>
+        <form method="post" class="vstack gap-3">
+          <div>
+            <label class="form-label">Nom</label>
+            <input class="form-control" name="nom" value="{{ salle.nom }}">
+          </div>
+          <div>
+            <label class="form-label">Capacité</label>
+            <input class="form-control" type="number" name="capacite" value="{{ salle.capacite }}">
+          </div>
+          <div>
+            <label class="form-label">Nombre de PC</label>
+            <input class="form-control" type="number" name="nombre_pc" value="{{ salle.nombre_pc }}">
+          </div>
+          <div>
+            <label class="form-label">Équipements</label>
+            <textarea class="form-control" name="equipements" rows="3">{{ salle.equipements }}</textarea>
+          </div>
+          <button class="btn btn-primary" type="submit">Mettre à jour</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h2 class="h5">Réservations</h2>
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Cours</th>
+                <th>Début</th>
+                <th>Fin</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for session in sessions %}
+              <tr>
+                <td><a href="{{ url_for('matiere.detail_matiere', matiere_id=session.matiere_id) }}">{{ session.matiere.nom }}</a></td>
+                <td>{{ session.debut.strftime('%d/%m/%Y %H:%M') }}</td>
+                <td>{{ session.fin.strftime('%H:%M') }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="3" class="text-center text-muted">Aucune réservation</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

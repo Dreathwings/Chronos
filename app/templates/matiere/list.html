@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Cours{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1 class="h3 mb-0">Cours</h1>
+</div>
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm border-0">
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Nom</th>
+              <th>Sessions</th>
+              <th>Durée</th>
+              <th>Priorité</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for matiere in matieres %}
+            <tr>
+              <td>{{ matiere.nom }}</td>
+              <td>{{ matiere.sessions|length }}</td>
+              <td>{{ matiere.duree_par_session }} h</td>
+              <td>{{ matiere.priorite }}</td>
+              <td class="text-end"><a class="btn btn-outline-primary btn-sm" href="{{ url_for('matiere.detail_matiere', matiere_id=matiere.id) }}">Ouvrir</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-center text-muted">Aucun cours enregistré</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h2 class="h5">Nouveau cours</h2>
+        <form method="post" class="vstack gap-3">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" class="form-control" name="nom" required>
+          </div>
+          <div>
+            <label class="form-label">Description</label>
+            <textarea class="form-control" name="description" rows="2"></textarea>
+          </div>
+          <div>
+            <label class="form-label">Sessions à planifier</label>
+            <input type="number" class="form-control" name="sessions_a_planifier" value="1" min="1">
+          </div>
+          <div>
+            <label class="form-label">Durée par session (h)</label>
+            <input type="number" class="form-control" name="duree_par_session" value="2" min="1">
+          </div>
+          <div>
+            <label class="form-label">Priorité</label>
+            <input type="number" class="form-control" name="priorite" value="1" min="1" max="5">
+          </div>
+          <div>
+            <label class="form-label">Besoins matériel</label>
+            <textarea class="form-control" name="besoins_materiel" rows="2"></textarea>
+          </div>
+          <div>
+            <label class="form-label">Besoins logiciel</label>
+            <textarea class="form-control" name="besoins_logiciel" rows="2"></textarea>
+          </div>
+          <div>
+            <label class="form-label">Couleur (FullCalendar)</label>
+            <input type="color" class="form-control form-control-color" name="couleur" value="#2563eb">
+          </div>
+          <div class="d-grid">
+            <button class="btn btn-primary" type="submit">Enregistrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
