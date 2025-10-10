@@ -39,7 +39,7 @@ flask --app app run --debug --port 8000
 ```
 FLASK_ENV=development
 SECRET_KEY=change_me
-DATABASE_URL=mariadb+mariadbconnector://warren@localhost:3306/chrono
+DATABASE_URL=mariadb+mariadbconnector://warren@localhost:3306/chronos
 DB_ECHO=false
 API_TITLE=Chronos API
 API_VERSION=0.1.0
