@@ -1,16 +1,46 @@
 """Web UI blueprint for Chronos administration pages."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
-from ..models import ClassGroup, Course, CourseRequirement, Room, RoomEquipment, Teacher
+from ..models import (
+    ClassGroup,
+    Course,
+    CourseRequirement,
+    Room,
+    RoomEquipment,
+    Teacher,
+    TeacherAvailability,
+    TeacherUnavailability,
+)
 
 
 web_bp = Blueprint("web", __name__)
+
+WEEKDAYS: list[tuple[int, str]] = [
+    (0, "Lundi"),
+    (1, "Mardi"),
+    (2, "Mercredi"),
+    (3, "Jeudi"),
+    (4, "Vendredi"),
+    (5, "Samedi"),
+    (6, "Dimanche"),
+]
+
+STANDARD_DAY_SLOTS: list[tuple[time, time]] = [
+    (time(8, 0), time(9, 0)),
+    (time(9, 0), time(10, 0)),
+    (time(10, 15), time(11, 15)),
+    (time(11, 15), time(12, 15)),
+    (time(13, 30), time(14, 30)),
+    (time(14, 30), time(15, 30)),
+    (time(15, 45), time(16, 45)),
+    (time(16, 45), time(17, 45)),
+]
 
 
 @web_bp.app_template_filter("datetime")
@@ -124,58 +154,93 @@ def delete_teacher(teacher_id: int):
     return redirect(url_for("web.manage_teachers"))
 
 
-@web_bp.route("/classes", methods=["GET", "POST"])
-def manage_classes() -> str:
+@web_bp.route("/teachers/<int:teacher_id>/planning", methods=["GET", "POST"])
+def teacher_planning(teacher_id: int) -> str:
+    teacher = Teacher.query.get_or_404(teacher_id)
     if request.method == "POST":
-        code = request.form.get("code", "").strip()
-        name = request.form.get("name", "").strip() or code
-        size = request.form.get("size", "").strip()
-        notes = request.form.get("notes", "").strip() or None
-        if not code or not size:
-            flash("Le code et l'effectif sont obligatoires", "danger")
-        else:
-            try:
-                size_value = int(size)
-            except ValueError:
-                flash("L'effectif doit être un nombre", "danger")
-            else:
-                class_group = ClassGroup(code=code, name=name, size=size_value, notes=notes)
-                db.session.add(class_group)
+        if "save_availability" in request.form:
+            slot_values = request.form.getlist("slots")
+            teacher.availabilities.clear()
+            for value in sorted(set(slot_values)):
                 try:
-                    db.session.commit()
-                except IntegrityError:
-                    db.session.rollback()
-                    flash("Cette classe existe déjà", "danger")
+                    weekday_str, start_str, end_str = value.split("|")
+                    weekday = int(weekday_str)
+                    start_time = datetime.strptime(start_str, "%H:%M").time()
+                    end_time = datetime.strptime(end_str, "%H:%M").time()
+                except (ValueError, TypeError):
+                    continue
+                teacher.availabilities.append(
+                    TeacherAvailability(
+                        teacher=teacher,
+                        weekday=weekday,
+                        start_time=start_time,
+                        end_time=end_time,
+                    )
+                )
+            db.session.commit()
+            flash("Disponibilités enregistrées", "success")
+            return redirect(url_for("web.teacher_planning", teacher_id=teacher.id))
+        if "add_unavailability" in request.form:
+            date_raw = request.form.get("date", "").strip()
+            start_raw = request.form.get("start_time", "").strip()
+            end_raw = request.form.get("end_time", "").strip()
+            try:
+                unavailable_date = datetime.strptime(date_raw, "%Y-%m-%d").date()
+                start_time = datetime.strptime(start_raw, "%H:%M").time()
+                end_time = datetime.strptime(end_raw, "%H:%M").time()
+            except ValueError:
+                flash("Date ou heure invalide", "danger")
+            else:
+                if end_time <= start_time:
+                    flash("L'heure de fin doit être après l'heure de début", "danger")
                 else:
-                    flash("Classe créée", "success")
-                    return redirect(url_for("web.manage_classes"))
-    classes = ClassGroup.query.order_by(ClassGroup.code).all()
-    return render_template("classes.html", classes=classes)
+                    db.session.add(
+                        TeacherUnavailability(
+                            teacher=teacher,
+                            date=unavailable_date,
+                            start_time=start_time,
+                            end_time=end_time,
+                        )
+                    )
+                    db.session.commit()
+                    flash("Indisponibilité ajoutée", "success")
+            return redirect(url_for("web.teacher_planning", teacher_id=teacher.id))
+
+    selected_slots = _teacher_selected_slots(teacher)
+    slot_rows = [
+        {
+            "start": slot_start,
+            "end": slot_end,
+            "start_str": slot_start.strftime("%H:%M"),
+            "end_str": slot_end.strftime("%H:%M"),
+        }
+        for slot_start, slot_end in STANDARD_DAY_SLOTS
+    ]
+    unavailabilities = sorted(
+        teacher.unavailabilities,
+        key=lambda item: (item.date, item.start_time, item.end_time),
+    )
+    return render_template(
+        "teacher_planning.html",
+        teacher=teacher,
+        weekdays=WEEKDAYS,
+        slots=slot_rows,
+        selected_slots=selected_slots,
+        unavailabilities=unavailabilities,
+    )
 
 
-@web_bp.post("/classes/<int:class_id>/delete")
-def delete_class(class_id: int):
-    class_group = ClassGroup.query.get_or_404(class_id)
-    if class_group.courses:
-        flash("Impossible de supprimer une classe liée à des cours", "danger")
+@web_bp.post("/teachers/<int:teacher_id>/unavailabilities/<int:entry_id>/delete")
+def delete_teacher_unavailability(teacher_id: int, entry_id: int):
+    teacher = Teacher.query.get_or_404(teacher_id)
+    entry = TeacherUnavailability.query.get_or_404(entry_id)
+    if entry.teacher_id != teacher.id:
+        flash("Indisponibilité introuvable", "danger")
     else:
-        db.session.delete(class_group)
+        db.session.delete(entry)
         db.session.commit()
-        flash("Classe supprimée", "success")
-    return redirect(url_for("web.manage_classes"))
-
-
-def _parse_requirements(raw: str) -> list[tuple[str, str]]:
-    requirements: list[tuple[str, str]] = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if "=" not in line:
-            raise ValueError("Format des exigences invalide (clé=valeur)")
-        key, value = [item.strip() for item in line.split("=", 1)]
-        requirements.append((key, value))
-    return requirements
+        flash("Indisponibilité supprimée", "success")
+    return redirect(url_for("web.teacher_planning", teacher_id=teacher.id))
 
 
 @web_bp.route("/courses", methods=["GET", "POST"])
@@ -287,3 +352,75 @@ def delete_course(course_id: int):
         db.session.commit()
         flash("Cours supprimé", "success")
     return redirect(url_for("web.manage_courses"))
+
+
+def _parse_requirements(raw: str) -> list[tuple[str, str]]:
+    requirements: list[tuple[str, str]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "=" not in line:
+            raise ValueError("Format des exigences invalide (clé=valeur)")
+        key, value = [item.strip() for item in line.split("=", 1)]
+        requirements.append((key, value))
+    return requirements
+
+
+@web_bp.route("/classes", methods=["GET", "POST"])
+def manage_classes() -> str:
+    if request.method == "POST":
+        code = request.form.get("code", "").strip()
+        name = request.form.get("name", "").strip() or code
+        size = request.form.get("size", "").strip()
+        notes = request.form.get("notes", "").strip() or None
+        if not code or not size:
+            flash("Le code et l'effectif sont obligatoires", "danger")
+        else:
+            try:
+                size_value = int(size)
+            except ValueError:
+                flash("L'effectif doit être un nombre", "danger")
+            else:
+                class_group = ClassGroup(code=code, name=name, size=size_value, notes=notes)
+                db.session.add(class_group)
+                try:
+                    db.session.commit()
+                except IntegrityError:
+                    db.session.rollback()
+                    flash("Cette classe existe déjà", "danger")
+                else:
+                    flash("Classe créée", "success")
+                    return redirect(url_for("web.manage_classes"))
+    classes = ClassGroup.query.order_by(ClassGroup.code).all()
+    return render_template("classes.html", classes=classes)
+
+
+@web_bp.post("/classes/<int:class_id>/delete")
+def delete_class(class_id: int):
+    class_group = ClassGroup.query.get_or_404(class_id)
+    if class_group.courses:
+        flash("Impossible de supprimer une classe liée à des cours", "danger")
+    else:
+        db.session.delete(class_group)
+        db.session.commit()
+        flash("Classe supprimée", "success")
+    return redirect(url_for("web.manage_classes"))
+
+
+def _slot_key(weekday: int, start: time, end: time) -> str:
+    return f"{weekday}|{start.strftime('%H:%M')}|{end.strftime('%H:%M')}"
+
+
+def _teacher_selected_slots(teacher: Teacher) -> set[str]:
+    selected: set[str] = set()
+    for availability in teacher.availabilities:
+        current = datetime.combine(date.today(), availability.start_time)
+        end_dt = datetime.combine(date.today(), availability.end_time)
+        while current < end_dt:
+            slot_end = current + timedelta(hours=1)
+            if slot_end > end_dt:
+                break
+            selected.add(_slot_key(availability.weekday, current.time(), slot_end.time()))
+            current = slot_end
+    return selected

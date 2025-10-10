@@ -1,7 +1,7 @@
-"""Timeslot endpoints including automatic generation."""
+"""Timeslot endpoints including automatic generation with Chronos rules."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from flask import request
@@ -12,6 +12,18 @@ from ..models import Timeslot
 
 
 ns = Namespace("timeslots", description="Manage potential teaching slots")
+
+STANDARD_DAY_SLOTS: list[tuple[time, time]] = [
+    (time(8, 0), time(9, 0)),
+    (time(9, 0), time(10, 0)),
+    (time(10, 15), time(11, 15)),
+    (time(11, 15), time(12, 15)),
+    (time(13, 30), time(14, 30)),
+    (time(14, 30), time(15, 30)),
+    (time(15, 45), time(16, 45)),
+    (time(16, 45), time(17, 45)),
+]
+
 
 timeslot_model = ns.model(
     "Timeslot",
@@ -35,11 +47,11 @@ def serialize_timeslot(timeslot: Timeslot) -> dict[str, Any]:
     }
 
 
-def _parse_date(value: str) -> datetime.date:
+def _parse_date(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
 
 
-def _parse_time(value: str) -> datetime.time:
+def _parse_time(value: str) -> time:
     return datetime.strptime(value, "%H:%M").time()
 
 
@@ -80,16 +92,21 @@ class TimeslotGenerate(Resource):
         start_date = _parse_date(payload["start_date"])
         end_date = _parse_date(payload["end_date"])
         weekdays = set(payload.get("weekdays", []))
-        start_time = _parse_time(payload["start_time"])
-        end_time = _parse_time(payload["end_time"])
+        day_start_time = _parse_time(payload["start_time"])
+        day_end_time = _parse_time(payload["end_time"])
         slot_minutes = int(payload["slot_minutes"])
 
         if start_date > end_date:
             ns.abort(400, "start_date must be before end_date")
-        if start_time >= end_time:
-            ns.abort(400, "start_time must be before end_time")
-        if slot_minutes <= 0:
-            ns.abort(400, "slot_minutes must be positive")
+        if slot_minutes != 60:
+            ns.abort(400, "Les créneaux doivent durer 60 minutes.")
+        expected_start = STANDARD_DAY_SLOTS[0][0]
+        expected_end = STANDARD_DAY_SLOTS[-1][1]
+        if day_start_time > expected_start or day_end_time < expected_end:
+            ns.abort(
+                400,
+                "La plage journalière doit couvrir au minimum 08:00 à 17:45 pour respecter les pauses.",
+            )
 
         if payload.get("clear_existing"):
             Timeslot.query.filter(
@@ -103,11 +120,14 @@ class TimeslotGenerate(Resource):
                 _create_slots_for_day(
                     created,
                     current_date,
-                    start_time,
-                    end_time,
+                    day_start_time,
+                    day_end_time,
                     slot_minutes,
                 )
             current_date += timedelta(days=1)
+
+        if not created:
+            ns.abort(400, "Aucun créneau généré pour la période demandée.")
 
         db.session.add_all(created)
         db.session.commit()
@@ -116,22 +136,23 @@ class TimeslotGenerate(Resource):
 
 def _create_slots_for_day(
     collection: list[Timeslot],
-    current_date: datetime.date,
-    start_time: datetime.time,
-    end_time: datetime.time,
+    current_date: date,
+    day_start: time,
+    day_end: time,
     slot_minutes: int,
 ) -> None:
-    start_dt = datetime.combine(current_date, start_time)
-    end_dt = datetime.combine(current_date, end_time)
-
-    while start_dt + timedelta(minutes=slot_minutes) <= end_dt:
-        end_slot = start_dt + timedelta(minutes=slot_minutes)
+    added = False
+    for slot_start, slot_end in STANDARD_DAY_SLOTS:
+        if slot_start < day_start or slot_end > day_end:
+            continue
         collection.append(
             Timeslot(
                 date=current_date,
-                start_time=start_dt.time(),
-                end_time=end_slot.time(),
+                start_time=slot_start,
+                end_time=slot_end,
                 minutes=slot_minutes,
             )
         )
-        start_dt = end_slot
+        added = True
+    if not added:
+        ns.abort(400, "Aucun créneau ne correspond à la plage demandée.")

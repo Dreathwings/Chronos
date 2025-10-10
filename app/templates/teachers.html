@@ -32,7 +32,7 @@
                 <th>Nom</th>
                 <th>Charge max (h)</th>
                 <th>Cours associés</th>
-                <th></th>
+                <th class="text-end">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -42,9 +42,12 @@
                 <td>{{ teacher.max_weekly_load_hrs }}</td>
                 <td>{{ teacher.courses|length }}</td>
                 <td class="text-end">
-                  <form method="post" action="{{ url_for('web.delete_teacher', teacher_id=teacher.id) }}" onsubmit="return confirm('Supprimer {{ teacher.name }} ?');">
-                    <button type="submit" class="btn btn-sm btn-outline-danger">Supprimer</button>
-                  </form>
+                  <div class="d-flex justify-content-end gap-2">
+                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('web.teacher_planning', teacher_id=teacher.id) }}">Planning</a>
+                    <form method="post" action="{{ url_for('web.delete_teacher', teacher_id=teacher.id) }}" onsubmit="return confirm('Supprimer {{ teacher.name }} ?');" class="m-0">
+                      <button type="submit" class="btn btn-sm btn-outline-danger">Supprimer</button>
+                    </form>
+                  </div>
                 </td>
               </tr>
               {% endfor %}

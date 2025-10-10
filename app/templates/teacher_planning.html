@@ -1,0 +1,99 @@
+{% extends "layout.html" %}
+{% block title %}Planning de {{ teacher.name }} — Chronos{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2 class="h3 mb-0">Disponibilités de {{ teacher.name }}</h2>
+  <a class="btn btn-outline-secondary" href="{{ url_for('web.manage_teachers') }}">&larr; Retour</a>
+</div>
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-body">
+        <h3 class="card-title">Calendrier hebdomadaire</h3>
+        <p class="text-muted small">Sélectionnez les créneaux d'une heure pendant lesquels l'enseignant peut assurer des cours. Les pauses de 10h, 12h15-13h30 et 15h30 sont appliquées automatiquement.</p>
+        <form method="post">
+          <input type="hidden" name="save_availability" value="1">
+          <div class="table-responsive">
+            <table class="table table-bordered align-middle text-center small">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col">Créneau</th>
+                  {% for weekday, label in weekdays %}
+                  <th scope="col">{{ label }}</th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for slot in slots %}
+                <tr>
+                  {% set slot_index = loop.index0 %}
+                  <th scope="row" class="text-nowrap">{{ slot.start_str }} &ndash; {{ slot.end_str }}</th>
+                  {% for weekday, label in weekdays %}
+                  {% set value = weekday|string ~ '|' ~ slot.start_str ~ '|' ~ slot.end_str %}
+                  <td>
+                    <div class="form-check d-flex justify-content-center">
+                      <input class="form-check-input" type="checkbox" name="slots" value="{{ value }}" id="slot-{{ weekday }}-{{ slot_index }}-{{ loop.index0 }}" {% if value in selected_slots %}checked{% endif %}>
+                    </div>
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="text-end">
+            <button type="submit" class="btn btn-primary">Enregistrer les disponibilités</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm border-0 mb-4">
+      <div class="card-body">
+        <h3 class="card-title">Ajouter une indisponibilité</h3>
+        <form method="post" class="row g-3">
+          <input type="hidden" name="add_unavailability" value="1">
+          <div class="col-12">
+            <label for="date" class="form-label">Date</label>
+            <input type="date" class="form-control" id="date" name="date" required>
+          </div>
+          <div class="col-6">
+            <label for="start_time" class="form-label">Début</label>
+            <input type="time" class="form-control" id="start_time" name="start_time" required>
+          </div>
+          <div class="col-6">
+            <label for="end_time" class="form-label">Fin</label>
+            <input type="time" class="form-control" id="end_time" name="end_time" required>
+          </div>
+          <div class="col-12 text-end">
+            <button type="submit" class="btn btn-outline-primary">Ajouter</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <div class="card shadow-sm border-0">
+      <div class="card-body">
+        <h3 class="card-title">Indisponibilités planifiées</h3>
+        {% if unavailabilities %}
+        <ul class="list-group list-group-flush">
+          {% for item in unavailabilities %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+              <strong>{{ item.date|datetime('%d/%m/%Y') }}</strong><br>
+              <span class="text-muted small">{{ item.start_time.strftime('%H:%M') }} &ndash; {{ item.end_time.strftime('%H:%M') }}</span>
+            </div>
+            <form method="post" action="{{ url_for('web.delete_teacher_unavailability', teacher_id=teacher.id, entry_id=item.id) }}" onsubmit="return confirm('Supprimer cette indisponibilité ?');" class="m-0">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Supprimer</button>
+            </form>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted">Aucune indisponibilité enregistrée.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

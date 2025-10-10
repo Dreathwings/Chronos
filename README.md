@@ -83,10 +83,26 @@ En complément de l'API, Chronos fournit une interface HTML responsive accessibl
 - Visualiser un tableau de bord (effectifs, dernières créations).
 - Gérer les **salles** (création, suppression, équipements sous forme `clé=valeur`).
 - Gérer les **enseignants** (création, suppression, charge hebdomadaire maximale).
+- Définir les disponibilités hebdomadaires grâce au calendrier dédié et enregistrer des périodes d'indisponibilité ponctuelle.
 - Gérer les **classes** (code, intitulé, effectif, notes). La suppression est bloquée si des cours sont associés.
 - Gérer les **cours** (sélection d'une classe et d'un enseignant, fenêtres de dates, exigences `clé=valeur`).
 
 Les formulaires intègrent des validations basiques et des messages de confirmation/erreur. Les actions reposent sur la même base de données que l'API, ce qui permet d'enchaîner gestion manuelle et appels programmatiques sans désynchronisation.
+
+## Règles horaires et génération des créneaux
+
+Les créneaux proposés par Chronos durent 60 minutes et respectent la journée standard de 08h00 à 18h00 avec les pauses imposées :
+
+- 08h00 – 09h00
+- 09h00 – 10h00
+- 10h15 – 11h15 (pause de 10h00 à 10h15)
+- 11h15 – 12h15
+- 13h30 – 14h30 (pause déjeuner de 12h15 à 13h30, soit 1h15 entre 12h et 14h)
+- 14h30 – 15h30
+- 15h45 – 16h45 (pause de 15h30 à 15h45)
+- 16h45 – 17h45
+
+L'endpoint `POST /api/timeslots/generate` valide désormais que la durée demandée reste à 60 minutes et que la plage journalière couvre au moins 08:00 à 17:45. Le calendrier web reprend exactement ces créneaux : il suffit de cocher les heures souhaitées pour un enseignant, puis d'ajouter au besoin des indisponibilités ponctuelles pour bloquer des journées spécifiques.
 
 ## Génération du code avec Codex
 (voir le README complet fourni précédemment)

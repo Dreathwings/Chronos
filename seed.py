@@ -1,6 +1,3 @@
-"""Populate the database with sample data for Chronos."""
-from __future__ import annotations
-
 from datetime import date, time, timedelta
 
 from app import create_app
@@ -17,22 +14,37 @@ from app.models import (
 )
 
 
+STANDARD_DAY_SLOTS: list[tuple[time, time]] = [
+    (time(8, 0), time(9, 0)),
+    (time(9, 0), time(10, 0)),
+    (time(10, 15), time(11, 15)),
+    (time(11, 15), time(12, 15)),
+    (time(13, 30), time(14, 30)),
+    (time(14, 30), time(15, 30)),
+    (time(15, 45), time(16, 45)),
+    (time(16, 45), time(17, 45)),
+]
+
+SLOT_LOOKUP = {
+    start.strftime("%H:%M"): (start, end) for start, end in STANDARD_DAY_SLOTS
+}
+
 SAMPLE_DATA = {
     "teachers": [
         {
             "name": "Alice Martin",
             "max_weekly_load_hrs": 12,
             "availabilities": [
-                {"weekday": 0, "start_time": time(8, 0), "end_time": time(16, 0)},
-                {"weekday": 2, "start_time": time(8, 0), "end_time": time(16, 0)},
+                {"weekday": 0, "slots": ["08:00", "09:00", "10:15", "11:15", "13:30", "14:30"]},
+                {"weekday": 2, "slots": ["08:00", "09:00", "10:15", "11:15", "13:30", "14:30"]},
             ],
         },
         {
             "name": "Benoit Leroy",
             "max_weekly_load_hrs": 16,
             "availabilities": [
-                {"weekday": 1, "start_time": time(9, 0), "end_time": time(18, 0)},
-                {"weekday": 3, "start_time": time(9, 0), "end_time": time(18, 0)},
+                {"weekday": 1, "slots": ["09:00", "10:15", "11:15", "13:30", "14:30", "15:45"]},
+                {"weekday": 3, "slots": ["09:00", "10:15", "11:15", "13:30", "14:30", "15:45"]},
             ],
         },
     ],
@@ -70,8 +82,8 @@ SAMPLE_DATA = {
             "group_id": "IG1",
             "size": 18,
             "teacher": "Alice Martin",
-            "sessions_count": 2,
-            "session_minutes": 120,
+            "sessions_count": 3,
+            "session_minutes": 60,
             "window_start": date.today(),
             "window_end": date.today() + timedelta(days=7),
             "requirements": {"pc": "true"},
@@ -81,8 +93,8 @@ SAMPLE_DATA = {
             "group_id": "IG2",
             "size": 25,
             "teacher": "Benoit Leroy",
-            "sessions_count": 2,
-            "session_minutes": 120,
+            "sessions_count": 3,
+            "session_minutes": 60,
             "window_start": date.today(),
             "window_end": date.today() + timedelta(days=7),
             "requirements": {"projector": "true"},
@@ -102,7 +114,18 @@ def seed() -> None:
             max_weekly_load_hrs=teacher_data["max_weekly_load_hrs"],
         )
         for availability in teacher_data["availabilities"]:
-            teacher.availabilities.append(TeacherAvailability(**availability))
+            weekday = availability["weekday"]
+            for slot_code in availability.get("slots", []):
+                if slot_code not in SLOT_LOOKUP:
+                    continue
+                start_time, end_time = SLOT_LOOKUP[slot_code]
+                teacher.availabilities.append(
+                    TeacherAvailability(
+                        weekday=weekday,
+                        start_time=start_time,
+                        end_time=end_time,
+                    )
+                )
         db.session.add(teacher)
         teachers[teacher.name] = teacher
 
@@ -132,13 +155,13 @@ def seed() -> None:
     base_date = date.today()
     for day_offset in range(5):
         day = base_date + timedelta(days=day_offset)
-        for start_hour in (8, 10, 14):
+        for start_time, end_time in STANDARD_DAY_SLOTS:
             db.session.add(
                 Timeslot(
                     date=day,
-                    start_time=time(start_hour, 0),
-                    end_time=time(start_hour + 2, 0),
-                    minutes=120,
+                    start_time=start_time,
+                    end_time=end_time,
+                    minutes=60,
                 )
             )
 
