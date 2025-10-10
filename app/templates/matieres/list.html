@@ -1,0 +1,32 @@
+{% extends 'layouts/base.html' %}
+{% block title %}Matières{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <h2>Matières</h2>
+    <a class="btn" href="{{ url_for('main.create_course') }}">Nouvelle matière</a>
+  </section>
+  <table>
+    <thead>
+      <tr>
+        <th>Nom</th>
+        <th>Enseignant</th>
+        <th>Salle</th>
+        <th>Début</th>
+        <th>Fin</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for course in courses %}
+      <tr>
+        <td><a href="{{ url_for('main.show_course', course_id=course.id) }}">{{ course.name }}</a></td>
+        <td>{{ course.teacher.full_name }}</td>
+        <td>{{ course.room.name if course.room else 'TBD' }}</td>
+        <td>{{ course.start_time.strftime('%d/%m/%Y %H:%M') }}</td>
+        <td>{{ course.end_time.strftime('%d/%m/%Y %H:%M') }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">Aucune matière planifiée.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

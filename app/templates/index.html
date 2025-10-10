@@ -1,0 +1,86 @@
+{% extends 'layouts/base.html' %}
+{% block title %}Chronos — Tableau de bord{% endblock %}
+{% block content %}
+  <section>
+    <h2>Vue d'ensemble</h2>
+    <form action="{{ url_for('main.optimize') }}" method="post">
+      <button class="btn" type="submit">Optimiser le planning</button>
+    </form>
+  </section>
+
+  <section>
+    <h3>Enseignants</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Nom</th>
+          <th>Email</th>
+          <th>Département</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for teacher in teachers %}
+        <tr>
+          <td><a href="{{ url_for('main.show_teacher', teacher_id=teacher.id) }}">{{ teacher.full_name }}</a></td>
+          <td>{{ teacher.email }}</td>
+          <td>{{ teacher.department or '-' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3">Aucun enseignant.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h3>Salles</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Nom</th>
+          <th>Capacité</th>
+          <th>Équipements</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for room in rooms %}
+        <tr>
+          <td><a href="{{ url_for('main.show_room', room_id=room.id) }}">{{ room.name }}</a></td>
+          <td>{{ room.capacity }}</td>
+          <td>{{ room.equipments or '-' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3">Aucune salle.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h3>Matières</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Nom</th>
+          <th>Enseignant</th>
+          <th>Salle</th>
+          <th>Début</th>
+          <th>Fin</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for course in courses %}
+        <tr>
+          <td><a href="{{ url_for('main.show_course', course_id=course.id) }}">{{ course.name }}</a></td>
+          <td>{{ course.teacher.full_name }}</td>
+          <td>{{ course.room.name if course.room else 'TBD' }}</td>
+          <td>{{ course.start_time.strftime('%d/%m/%Y %H:%M') }}</td>
+          <td>{{ course.end_time.strftime('%d/%m/%Y %H:%M') }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">Aucun cours.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

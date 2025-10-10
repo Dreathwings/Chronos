@@ -1,0 +1,19 @@
+{% extends 'layouts/base.html' %}
+{% block title %}{{ course.name }}{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h2>{{ course.name }}</h2>
+      <p>Groupe {{ course.group_name }} — {{ course.teacher.full_name }}</p>
+      <p>Salle: {{ course.room.name if course.room else 'Non assignée' }}</p>
+      <p>Début: {{ course.start_time.strftime('%d/%m/%Y %H:%M') }} | Fin: {{ course.end_time.strftime('%d/%m/%Y %H:%M') }}</p>
+      <p>Logiciels requis: {{ course.software_required or 'Aucun' }}</p>
+    </div>
+    <div>
+      <a class="btn" href="{{ url_for('main.edit_course', course_id=course.id) }}">Modifier</a>
+      <form method="post" action="{{ url_for('main.delete_course', course_id=course.id) }}" style="display:inline">
+        <button class="btn secondary" type="submit" onclick="return confirm('Supprimer ce cours ?')">Supprimer</button>
+      </form>
+    </div>
+  </section>
+{% endblock %}

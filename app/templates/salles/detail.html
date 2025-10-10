@@ -1,0 +1,48 @@
+{% extends 'layouts/base.html' %}
+{% block title %}{{ room.name }}{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h2>{{ room.name }}</h2>
+      <p>Capacité: {{ room.capacity }} — {{ room.equipments or 'Équipements non précisés' }}</p>
+      <p>Ordinateurs: {{ 'Oui' if room.has_computers else 'Non' }}</p>
+    </div>
+    <div>
+      <a class="btn" href="{{ url_for('main.edit_room', room_id=room.id) }}">Modifier</a>
+      <form method="post" action="{{ url_for('main.delete_room', room_id=room.id) }}" style="display:inline">
+        <button class="btn secondary" type="submit" onclick="return confirm('Supprimer cette salle ?')">Supprimer</button>
+      </form>
+    </div>
+  </section>
+
+  <section>
+    <h3>Planning</h3>
+    {% include 'partials/calendar.html' with context %}
+  </section>
+
+  <section>
+    <h3>Cours planifiés</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Nom</th>
+          <th>Enseignant</th>
+          <th>Début</th>
+          <th>Fin</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for course in courses %}
+        <tr>
+          <td><a href="{{ url_for('main.show_course', course_id=course.id) }}">{{ course.name }}</a></td>
+          <td>{{ course.teacher.full_name }}</td>
+          <td>{{ course.start_time.strftime('%d/%m/%Y %H:%M') }}</td>
+          <td>{{ course.end_time.strftime('%d/%m/%Y %H:%M') }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">Aucun cours planifié.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

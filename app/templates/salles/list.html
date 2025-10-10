@@ -1,0 +1,30 @@
+{% extends 'layouts/base.html' %}
+{% block title %}Salles{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <h2>Salles</h2>
+    <a class="btn" href="{{ url_for('main.create_room') }}">Nouvelle salle</a>
+  </section>
+  <table>
+    <thead>
+      <tr>
+        <th>Nom</th>
+        <th>Capacité</th>
+        <th>Équipements</th>
+        <th>Ordinateurs</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for room in rooms %}
+      <tr>
+        <td><a href="{{ url_for('main.show_room', room_id=room.id) }}">{{ room.name }}</a></td>
+        <td>{{ room.capacity }}</td>
+        <td>{{ room.equipments or '-' }}</td>
+        <td>{{ 'Oui' if room.has_computers else 'Non' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">Aucune salle enregistrée.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

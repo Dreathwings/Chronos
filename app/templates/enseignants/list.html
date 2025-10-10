@@ -1,0 +1,30 @@
+{% extends 'layouts/base.html' %}
+{% block title %}Enseignants{% endblock %}
+{% block content %}
+  <section class="page-header">
+    <h2>Enseignants</h2>
+    <a class="btn" href="{{ url_for('main.create_teacher') }}">Nouvel enseignant</a>
+  </section>
+  <table>
+    <thead>
+      <tr>
+        <th>Nom</th>
+        <th>Email</th>
+        <th>Département</th>
+        <th>Cours</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for teacher in teachers %}
+      <tr>
+        <td><a href="{{ url_for('main.show_teacher', teacher_id=teacher.id) }}">{{ teacher.full_name }}</a></td>
+        <td>{{ teacher.email }}</td>
+        <td>{{ teacher.department or '-' }}</td>
+        <td>{{ teacher.courses|length }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">Aucun enseignant enregistré.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

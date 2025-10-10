@@ -1,0 +1,23 @@
+{% extends 'layouts/base.html' %}
+{% block title %}{{ 'Modifier' if room else 'Créer' }} une salle{% endblock %}
+{% block content %}
+  <h2>{{ 'Modifier' if room else 'Créer' }} une salle</h2>
+  <form method="post">
+    <label for="name">Nom</label>
+    <input id="name" name="name" type="text" value="{{ room.name if room else '' }}" required>
+
+    <label for="capacity">Capacité</label>
+    <input id="capacity" name="capacity" type="number" min="0" value="{{ room.capacity if room else 0 }}">
+
+    <label for="equipments">Équipements</label>
+    <textarea id="equipments" name="equipments">{{ room.equipments if room else '' }}</textarea>
+
+    <label>
+      <input type="checkbox" name="has_computers" value="1" {% if room and room.has_computers %}checked{% endif %}>
+      Poste informatique
+    </label>
+
+    <button class="btn" type="submit">Enregistrer</button>
+    <a class="btn secondary" href="{{ url_for('main.list_rooms') }}">Annuler</a>
+  </form>
+{% endblock %}

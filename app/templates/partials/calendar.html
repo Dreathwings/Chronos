@@ -1,0 +1,26 @@
+{% if calendar %}
+  {% set grouped = namespace(days={}) %}
+  {% for event in calendar %}
+    {% set day = event['start'][:10] %}
+    {% if day not in grouped.days %}
+      {% set _ = grouped.days.update({day: []}) %}
+    {% endif %}
+    {% set _ = grouped.days[day].append(event) %}
+  {% endfor %}
+  <div class="calendar-grid">
+    {% for day, events in grouped.days|dictsort %}
+      <div class="day">
+        <h4>{{ day }}</h4>
+        {% for event in events %}
+        <div class="calendar-event">
+          <strong>{{ event['title'] }}</strong>
+          <div>{{ event['start'][11:16] }} → {{ event['end'][11:16] }}</div>
+          <div>Salle: {{ event['room'] }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p>Aucun événement planifié.</p>
+{% endif %}

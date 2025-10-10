@@ -1,0 +1,18 @@
+{% extends 'layouts/base.html' %}
+{% block title %}{{ 'Modifier' if teacher else 'Créer' }} un enseignant{% endblock %}
+{% block content %}
+  <h2>{{ 'Modifier' if teacher else 'Créer' }} un enseignant</h2>
+  <form method="post">
+    <label for="full_name">Nom complet</label>
+    <input id="full_name" name="full_name" type="text" value="{{ teacher.full_name if teacher else '' }}" required>
+
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" value="{{ teacher.email if teacher else '' }}" required>
+
+    <label for="department">Département</label>
+    <input id="department" name="department" type="text" value="{{ teacher.department if teacher else '' }}">
+
+    <button class="btn" type="submit">Enregistrer</button>
+    <a class="btn secondary" href="{{ url_for('main.list_teachers') }}">Annuler</a>
+  </form>
+{% endblock %}

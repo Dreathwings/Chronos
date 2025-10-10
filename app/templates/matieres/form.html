@@ -1,0 +1,43 @@
+{% extends 'layouts/base.html' %}
+{% block title %}{{ 'Modifier' if course else 'Créer' }} une matière{% endblock %}
+{% block content %}
+  <h2>{{ 'Modifier' if course else 'Créer' }} une matière</h2>
+  <form method="post">
+    <label for="name">Nom</label>
+    <input id="name" name="name" type="text" value="{{ course.name if course else '' }}" required>
+
+    <label for="group_name">Groupe</label>
+    <input id="group_name" name="group_name" type="text" value="{{ course.group_name if course else 'A1' }}">
+
+    <label for="teacher_id">Enseignant</label>
+    <select id="teacher_id" name="teacher_id" required>
+      <option value="">-- Choisir --</option>
+      {% for teacher in teachers %}
+        <option value="{{ teacher.id }}" {% if course and course.teacher_id == teacher.id %}selected{% endif %}>{{ teacher.full_name }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="room_id">Salle</label>
+    <select id="room_id" name="room_id">
+      <option value="">Non assignée</option>
+      {% for room in rooms %}
+        <option value="{{ room.id }}" {% if course and course.room_id == room.id %}selected{% endif %}>{{ room.name }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="start_date">Date et heure de début</label>
+    <input id="start_date" name="start_date" type="datetime-local" value="{{ course.start_time.strftime('%Y-%m-%dT%H:%M') if course else '' }}" required>
+
+    <label for="duration_hours">Durée (heures)</label>
+    <input id="duration_hours" name="duration_hours" type="number" min="1" max="4" value="{{ course.duration_hours if course else 1 }}">
+
+    <label for="priority">Priorité</label>
+    <input id="priority" name="priority" type="number" min="1" max="5" value="{{ course.priority if course else 1 }}">
+
+    <label for="software_required">Logiciels requis</label>
+    <input id="software_required" name="software_required" type="text" value="{{ course.software_required if course else '' }}">
+
+    <button class="btn" type="submit">Enregistrer</button>
+    <a class="btn secondary" href="{{ url_for('main.list_courses') }}">Annuler</a>
+  </form>
+{% endblock %}
