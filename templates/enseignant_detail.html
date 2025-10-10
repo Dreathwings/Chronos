@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="two-columns">
+  <div>
+    <h2>{{ enseignant.nom }}</h2>
+    <p><strong>Email :</strong> {{ enseignant.email or '—' }}</p>
+    <p><strong>Disponibilités :</strong> {{ enseignant.disponibilites or '—' }}</p>
+
+    <h3>Séances planifiées</h3>
+    {% if cours %}
+      <ul class="sessions">
+        {% for session in cours %}
+          <li>
+            {{ session.date.strftime('%d/%m/%Y') }} — {{ session.debut.strftime('%H:%M') }} → {{ session.fin.strftime('%H:%M') }} :
+            {{ session.matiere.nom if session.matiere else 'Cours' }}
+            {% if session.salle %}dans {{ session.salle.nom }}{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>Aucune séance planifiée pour le moment.</p>
+    {% endif %}
+  </div>
+  <div>
+    <h3>Modifier</h3>
+    <form method="post" class="panel">
+      <label for="nom">Nom</label>
+      <input type="text" name="nom" id="nom" value="{{ enseignant.nom }}" required>
+
+      <label for="email">Email</label>
+      <input type="email" name="email" id="email" value="{{ enseignant.email }}">
+
+      <label for="disponibilites">Disponibilités</label>
+      <textarea name="disponibilites" id="disponibilites">{{ enseignant.disponibilites }}</textarea>
+
+      <button type="submit">Enregistrer</button>
+    </form>
+  </div>
+</section>
+<section>
+  <h3>Calendrier de {{ enseignant.nom }}</h3>
+  {% include "partials/calendar.html" with context %}
+</section>
+{% endblock %}

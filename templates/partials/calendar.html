@@ -1,0 +1,25 @@
+{% if calendar %}
+  {% for day, slots in calendar.items() %}
+    <div class="calendar-day">
+      <h4>{{ day.strftime('%A %d %B %Y') }}</h4>
+      <ul>
+        {% for slot, items in slots.items() %}
+          <li>
+            <strong>{{ slot }}</strong>
+            <ul>
+              {% for session in items %}
+                <li>
+                  {{ session.matiere.nom if session.matiere else 'Cours' }}
+                  {% if session.enseignant %} — {{ session.enseignant.nom }}{% endif %}
+                  {% if session.salle %} ({{ session.salle.nom }}){% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+{% else %}
+  <p>Aucune séance planifiée pour le moment.</p>
+{% endif %}

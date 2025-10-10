@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="two-columns">
+  <div>
+    <h2>Enseignants</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Nom</th>
+          <th>Email</th>
+          <th>Disponibilités</th>
+          <th>Séances</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for enseignant in enseignants %}
+          <tr>
+            <td><a href="{{ url_for('web.enseignant_detail', enseignant_id=enseignant.id) }}">{{ enseignant.nom }}</a></td>
+            <td>{{ enseignant.email or '—' }}</td>
+            <td>{{ enseignant.disponibilites or '—' }}</td>
+            <td>{{ enseignant.cours|length }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Nouvel enseignant</h3>
+    <form method="post" class="panel">
+      <label for="nom">Nom</label>
+      <input type="text" name="nom" id="nom" required>
+
+      <label for="email">Email</label>
+      <input type="email" name="email" id="email">
+
+      <label for="disponibilites">Disponibilités</label>
+      <textarea name="disponibilites" id="disponibilites"></textarea>
+
+      <button type="submit">Créer</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

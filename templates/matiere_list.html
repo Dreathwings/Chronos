@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="two-columns">
+  <div>
+    <h2>Cours</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Nom</th>
+          <th>Durée (min)</th>
+          <th>Priorité</th>
+          <th>Séances</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for matiere in matieres %}
+          <tr>
+            <td><a href="{{ url_for('web.matiere_detail', matiere_id=matiere.id) }}">{{ matiere.nom }}</a></td>
+            <td>{{ matiere.duree }}</td>
+            <td>{{ matiere.priorite }}</td>
+            <td>{{ matiere.sessions|length }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Nouveau cours</h3>
+    <form method="post" class="panel">
+      <label for="nom">Nom</label>
+      <input type="text" name="nom" id="nom" required>
+
+      <label for="description">Description</label>
+      <textarea name="description" id="description"></textarea>
+
+      <div class="two-cols">
+        <div>
+          <label for="duree">Durée (min)</label>
+          <input type="number" name="duree" id="duree" value="60" min="15" step="15">
+        </div>
+        <div>
+          <label for="priorite">Priorité</label>
+          <input type="number" name="priorite" id="priorite" value="1" min="1">
+        </div>
+      </div>
+
+      <label for="besoins">Besoins spécifiques</label>
+      <textarea name="besoins" id="besoins"></textarea>
+
+      <div class="two-cols">
+        <div>
+          <label for="fenetre_debut">Début possible</label>
+          <input type="date" name="fenetre_debut" id="fenetre_debut">
+        </div>
+        <div>
+          <label for="fenetre_fin">Fin possible</label>
+          <input type="date" name="fenetre_fin" id="fenetre_fin">
+        </div>
+      </div>
+
+      <button type="submit">Créer</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

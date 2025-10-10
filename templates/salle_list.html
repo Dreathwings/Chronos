@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="two-columns">
+  <div>
+    <h2>Salles</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Nom</th>
+          <th>Capacité</th>
+          <th>Équipements</th>
+          <th>Séances</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for salle in salles %}
+          <tr>
+            <td><a href="{{ url_for('web.salle_detail', salle_id=salle.id) }}">{{ salle.nom }}</a></td>
+            <td>{{ salle.capacite or '—' }}</td>
+            <td>{{ salle.equipements or '—' }}</td>
+            <td>{{ salle.cours|length }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <h3>Nouvelle salle</h3>
+    <form method="post" class="panel">
+      <label for="nom">Nom</label>
+      <input type="text" name="nom" id="nom" required>
+
+      <label for="capacite">Capacité</label>
+      <input type="number" name="capacite" id="capacite" min="0">
+
+      <label for="equipements">Équipements</label>
+      <textarea name="equipements" id="equipements"></textarea>
+
+      <button type="submit">Créer</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

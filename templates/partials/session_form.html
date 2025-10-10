@@ -1,0 +1,42 @@
+<form method="post" action="{{ url_for('web.session_create') }}" class="session-form">
+  <label for="matiere_id">Cours</label>
+  <select name="matiere_id" id="matiere_id" required>
+    <option value="">Sélectionner…</option>
+    {% for matiere in matieres %}
+      <option value="{{ matiere.id }}">{{ matiere.nom }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="enseignant_id">Enseignant</label>
+  <select name="enseignant_id" id="enseignant_id">
+    <option value="">Non assigné</option>
+    {% for enseignant in enseignants %}
+      <option value="{{ enseignant.id }}">{{ enseignant.nom }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="salle_id">Salle</label>
+  <select name="salle_id" id="salle_id">
+    <option value="">Non assignée</option>
+    {% for salle in salles %}
+      <option value="{{ salle.id }}">{{ salle.nom }}</option>
+    {% endfor %}
+  </select>
+
+  <div class="time-grid">
+    <div>
+      <label for="date">Date</label>
+      <input type="date" id="date" name="date" required>
+    </div>
+    <div>
+      <label for="debut">Début</label>
+      <input type="time" id="debut" name="debut" min="08:00" max="18:00" step="900" required>
+    </div>
+    <div>
+      <label for="fin">Fin</label>
+      <input type="time" id="fin" name="fin" min="08:00" max="19:00" step="900" required>
+    </div>
+  </div>
+
+  <button type="submit">Planifier</button>
+</form>

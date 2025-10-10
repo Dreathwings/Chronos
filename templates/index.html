@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <h2>Planification centralisée</h2>
+  <p>Créez des enseignants, salles et cours, puis planifiez vos séances pour visualiser automatiquement les emplois du temps.</p>
+</section>
+<section>
+  <h3>Calendrier global</h3>
+  {% include "partials/calendar.html" with context %}
+</section>
+<section class="quick-actions">
+  <h3>Créer une séance</h3>
+  {% include "partials/session_form.html" with context %}
+</section>
+{% endblock %}
