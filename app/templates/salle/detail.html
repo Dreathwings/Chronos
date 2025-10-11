@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ room.name }} — Chronos{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header">Informations salle</div>
+      <div class="card-body">
+        <form method="post">
+          {{ form.hidden_tag() }}
+          <div class="mb-3">{{ form.name.label(class_="form-label") }}{{ form.name(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.capacity.label(class_="form-label") }}{{ form.capacity(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.computers.label(class_="form-label") }}{{ form.computers(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.materials.label(class_="form-label") }}{{ form.materials(class_="form-select", multiple=true) }}</div>
+          <div class="mb-3">{{ form.notes.label(class_="form-label") }}{{ form.notes(class_="form-control") }}</div>
+          {{ form.submit(class_="btn btn-primary") }}
+        </form>
+      </div>
+      <div class="card-footer text-muted small">
+        Matériel: {% if room.materials %}{{ room.materials | map(attribute='name') | join(', ') }}{% else %}Aucun{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header">Calendrier des réservations</div>
+      <div class="card-body">
+        <div id="room-calendar"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const calendarEl = document.getElementById('room-calendar');
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+      initialView: 'timeGridWeek',
+      locale: 'fr',
+      height: 'auto',
+      slotMinTime: '08:00:00',
+      slotMaxTime: '18:00:00',
+      events: fetch('{{ url_for('main.api_room_sessions', room_id=room.id) }}').then(r => r.json()).then(data => data.map(event => ({
+        title: `${event.course} — ${event.teacher ?? 'Sans enseignant'}`,
+        start: event.start,
+        end: event.end,
+      })))
+    });
+    calendar.render();
+  });
+</script>
+{% endblock %}

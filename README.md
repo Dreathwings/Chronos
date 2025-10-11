@@ -1,35 +1,29 @@
 # Planificateur d’emplois du temps — Flask + MariaDB
 
-Chaque endpoint dispose d'une page HTML qui permet la gestion des elements
-Gestion et optimisation automatisée d’emplois du temps selon:
-- disponibilités enseignants  
-- capacités ,disponibilité et équipements des salles  
-- besoins des cours (Taille creneau, fenêtres de dates, logiciels, PC,priorité de placement dans l'emploi du temps)
-- Pour chaque pages génére un calendrier contenant tout les cours assigner a cette element
+Chronos est une application Flask qui centralise la gestion des enseignants, des salles, du catalogue de cours et des contraintes matérielles/logicielles pour générer automatiquement (ou manuellement) un emploi du temps optimisé. Chaque ressource dispose de sa fiche détaillée et d’un calendrier interactif construit avec FullCalendar.
 
-- Tableau de bord `/` avec visualisation globale du calendrier et formulaire rapide de planification.
-- Gestion des enseignants `/enseignant` + fiche détaillée `/enseignant/<id>` avec édition inline et calendrier dédié(disponibilité dans les creneaux Horaire, indisponibilité a la journée, nombre d'heure maximum).
-- Gestion des salles `/salle` + fiche `/salle/<id>` avec calendrier des réservations(nombre de place, nbr PC, Materiel).
-- Gestion des cours `/matiere` + fiche `/matiere/<id>` pour modifier contraintes et visualiser les séances(Besoin en materiel, Logiciel,nombre de seances, nbr creneaux / seance, plages de dates pour le placement automatique du cours, priorité de placement du cours).
+- Tableau de bord `/` avec visualisation globale du calendrier et formulaires de planification manuelle et automatique.
+- Gestion des enseignants `/enseignant` + fiche détaillée `/enseignant/<id>` avec édition inline, calendrier dédié, disponibilités (créneaux horaires) et indisponibilités à la journée.
+- Gestion des salles `/salle` + fiche `/salle/<id>` avec calendrier des réservations (capacité, postes informatiques, matériel associé).
+- Gestion des cours `/matiere` + fiche `/matiere/<id>` pour modifier les contraintes et visualiser les séances (matériel, logiciels, nombre de séances, priorité, capacité, besoin informatique).
+- Gestion des référentiels `/materiel` et `/logiciel` pour standardiser les ressources utilisées dans les salles et les cours.
+- Les calendriers (global + fiches) sont générés avec FullCalendar.js.
+- Plusieurs enseignants peuvent intervenir sur un même cours; les contraintes d’équipement, de disponibilité et de capacité sont prises en compte par l’optimiseur.
 
-Chaque page fiche intègre un formulaire de création, les fiches détaillées permettent l'édition et affichent automatiquement les séances planifiées.
-Generer les calendrier avec FullCalendar.js
-Plusieur enseignent peuvent être sur le meme cours
-Les élement comme [Logiciel,Materiel] sont generer avec une page CRUD et stocké en base de donnée pour standardisé les entrées
+## Organisation de l’horaire
+- Plage horaire : 8h à 18h en créneaux d’1 h.
+- Pause matin : 10h00 à 10h15.
+- Pause midi : 12h00 à 13h15 (créneaux disponibles à partir de 13h45).
+- Pause après-midi : 15h15 à 15h30.
 
-## Organisation de Horaire
-    Plage Horaire: 8H a 18H en creneau de 1H
-        Pause matin: 10H a 10H15
-        Pause midi: 1H15 entre 12H et 14H
-        Pause aprés-midi: 15H15 a 15H30
-
-## Architecture cible
-- **ORM**: SQLAlchemy + Alembic
-- **DB**: MariaDB 10.6+
-- **Optimisation**: OR-Tools (CP-SAT)
-- **Config**: `.env`
-- **Conteneurs**: Docker + docker-compose
-- **Tests**: pytest
+## Architecture
+- **Framework** : Flask 3 + application factory (`create_app`).
+- **ORM** : SQLAlchemy 2 + Flask-Migrate.
+- **DB** : MariaDB 10.6+ (ou SQLite en développement via `DATABASE_URL`).
+- **Optimisation** : OR-Tools (CP-SAT) pour l’assignation automatique des séances aux créneaux/ressources.
+- **Config** : `.env` + `python-dotenv`.
+- **Tests** : pytest (à compléter selon vos besoins).
+- **Conteneurs** : Docker + docker-compose (optionnel, cf. instructions ci-dessous).
 
 ## Démarrage rapide
 
@@ -37,7 +31,7 @@ Les élement comme [Logiciel,Materiel] sont generer avec une page CRUD et stock�
 ```bash
 cp .env.example .env
 docker compose up --build
-# Swagger: http://localhost:8000/api/docs
+# Swagger (à implémenter selon vos besoins) : http://localhost:8000/api/docs
 ```
 
 ### Option B — Local (sans Docker)
@@ -45,34 +39,36 @@ docker compose up --build
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Adapter DATABASE_URL si besoin
-alembic upgrade head
+# Adapter DATABASE_URL si besoin (SQLite par défaut)
+flask --app app db upgrade  # nécessite une migration initiale
 python seed.py
 flask --app app run --debug --port 8000
 ```
 
+> ℹ️ Aucun fichier de migration n’est versionné par défaut. Après avoir configuré votre base, générez la migration initiale avec `flask --app app db init` puis `flask --app app db migrate -m "Initial"` avant d’exécuter `flask --app app db upgrade`.
+
+## Fonctionnalités clés
+- **Planification automatique** : le formulaire du tableau de bord déclenche `plan_sessions` (OR-Tools) qui affecte les séances restantes des cours aux créneaux disponibles en respectant les contraintes (disponibilités enseignants, capacité et matériel des salles, priorité des cours, etc.).
+- **Planification manuelle** : sélectionnez cours / enseignant / salle / créneau pour créer une séance ponctuelle.
+- **Calendriers interactifs** : FullCalendar affiche les événements (globaux et par fiche) et consomme l’API JSON (`/api/.../sessions`).
+- **Gestion des référentiels** : pages CRUD simples pour alimenter le matériel et les logiciels, utilisés ensuite dans les fiches cours et salles.
+
 ## Variables d’environnement (`.env.example`)
-```
+```env
 FLASK_ENV=development
 SECRET_KEY=change_me
-DATABASE_URL=mariadb+mariadbconnector://warren@localhost:3306/chronos
+DATABASE_URL=sqlite:///chronos.db
 DB_ECHO=false
 API_TITLE=Chronos API
 API_VERSION=0.1.0
 ORIGIN=http://localhost:8000
 ```
 
-## Pages principals
-- `GET /`
-- `GET /enseignant` Listing enseignants
-- `GET /enseignant/<id>` CRUD enseignant
-- `GET /salle` Listing salles
-- `GET /salle/<id>` CRUD salles  
-- `GET /matiere` Listing cours
-- `GET /matiere/<id>` CRUD cours
-
-## Génération du code avec Codex
-(voir le README complet fourni précédemment)
+## Structure des principaux modèles
+- `Teacher`, `TeacherAvailability`, `TeacherUnavailability`
+- `Room`, `Material`
+- `Course`, `Software`
+- `CourseSession` (créneaux planifiés)
 
 ## Licence
 MIT.

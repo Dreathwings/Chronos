@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Salles — Chronos{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-header">Salles disponibles</div>
+      <ul class="list-group list-group-flush">
+        {% for room in rooms %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+              <h6 class="mb-0">{{ room.name }}</h6>
+              <small class="text-muted">Capacité {{ room.capacity }}{% if room.computers %} — {{ room.computers }} postes{% endif %}</small>
+            </div>
+            <a href="{{ url_for('main.room_detail', room_id=room.id) }}" class="btn btn-sm btn-outline-primary">Fiche</a>
+          </li>
+        {% else %}
+          <li class="list-group-item">Aucune salle enregistrée.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card shadow-sm">
+      <div class="card-header">Nouvelle salle</div>
+      <div class="card-body">
+        <form method="post">
+          {{ form.hidden_tag() }}
+          <div class="mb-3">{{ form.name.label(class_="form-label") }}{{ form.name(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.capacity.label(class_="form-label") }}{{ form.capacity(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.computers.label(class_="form-label") }}{{ form.computers(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.materials.label(class_="form-label") }}{{ form.materials(class_="form-select", multiple=true) }}</div>
+          <div class="mb-3">{{ form.notes.label(class_="form-label") }}{{ form.notes(class_="form-control") }}</div>
+          {{ form.submit(class_="btn btn-primary") }}
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

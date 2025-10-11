@@ -1,0 +1,18 @@
+body {
+  background-color: #f7f9fb;
+}
+
+.card {
+  border: none;
+}
+
+.card-header {
+  font-weight: 600;
+}
+
+#global-calendar,
+#teacher-calendar,
+#room-calendar,
+#course-calendar {
+  min-height: 600px;
+}

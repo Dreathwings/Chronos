@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Cours — Chronos{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-header">Cours</div>
+      <ul class="list-group list-group-flush">
+        {% for course in courses %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+              <h6 class="mb-0">{{ course.title }}</h6>
+              <small class="text-muted">{{ course.session_count }} séances — priorité {{ course.priority }}</small>
+            </div>
+            <a href="{{ url_for('main.course_detail', course_id=course.id) }}" class="btn btn-sm btn-outline-primary">Fiche</a>
+          </li>
+        {% else %}
+          <li class="list-group-item">Aucun cours défini.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card shadow-sm">
+      <div class="card-header">Nouveau cours</div>
+      <div class="card-body">
+        <form method="post">
+          {{ form.hidden_tag() }}
+          <div class="mb-3">{{ form.title.label(class_="form-label") }}{{ form.title(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.duration_hours.label(class_="form-label") }}{{ form.duration_hours(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.session_count.label(class_="form-label") }}{{ form.session_count(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.priority.label(class_="form-label") }}{{ form.priority(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.required_capacity.label(class_="form-label") }}{{ form.required_capacity(class_="form-control") }}</div>
+          <div class="form-check form-switch mb-3">{{ form.requires_computers(class_="form-check-input") }}{{ form.requires_computers.label(class_="form-check-label") }}</div>
+          <div class="mb-3">{{ form.materials.label(class_="form-label") }}{{ form.materials(class_="form-select", multiple=true) }}</div>
+          <div class="mb-3">{{ form.softwares.label(class_="form-label") }}{{ form.softwares(class_="form-select", multiple=true) }}</div>
+          {{ form.submit(class_="btn btn-primary") }}
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

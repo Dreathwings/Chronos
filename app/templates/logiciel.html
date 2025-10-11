@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Logiciels — Chronos{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header">Catalogue logiciels</div>
+      <ul class="list-group list-group-flush">
+        {% for software in softwares %}
+          <li class="list-group-item">
+            <strong>{{ software.name }}</strong><br>
+            <small class="text-muted">Version {{ software.version }}</small>
+          </li>
+        {% else %}
+          <li class="list-group-item">Aucun logiciel enregistré.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header">Ajouter un logiciel</div>
+      <div class="card-body">
+        <form method="post">
+          {{ form.hidden_tag() }}
+          <div class="mb-3">{{ form.name.label(class_="form-label") }}{{ form.name(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.version.label(class_="form-label") }}{{ form.version(class_="form-control") }}</div>
+          {{ form.submit(class_="btn btn-primary") }}
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

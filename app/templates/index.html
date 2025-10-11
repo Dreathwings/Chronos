@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Tableau de bord — Chronos{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header">Planification automatique</div>
+      <div class="card-body">
+        <form method="post">
+          {{ quick_plan_form.hidden_tag() }}
+          <div class="mb-3">
+            {{ quick_plan_form.start_day.label(class_="form-label") }}
+            {{ quick_plan_form.start_day(class_="form-control") }}
+          </div>
+          <div class="mb-3">
+            {{ quick_plan_form.horizon_days.label(class_="form-label") }}
+            {{ quick_plan_form.horizon_days(class_="form-control") }}
+          </div>
+          {{ quick_plan_form.submit(class_="btn btn-primary") }}
+        </form>
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-header">Planification manuelle</div>
+      <div class="card-body">
+        <form method="post">
+          {{ session_form.hidden_tag() }}
+          <div class="mb-3">{{ session_form.course_id.label(class_="form-label") }}{{ session_form.course_id(class_="form-select") }}</div>
+          <div class="mb-3">{{ session_form.teacher_id.label(class_="form-label") }}{{ session_form.teacher_id(class_="form-select") }}</div>
+          <div class="mb-3">{{ session_form.room_id.label(class_="form-label") }}{{ session_form.room_id(class_="form-select") }}</div>
+          <div class="mb-3">{{ session_form.date.label(class_="form-label") }}{{ session_form.date(class_="form-control") }}</div>
+          <div class="mb-3">{{ session_form.slot.label(class_="form-label") }}{{ session_form.slot(class_="form-select") }}</div>
+          {{ session_form.submit(class_="btn btn-outline-primary") }}
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header">Calendrier global</div>
+      <div class="card-body">
+        <div id="global-calendar"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const calendarEl = document.getElementById('global-calendar');
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+      initialView: 'timeGridWeek',
+      locale: 'fr',
+      height: 'auto',
+      slotMinTime: '08:00:00',
+      slotMaxTime: '18:00:00',
+      events: fetch('{{ url_for('main.api_sessions') }}').then(response => response.json()).then(data => data.map(event => ({
+        title: `${event.title} — ${event.teacher ?? 'Sans enseignant'} / ${event.room ?? 'Sans salle'}`,
+        start: event.start,
+        end: event.end,
+      })))
+    });
+    calendar.render();
+  });
+</script>
+{% endblock %}

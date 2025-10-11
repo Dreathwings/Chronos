@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Matériel — Chronos{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header">Catalogue matériel</div>
+      <ul class="list-group list-group-flush">
+        {% for material in materials %}
+          <li class="list-group-item">
+            <strong>{{ material.name }}</strong><br>
+            <small class="text-muted">{{ material.description or 'Sans description' }}</small>
+          </li>
+        {% else %}
+          <li class="list-group-item">Aucun matériel enregistré.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header">Ajouter un matériel</div>
+      <div class="card-body">
+        <form method="post">
+          {{ form.hidden_tag() }}
+          <div class="mb-3">{{ form.name.label(class_="form-label") }}{{ form.name(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.description.label(class_="form-label") }}{{ form.description(class_="form-control") }}</div>
+          {{ form.submit(class_="btn btn-primary") }}
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

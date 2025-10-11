@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ course.title }} — Chronos{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header">Paramètres du cours</div>
+      <div class="card-body">
+        <form method="post">
+          {{ form.hidden_tag() }}
+          <div class="mb-3">{{ form.title.label(class_="form-label") }}{{ form.title(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.duration_hours.label(class_="form-label") }}{{ form.duration_hours(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.session_count.label(class_="form-label") }}{{ form.session_count(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.priority.label(class_="form-label") }}{{ form.priority(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.required_capacity.label(class_="form-label") }}{{ form.required_capacity(class_="form-control") }}</div>
+          <div class="form-check form-switch mb-3">{{ form.requires_computers(class_="form-check-input") }}{{ form.requires_computers.label(class_="form-check-label") }}</div>
+          <div class="mb-3">{{ form.materials.label(class_="form-label") }}{{ form.materials(class_="form-select", multiple=true) }}</div>
+          <div class="mb-3">{{ form.softwares.label(class_="form-label") }}{{ form.softwares(class_="form-select", multiple=true) }}</div>
+          {{ form.submit(class_="btn btn-primary") }}
+        </form>
+      </div>
+      <div class="card-footer text-muted small">
+        Matériel : {% if course.materials %}{{ course.materials | map(attribute='name') | join(', ') }}{% else %}Aucun{% endif %}<br>
+        Logiciels : {% if course.softwares %}{{ course.softwares | map(attribute='name') | join(', ') }}{% else %}Aucun{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header">Séances du cours</div>
+      <div class="card-body">
+        <div id="course-calendar"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const calendarEl = document.getElementById('course-calendar');
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+      initialView: 'timeGridWeek',
+      locale: 'fr',
+      height: 'auto',
+      slotMinTime: '08:00:00',
+      slotMaxTime: '18:00:00',
+      events: fetch('{{ url_for('main.api_course_sessions', course_id=course.id) }}').then(r => r.json()).then(data => data.map(event => ({
+        title: `${event.course} — ${event.teacher ?? 'Sans enseignant'} / ${event.room ?? 'Sans salle'}`,
+        start: event.start,
+        end: event.end,
+      })))
+    });
+    calendar.render();
+  });
+</script>
+{% endblock %}

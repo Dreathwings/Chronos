@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ teacher.full_name }} — Chronos{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header">Profil enseignant</div>
+      <div class="card-body">
+        <form method="post">
+          {{ form.hidden_tag() }}
+          <div class="mb-3">{{ form.full_name.label(class_="form-label") }}{{ form.full_name(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.email.label(class_="form-label") }}{{ form.email(class_="form-control") }}</div>
+          <div class="mb-3">{{ form.max_hours_per_week.label(class_="form-label") }}{{ form.max_hours_per_week(class_="form-control") }}</div>
+          {{ form.submit(class_="btn btn-primary") }}
+        </form>
+      </div>
+    </div>
+    <div class="card shadow-sm mb-4">
+      <div class="card-header">Disponibilités</div>
+      <div class="card-body">
+        <form method="post">
+          {{ availability_form.hidden_tag() }}
+          <div class="mb-3">{{ availability_form.weekday.label(class_="form-label") }}{{ availability_form.weekday(class_="form-select") }}</div>
+          <div class="mb-3">{{ availability_form.start_time.label(class_="form-label") }}{{ availability_form.start_time(class_="form-control") }}</div>
+          <div class="mb-3">{{ availability_form.end_time.label(class_="form-label") }}{{ availability_form.end_time(class_="form-control") }}</div>
+          {{ availability_form.submit(class_="btn btn-outline-primary") }}
+        </form>
+        <hr>
+        <ul class="list-unstyled small">
+          {% for availability in teacher.availabilities %}
+            <li>{{ ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'][availability.weekday] }} : {{ availability.start_time.strftime('%H:%M') }} - {{ availability.end_time.strftime('%H:%M') }}</li>
+          {% else %}
+            <li>Aucune disponibilité définie.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-header">Indisponibilités</div>
+      <div class="card-body">
+        <form method="post">
+          {{ unavailability_form.hidden_tag() }}
+          <div class="mb-3">{{ unavailability_form.date.label(class_="form-label") }}{{ unavailability_form.date(class_="form-control") }}</div>
+          <div class="mb-3">{{ unavailability_form.reason.label(class_="form-label") }}{{ unavailability_form.reason(class_="form-control") }}</div>
+          {{ unavailability_form.submit(class_="btn btn-outline-danger") }}
+        </form>
+        <hr>
+        <ul class="list-unstyled small">
+          {% for unavailability in teacher.unavailabilities %}
+            <li>{{ unavailability.date.strftime('%d/%m/%Y') }} — {{ unavailability.reason or 'Indisponible' }}</li>
+          {% else %}
+            <li>Aucune indisponibilité.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header">Séances programmées</div>
+      <div class="card-body">
+        <div id="teacher-calendar"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const calendarEl = document.getElementById('teacher-calendar');
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+      initialView: 'timeGridWeek',
+      locale: 'fr',
+      height: 'auto',
+      slotMinTime: '08:00:00',
+      slotMaxTime: '18:00:00',
+      events: fetch('{{ url_for('main.api_teacher_sessions', teacher_id=teacher.id) }}').then(r => r.json()).then(data => data.map(event => ({
+        title: `${event.course} — ${event.room ?? 'Sans salle'}`,
+        start: event.start,
+        end: event.end,
+      })))
+    });
+    calendar.render();
+  });
+</script>
+{% endblock %}
