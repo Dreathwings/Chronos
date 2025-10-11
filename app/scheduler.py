@@ -16,16 +16,18 @@ WORKING_WINDOWS: List[tuple[time, time]] = [
     (time(15, 45), time(17, 45)),
 ]
 
-START_TIMES: List[time] = [
-    time(8, 0),
-    time(9, 0),
-    time(10, 15),
-    time(11, 15),
-    time(13, 30),
-    time(14, 30),
-    time(15, 45),
-    time(16, 45),
+SCHEDULE_SLOTS: List[tuple[time, time]] = [
+    (time(8, 0), time(9, 0)),
+    (time(9, 0), time(10, 0)),
+    (time(10, 15), time(11, 15)),
+    (time(11, 15), time(12, 15)),
+    (time(13, 30), time(14, 30)),
+    (time(14, 30), time(15, 30)),
+    (time(15, 45), time(16, 45)),
+    (time(16, 45), time(17, 45)),
 ]
+
+START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
 
 
 def daterange(start: date, end: date) -> Iterable[date]:

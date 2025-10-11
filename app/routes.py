@@ -16,7 +16,7 @@ from .models import (
     Teacher,
     TeacherAvailability,
 )
-from .scheduler import START_TIMES, fits_in_windows, generate_schedule
+from .scheduler import SCHEDULE_SLOTS, START_TIMES, fits_in_windows, generate_schedule
 
 bp = Blueprint("main", __name__)
 
@@ -24,6 +24,12 @@ bp = Blueprint("main", __name__)
 WORKDAY_START = time(hour=7)
 WORKDAY_END = time(hour=19)
 BACKGROUND_BLOCK_COLOR = "#adb5bd"
+
+SCHEDULE_SLOT_LOOKUP = {start: end for start, end in SCHEDULE_SLOTS}
+SCHEDULE_SLOT_CHOICES = [
+    {"start": start.strftime("%H:%M"), "end": end.strftime("%H:%M")}
+    for start, end in SCHEDULE_SLOTS
+]
 
 
 def _parse_date(value: str | None) -> datetime.date | None:
@@ -38,6 +44,15 @@ def _parse_datetime(date_str: str, time_str: str) -> datetime:
 
 def _format_time(value: time) -> str:
     return value.strftime("%H:%M:%S")
+
+
+def _parse_time_only(value: str | None) -> time | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%H:%M").time()
+    except ValueError:
+        return None
 
 
 def _teacher_unavailability_backgrounds(teacher: Teacher) -> list[dict[str, object]]:
@@ -220,49 +235,52 @@ def teacher_detail(teacher_id: int):
                 flash("Enseignant assigné au cours", "success")
         elif form_name == "set-availability":
             raw_slots = request.form.getlist("availability_slots")
-            slots_by_day: dict[int, set[int]] = {weekday: set() for weekday in range(5)}
+            slots_by_day: dict[int, set[time]] = {weekday: set() for weekday in range(5)}
             for raw in raw_slots:
                 try:
-                    weekday_str, hour_str = raw.split("-")
+                    weekday_str, start_str = raw.split("-", 1)
                     weekday = int(weekday_str)
-                    hour = int(hour_str)
                 except ValueError:
                     continue
                 if weekday not in slots_by_day:
                     continue
-                if hour < 7 or hour >= 19:
+                slot_start = _parse_time_only(start_str)
+                if slot_start is None:
                     continue
-                slots_by_day[weekday].add(hour)
+                if slot_start not in SCHEDULE_SLOT_LOOKUP:
+                    continue
+                slots_by_day[weekday].add(slot_start)
 
             for availability in list(teacher.availabilities):
                 db.session.delete(availability)
 
-            for weekday, hours in slots_by_day.items():
-                if not hours:
+            for weekday, slot_starts in slots_by_day.items():
+                if not slot_starts:
                     continue
-                merged_hours = sorted(hours)
-                start_hour = merged_hours[0]
-                end_hour = start_hour + 1
-                for current_hour in merged_hours[1:]:
-                    if current_hour == end_hour:
-                        end_hour += 1
+                ordered_starts = sorted(slot_starts)
+                current_start = ordered_starts[0]
+                current_end = SCHEDULE_SLOT_LOOKUP[current_start]
+                for next_start in ordered_starts[1:]:
+                    next_end = SCHEDULE_SLOT_LOOKUP[next_start]
+                    if next_start == current_end:
+                        current_end = next_end
                     else:
                         db.session.add(
                             TeacherAvailability(
                                 teacher=teacher,
                                 weekday=weekday,
-                                start_time=time(hour=start_hour),
-                                end_time=time(hour=end_hour),
+                                start_time=current_start,
+                                end_time=current_end,
                             )
                         )
-                        start_hour = current_hour
-                        end_hour = current_hour + 1
+                        current_start = next_start
+                        current_end = next_end
                 db.session.add(
                     TeacherAvailability(
                         teacher=teacher,
                         weekday=weekday,
-                        start_time=time(hour=start_hour),
-                        end_time=time(hour=end_hour),
+                        start_time=current_start,
+                        end_time=current_end,
                     )
                 )
             db.session.commit()
@@ -270,12 +288,14 @@ def teacher_detail(teacher_id: int):
         return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
 
     events = [session.as_event() for session in teacher.sessions]
-    selected_slots = set()
+    selected_slots: set[str] = set()
     for availability in teacher.availabilities:
-        hour = availability.start_time.hour
-        while hour < availability.end_time.hour:
-            selected_slots.add((availability.weekday, hour))
-            hour += 1
+        if availability.weekday >= 5:
+            continue
+        for slot_start, slot_end in SCHEDULE_SLOTS:
+            if availability.start_time <= slot_start and slot_end <= availability.end_time:
+                key = f"{availability.weekday}-{slot_start.strftime('%H:%M')}"
+                selected_slots.add(key)
 
     backgrounds = _teacher_unavailability_backgrounds(teacher)
 
@@ -285,7 +305,7 @@ def teacher_detail(teacher_id: int):
         courses=courses,
         assignable_courses=assignable_courses,
         events_json=json.dumps(events, ensure_ascii=False),
-        availability_hours=range(7, 19),
+        availability_slots=SCHEDULE_SLOT_CHOICES,
         selected_availability_slots=selected_slots,
         unavailability_backgrounds_json=json.dumps(backgrounds, ensure_ascii=False),
     )

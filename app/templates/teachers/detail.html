@@ -49,21 +49,21 @@
                 </tr>
               </thead>
               <tbody>
-                {% for hour in availability_hours %}
-                {% set slot_label = "%02d:00 - %02d:00"|format(hour, hour + 1) %}
+                {% for slot in availability_slots %}
+                {% set slot_label = slot.start ~ ' - ' ~ slot.end %}
                 <tr>
                   <th scope="row" class="text-start">{{ slot_label }}</th>
                   {% for weekday, _ in [(0, 'Lundi'), (1, 'Mardi'), (2, 'Mercredi'), (3, 'Jeudi'), (4, 'Vendredi')] %}
-                  {% set slot_value = weekday|string + '-' + hour|string %}
+                  {% set slot_value = weekday|string + '-' + slot.start %}
                   <td>
                     <div class="form-check justify-content-center d-flex">
                       <input
                         class="form-check-input"
                         type="checkbox"
-                        id="slot-{{ weekday }}-{{ hour }}"
+                        id="slot-{{ weekday }}-{{ slot.start | replace(':', '-') }}"
                         name="availability_slots"
                         value="{{ slot_value }}"
-                        {% if (weekday, hour) in selected_availability_slots %}checked{% endif %}
+                        {% if slot_value in selected_availability_slots %}checked{% endif %}
                       >
                     </div>
                   </td>
