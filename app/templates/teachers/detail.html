@@ -117,11 +117,12 @@
   document.addEventListener('DOMContentLoaded', function() {
     const calendarEl = document.getElementById('teacher-calendar');
     const events = {{ events_json|safe }};
+    const unavailableBackgrounds = {{ unavailability_backgrounds_json|safe }};
     const calendar = new FullCalendar.Calendar(calendarEl, {
       initialView: 'timeGridWeek',
       locale: 'fr',
-      slotMinTime: '08:00:00',
-      slotMaxTime: '18:00:00',
+      slotMinTime: '07:00:00',
+      slotMaxTime: '19:00:00',
       firstDay: 1,
       weekends: false,
       events,
@@ -133,6 +134,9 @@
     });
     if (window.CHRONOS_PAUSE_BACKGROUNDS) {
       calendar.addEventSource(window.CHRONOS_PAUSE_BACKGROUNDS);
+    }
+    if (Array.isArray(unavailableBackgrounds) && unavailableBackgrounds.length) {
+      calendar.addEventSource(unavailableBackgrounds);
     }
     calendar.render();
   });

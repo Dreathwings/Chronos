@@ -21,6 +21,11 @@ from .scheduler import START_TIMES, fits_in_windows, generate_schedule
 bp = Blueprint("main", __name__)
 
 
+WORKDAY_START = time(hour=7)
+WORKDAY_END = time(hour=19)
+BACKGROUND_BLOCK_COLOR = "#adb5bd"
+
+
 def _parse_date(value: str | None) -> datetime.date | None:
     if not value:
         return None
@@ -29,6 +34,83 @@ def _parse_date(value: str | None) -> datetime.date | None:
 
 def _parse_datetime(date_str: str, time_str: str) -> datetime:
     return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+
+
+def _format_time(value: time) -> str:
+    return value.strftime("%H:%M:%S")
+
+
+def _teacher_unavailability_backgrounds(teacher: Teacher) -> list[dict[str, object]]:
+    backgrounds: list[dict[str, object]] = []
+    for weekday in range(5):
+        day_slots = sorted(
+            (slot for slot in teacher.availabilities if slot.weekday == weekday),
+            key=lambda slot: slot.start_time,
+        )
+        pointer = WORKDAY_START
+        if not day_slots:
+            backgrounds.append(
+                {
+                    "daysOfWeek": [weekday + 1],
+                    "startTime": _format_time(WORKDAY_START),
+                    "endTime": _format_time(WORKDAY_END),
+                    "display": "background",
+                    "overlap": False,
+                    "color": BACKGROUND_BLOCK_COLOR,
+                }
+            )
+            continue
+        for slot in day_slots:
+            slot_start = max(slot.start_time, WORKDAY_START)
+            slot_end = min(slot.end_time, WORKDAY_END)
+            if slot_end <= WORKDAY_START or slot_start >= WORKDAY_END:
+                continue
+            if slot_start > pointer:
+                backgrounds.append(
+                    {
+                        "daysOfWeek": [weekday + 1],
+                        "startTime": _format_time(pointer),
+                        "endTime": _format_time(slot_start),
+                        "display": "background",
+                        "overlap": False,
+                        "color": BACKGROUND_BLOCK_COLOR,
+                    }
+                )
+            if slot_end > pointer:
+                pointer = slot_end
+        if pointer < WORKDAY_END:
+            backgrounds.append(
+                {
+                    "daysOfWeek": [weekday + 1],
+                    "startTime": _format_time(pointer),
+                    "endTime": _format_time(WORKDAY_END),
+                    "display": "background",
+                    "overlap": False,
+                    "color": BACKGROUND_BLOCK_COLOR,
+                }
+            )
+
+    if teacher.unavailable_dates:
+        raw_dates = teacher.unavailable_dates.replace("\n", ",")
+        for token in raw_dates.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                day = datetime.strptime(token, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            backgrounds.append(
+                {
+                    "start": day.strftime("%Y-%m-%dT00:00:00"),
+                    "end": (day + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"),
+                    "display": "background",
+                    "overlap": False,
+                    "color": BACKGROUND_BLOCK_COLOR,
+                }
+            )
+
+    return backgrounds
 
 
 @bp.route("/", methods=["GET", "POST"])
@@ -148,7 +230,7 @@ def teacher_detail(teacher_id: int):
                     continue
                 if weekday not in slots_by_day:
                     continue
-                if hour < 8 or hour >= 18:
+                if hour < 7 or hour >= 19:
                     continue
                 slots_by_day[weekday].add(hour)
 
@@ -195,14 +277,17 @@ def teacher_detail(teacher_id: int):
             selected_slots.add((availability.weekday, hour))
             hour += 1
 
+    backgrounds = _teacher_unavailability_backgrounds(teacher)
+
     return render_template(
         "teachers/detail.html",
         teacher=teacher,
         courses=courses,
         assignable_courses=assignable_courses,
         events_json=json.dumps(events, ensure_ascii=False),
-        availability_hours=range(8, 18),
+        availability_hours=range(7, 19),
         selected_availability_slots=selected_slots,
+        unavailability_backgrounds_json=json.dumps(backgrounds, ensure_ascii=False),
     )
 
 
