@@ -21,16 +21,6 @@
             <label class="form-label">Téléphone</label>
             <input type="text" name="phone" class="form-control">
           </div>
-          <div class="row g-2">
-            <div class="col">
-              <label class="form-label">Disponible de</label>
-              <input type="time" name="available_from" class="form-control" value="08:00">
-            </div>
-            <div class="col">
-              <label class="form-label">à</label>
-              <input type="time" name="available_until" class="form-control" value="18:00">
-            </div>
-          </div>
           <div>
             <label class="form-label">Heures max / semaine</label>
             <input type="number" name="max_hours_per_week" class="form-control" min="1" value="20">
@@ -56,7 +46,7 @@
           <thead>
             <tr>
               <th>Nom</th>
-              <th>Disponibilité</th>
+              <th>Créneaux déclarés</th>
               <th>Max h/semaine</th>
               <th>Actions</th>
             </tr>
@@ -69,7 +59,7 @@
                   {{ teacher.name }}
                 </a>
               </td>
-              <td>{{ teacher.available_from.strftime('%H:%M') }} - {{ teacher.available_until.strftime('%H:%M') }}</td>
+              <td>{{ teacher.availabilities|length }}</td>
               <td>
                 <form method="post" class="d-flex align-items-center gap-2">
                   <input type="hidden" name="form" value="update">

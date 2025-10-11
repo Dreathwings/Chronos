@@ -5,7 +5,7 @@ Application Flask permettant de gérer enseignants, salles, cours et ressources 
 ## Fonctionnalités
 
 - Tableau de bord avec calendrier global et formulaire de planification rapide.
-- Gestion des enseignants (disponibilités horaires, jours d'indisponibilité, charge hebdomadaire maximale) et assignation aux cours.
+- Gestion des enseignants (créneaux de disponibilité hebdomadaires, jours d'indisponibilité, charge hebdomadaire maximale) et assignation aux cours.
 - Gestion des salles avec capacités, postes informatiques, matériels et logiciels disponibles.
 - Gestion des cours avec contraintes (nombre de séances, durée, période de planification, priorité, équipements et logiciels requis, besoin en ordinateurs) et assignation multi-enseignants.
 - Référentiels centralisés pour les matériels et logiciels utilisés lors de la planification.
@@ -70,7 +70,7 @@ python -m compileall app
 
 - L'algorithme de génération automatique parcourt les jours ouvrés de la plage de dates définie et sélectionne les premiers créneaux disponibles respectant les contraintes (professeur disponible, salle adéquate, ressources requises et charge hebdomadaire maximale).
 - Les pauses sont prises en compte avec les créneaux suivants : 08h-09h, 09h-10h, 10h15-11h15, 11h15-12h15, 13h30-14h30, 14h30-15h30, 15h45-16h45, 16h45-17h45.
-- Les calendriers sont générés côté client avec FullCalendar (CDN).
+- Les calendriers sont générés côté client avec FullCalendar (CDN) et grisent automatiquement les pauses (matin, midi, après-midi).
 
 ## Licence
 

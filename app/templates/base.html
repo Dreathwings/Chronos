@@ -20,6 +20,34 @@
         white-space: normal;
       }
     </style>
+    <script>
+      window.CHRONOS_PAUSE_BACKGROUNDS = [
+        {
+          daysOfWeek: [1, 2, 3, 4, 5],
+          startTime: '10:00:00',
+          endTime: '10:15:00',
+          display: 'background',
+          overlap: false,
+          color: '#e9ecef'
+        },
+        {
+          daysOfWeek: [1, 2, 3, 4, 5],
+          startTime: '12:15:00',
+          endTime: '13:30:00',
+          display: 'background',
+          overlap: false,
+          color: '#e9ecef'
+        },
+        {
+          daysOfWeek: [1, 2, 3, 4, 5],
+          startTime: '15:30:00',
+          endTime: '15:45:00',
+          display: 'background',
+          overlap: false,
+          color: '#e9ecef'
+        }
+      ];
+    </script>
     {% block head %}{% endblock %}
   </head>
   <body>

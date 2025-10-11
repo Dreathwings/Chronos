@@ -17,16 +17,6 @@
             <label class="form-label">Téléphone</label>
             <input type="text" name="phone" class="form-control" value="{{ teacher.phone }}">
           </div>
-          <div class="row g-2">
-            <div class="col">
-              <label class="form-label">Disponible de</label>
-              <input type="time" name="available_from" class="form-control" value="{{ teacher.available_from.strftime('%H:%M') }}">
-            </div>
-            <div class="col">
-              <label class="form-label">à</label>
-              <input type="time" name="available_until" class="form-control" value="{{ teacher.available_until.strftime('%H:%M') }}">
-            </div>
-          </div>
           <div>
             <label class="form-label">Heures max / semaine</label>
             <input type="number" name="max_hours_per_week" class="form-control" value="{{ teacher.max_hours_per_week }}" min="1">
@@ -40,6 +30,67 @@
             <textarea name="notes" class="form-control" rows="3">{{ teacher.notes }}</textarea>
           </div>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </form>
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Créneaux de disponibilité</div>
+      <div class="card-body">
+        {% set WEEKDAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'] %}
+        {% set availabilities = teacher.availabilities|sort(attribute='start_time')|sort(attribute='weekday') %}
+        {% if availabilities %}
+        <div class="table-responsive mb-3">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>Jour</th>
+                <th>Début</th>
+                <th>Fin</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for availability in availabilities %}
+              <tr>
+                <td>{{ WEEKDAYS[availability.weekday] }}</td>
+                <td>{{ availability.start_time.strftime('%H:%M') }}</td>
+                <td>{{ availability.end_time.strftime('%H:%M') }}</td>
+                <td class="text-end">
+                  <form method="post" class="d-inline">
+                    <input type="hidden" name="form" value="delete-availability">
+                    <input type="hidden" name="availability_id" value="{{ availability.id }}">
+                    <button class="btn btn-sm btn-outline-danger" type="submit">Supprimer</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted">Aucun créneau défini pour le moment.</p>
+        {% endif %}
+        <form method="post" class="row g-2 align-items-end">
+          <input type="hidden" name="form" value="add-availability">
+          <div class="col-12">
+            <label class="form-label">Jour</label>
+            <select name="weekday" class="form-select">
+              {% for weekday, label in [(0, 'Lundi'), (1, 'Mardi'), (2, 'Mercredi'), (3, 'Jeudi'), (4, 'Vendredi')] %}
+              <option value="{{ weekday }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label">Début</label>
+            <input type="time" name="start_time" class="form-control" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label">Fin</label>
+            <input type="time" name="end_time" class="form-control" required>
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-outline-secondary w-100">Ajouter un créneau</button>
+          </div>
         </form>
       </div>
     </div>
@@ -128,6 +179,7 @@
 <script>
   document.addEventListener('DOMContentLoaded', function() {
     const calendarEl = document.getElementById('teacher-calendar');
+    const events = {{ events_json|safe }};
     const calendar = new FullCalendar.Calendar(calendarEl, {
       initialView: 'timeGridWeek',
       locale: 'fr',
@@ -135,13 +187,16 @@
       slotMaxTime: '18:00:00',
       firstDay: 1,
       weekends: false,
-      events: {{ events_json|safe }},
+      events,
       headerToolbar: {
         left: 'prev,next today',
         center: 'title',
         right: 'dayGridMonth,timeGridWeek,timeGridDay'
       },
     });
+    if (window.CHRONOS_PAUSE_BACKGROUNDS) {
+      calendar.addEventSource(window.CHRONOS_PAUSE_BACKGROUNDS);
+    }
     calendar.render();
   });
 </script>

@@ -80,11 +80,7 @@ def find_available_room(course: Course, start: datetime, end: datetime) -> Optio
 def find_available_teacher(course: Course, start: datetime, end: datetime) -> Optional[Teacher]:
     candidate_teachers = course.teachers if course.teachers else Teacher.query.all()
     for teacher in sorted(candidate_teachers, key=lambda t: t.max_hours_per_week):
-        if not teacher.is_available_on(start):
-            continue
-        if teacher.available_from and start.time() < teacher.available_from:
-            continue
-        if teacher.available_until and end.time() > teacher.available_until:
+        if not teacher.is_available_during(start, end):
             continue
         if any(overlaps(s.start_time, s.end_time, start, end) for s in teacher.sessions):
             continue

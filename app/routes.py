@@ -14,8 +14,7 @@ from .models import (
     Session,
     Software,
     Teacher,
-    default_end_time,
-    default_start_time,
+    TeacherAvailability,
 )
 from .scheduler import START_TIMES, fits_in_windows, generate_schedule
 
@@ -52,12 +51,16 @@ def dashboard():
             date_str = request.form["date"]
             start_time_str = request.form["start_time"]
             course = Course.query.get_or_404(course_id)
+            teacher = Teacher.query.get_or_404(teacher_id)
             duration_raw = request.form.get("duration")
             duration = int(duration_raw) if duration_raw else course.session_length_hours
             start_dt = _parse_datetime(date_str, start_time_str)
             end_dt = start_dt + timedelta(hours=duration)
             if not fits_in_windows(start_dt.time(), end_dt.time()):
                 flash("Le créneau choisi dépasse les fenêtres horaires autorisées", "danger")
+                return redirect(url_for("main.dashboard"))
+            if not teacher.is_available_during(start_dt, end_dt):
+                flash("L'enseignant n'est pas disponible sur ce créneau", "danger")
                 return redirect(url_for("main.dashboard"))
 
             session = Session(
@@ -92,8 +95,6 @@ def teachers_list():
                 name=request.form["name"],
                 email=request.form.get("email"),
                 phone=request.form.get("phone"),
-                available_from=_parse_time(request.form.get("available_from")) or default_start_time(),
-                available_until=_parse_time(request.form.get("available_until")) or default_end_time(),
                 max_hours_per_week=int(request.form.get("max_hours_per_week", 20)),
                 unavailable_dates=request.form.get("unavailable_dates"),
                 notes=request.form.get("notes"),
@@ -107,13 +108,9 @@ def teachers_list():
                 flash("Nom d'enseignant déjà utilisé", "danger")
         elif action == "update":
             teacher = Teacher.query.get_or_404(int(request.form["teacher_id"]))
-            teacher.email = request.form.get("email")
-            teacher.phone = request.form.get("phone")
-            teacher.available_from = _parse_time(request.form.get("available_from")) or teacher.available_from
-            teacher.available_until = _parse_time(request.form.get("available_until")) or teacher.available_until
-            teacher.max_hours_per_week = int(request.form.get("max_hours_per_week", teacher.max_hours_per_week))
-            teacher.unavailable_dates = request.form.get("unavailable_dates")
-            teacher.notes = request.form.get("notes")
+            teacher.max_hours_per_week = int(
+                request.form.get("max_hours_per_week", teacher.max_hours_per_week)
+            )
             db.session.commit()
             flash("Enseignant mis à jour", "success")
         return redirect(url_for("main.teachers_list"))
@@ -134,8 +131,6 @@ def teacher_detail(teacher_id: int):
         if form_name == "update":
             teacher.email = request.form.get("email")
             teacher.phone = request.form.get("phone")
-            teacher.available_from = _parse_time(request.form.get("available_from")) or teacher.available_from
-            teacher.available_until = _parse_time(request.form.get("available_until")) or teacher.available_until
             teacher.max_hours_per_week = int(request.form.get("max_hours_per_week", teacher.max_hours_per_week))
             teacher.unavailable_dates = request.form.get("unavailable_dates")
             teacher.notes = request.form.get("notes")
@@ -159,6 +154,9 @@ def teacher_detail(teacher_id: int):
             if not fits_in_windows(start_dt.time(), end_dt.time()):
                 flash("Le créneau choisi dépasse les fenêtres horaires autorisées", "danger")
                 return redirect(url_for("main.teacher_detail", teacher_id=teacher.id))
+            if not teacher.is_available_during(start_dt, end_dt):
+                flash("L'enseignant n'est pas disponible sur ce créneau", "danger")
+                return redirect(url_for("main.teacher_detail", teacher_id=teacher.id))
             session = Session(
                 course_id=course_id,
                 teacher_id=teacher.id,
@@ -169,6 +167,46 @@ def teacher_detail(teacher_id: int):
             db.session.add(session)
             db.session.commit()
             flash("Séance ajoutée", "success")
+        elif form_name == "add-availability":
+            weekday = int(request.form["weekday"])
+            start_time = _parse_time(request.form.get("start_time"))
+            end_time = _parse_time(request.form.get("end_time"))
+            if start_time is None or end_time is None:
+                flash("Merci de saisir des heures valides", "danger")
+                return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
+            if weekday < 0 or weekday > 6:
+                flash("Jour de la semaine invalide", "danger")
+                return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
+            if end_time <= start_time:
+                flash("L'heure de fin doit être supérieure à l'heure de début", "danger")
+                return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
+            overlap = [
+                a
+                for a in teacher.availabilities
+                if a.weekday == weekday
+                and not (a.end_time <= start_time or a.start_time >= end_time)
+            ]
+            if overlap:
+                flash("Ce créneau chevauche un créneau existant", "danger")
+                return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
+            availability = TeacherAvailability(
+                teacher=teacher,
+                weekday=weekday,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            db.session.add(availability)
+            db.session.commit()
+            flash("Créneau de disponibilité ajouté", "success")
+        elif form_name == "delete-availability":
+            availability_id = int(request.form["availability_id"])
+            availability = TeacherAvailability.query.get_or_404(availability_id)
+            if availability.teacher_id != teacher.id:
+                flash("Créneau introuvable", "danger")
+            else:
+                db.session.delete(availability)
+                db.session.commit()
+                flash("Créneau de disponibilité supprimé", "success")
         return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
 
     events = [session.as_event() for session in teacher.sessions]

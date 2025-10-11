@@ -3,7 +3,19 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import List, Optional
 
-from sqlalchemy import CheckConstraint, Column, Date, DateTime, ForeignKey, Integer, String, Table, Text, Time, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    Text,
+    Time,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from . import db
@@ -63,20 +75,53 @@ class Teacher(db.Model, TimeStampedModel):
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     email: Mapped[Optional[str]] = mapped_column(String(255))
     phone: Mapped[Optional[str]] = mapped_column(String(50))
-    available_from: Mapped[time] = mapped_column(Time, default=default_start_time)
-    available_until: Mapped[time] = mapped_column(Time, default=default_end_time)
     max_hours_per_week: Mapped[int] = mapped_column(Integer, default=20)
     unavailable_dates: Mapped[Optional[str]] = mapped_column(Text)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
-    sessions: Mapped[List["Session"]] = relationship(back_populates="teacher", cascade="all, delete-orphan")
-    courses: Mapped[List["Course"]] = relationship(secondary=course_teacher, back_populates="teachers")
+    sessions: Mapped[List["Session"]] = relationship(
+        back_populates="teacher", cascade="all, delete-orphan"
+    )
+    courses: Mapped[List["Course"]] = relationship(
+        secondary=course_teacher, back_populates="teachers"
+    )
+    availabilities: Mapped[List["TeacherAvailability"]] = relationship(
+        back_populates="teacher",
+        cascade="all, delete-orphan",
+        order_by="TeacherAvailability.weekday",
+    )
 
-    def is_available_on(self, day: datetime) -> bool:
-        if not self.unavailable_dates:
-            return True
-        unavailable = {d.strip() for d in self.unavailable_dates.split(",") if d.strip()}
-        return day.strftime("%Y-%m-%d") not in unavailable
+    def is_available_on(self, day: datetime | date) -> bool:
+        target_date = day.date() if isinstance(day, datetime) else day
+        if target_date.weekday() >= 5:
+            return False
+        if self.unavailable_dates:
+            unavailable = {d.strip() for d in self.unavailable_dates.split(",") if d.strip()}
+            if target_date.strftime("%Y-%m-%d") in unavailable:
+                return False
+        return any(a.weekday == target_date.weekday() for a in self.availabilities)
+
+    def is_available_during(self, start: datetime, end: datetime) -> bool:
+        if not self.is_available_on(start):
+            return False
+        day_slots = sorted(
+            (a for a in self.availabilities if a.weekday == start.weekday()),
+            key=lambda a: a.start_time,
+        )
+        if not day_slots:
+            return False
+        coverage = start.time()
+        target_end = end.time()
+        for slot in day_slots:
+            if slot.end_time <= coverage:
+                continue
+            if slot.start_time > coverage:
+                return False
+            if slot.end_time > coverage:
+                coverage = slot.end_time
+            if coverage >= target_end:
+                return True
+        return False
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"Teacher<{self.id} {self.name}>"
@@ -175,3 +220,27 @@ class Software(db.Model):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Software<{self.name}>"
+
+
+class TeacherAvailability(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("teacher.id"), nullable=False)
+    weekday: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+
+    teacher: Mapped[Teacher] = relationship(back_populates="availabilities")
+
+    __table_args__ = (
+        CheckConstraint("end_time > start_time", name="chk_availability_time_order"),
+        CheckConstraint("weekday >= 0 AND weekday <= 6", name="chk_availability_weekday_range"),
+    )
+
+    def contains(self, start: time, end: time) -> bool:
+        return self.start_time <= start and end <= self.end_time
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"TeacherAvailability<Teacher {self.teacher_id} day {self.weekday} "
+            f"{self.start_time}-{self.end_time}>"
+        )

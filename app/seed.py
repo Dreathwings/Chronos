@@ -1,7 +1,7 @@
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 
 from . import db
-from .models import Course, Equipment, Room, Software, Teacher
+from .models import Course, Equipment, Room, Software, Teacher, TeacherAvailability
 
 
 def seed_data() -> None:
@@ -28,6 +28,18 @@ def seed_data() -> None:
         max_hours_per_week=12,
         unavailable_dates="",
     )
+
+    default_slots = [
+        (time(8, 0), time(10, 0)),
+        (time(10, 15), time(12, 15)),
+        (time(13, 30), time(15, 30)),
+        (time(15, 45), time(17, 45)),
+    ]
+    for weekday in range(5):
+        for start, end in default_slots:
+            teacher.availabilities.append(
+                TeacherAvailability(weekday=weekday, start_time=start, end_time=end)
+            )
 
     room = Room(name="Salle 101", capacity=24, computers=20)
 
