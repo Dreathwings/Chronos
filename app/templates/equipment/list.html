@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Équipements — Chronos{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Nouvel équipement</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" class="form-control" name="name" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Ajouter</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Référentiel équipements</div>
+      <ul class="list-group list-group-flush">
+        {% for equipment in equipments %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          {{ equipment.name }}
+          <span class="badge bg-light text-dark">{{ equipment.rooms|length }} salles • {{ equipment.courses|length }} cours</span>
+        </li>
+        {% else %}
+        <li class="list-group-item">Aucun équipement pour le moment.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

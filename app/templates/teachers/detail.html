@@ -1,0 +1,146 @@
+{% extends 'base.html' %}
+{% block title %}{{ teacher.name }} — Enseignant{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-xl-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Profil</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="update">
+          <div>
+            <label class="form-label">E-mail</label>
+            <input type="email" name="email" class="form-control" value="{{ teacher.email }}">
+          </div>
+          <div>
+            <label class="form-label">Téléphone</label>
+            <input type="text" name="phone" class="form-control" value="{{ teacher.phone }}">
+          </div>
+          <div class="row g-2">
+            <div class="col">
+              <label class="form-label">Disponible de</label>
+              <input type="time" name="available_from" class="form-control" value="{{ teacher.available_from.strftime('%H:%M') }}">
+            </div>
+            <div class="col">
+              <label class="form-label">à</label>
+              <input type="time" name="available_until" class="form-control" value="{{ teacher.available_until.strftime('%H:%M') }}">
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Heures max / semaine</label>
+            <input type="number" name="max_hours_per_week" class="form-control" value="{{ teacher.max_hours_per_week }}" min="1">
+          </div>
+          <div>
+            <label class="form-label">Jours d'indisponibilité</label>
+            <textarea name="unavailable_dates" class="form-control" rows="2">{{ teacher.unavailable_dates }}</textarea>
+          </div>
+          <div>
+            <label class="form-label">Notes</label>
+            <textarea name="notes" class="form-control" rows="3">{{ teacher.notes }}</textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </form>
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Affecter un cours</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="assign-course">
+          <div>
+            <label class="form-label">Cours</label>
+            <select class="form-select" name="course_id" {% if not assignable_courses %}disabled{% endif %}>
+              {% for course in assignable_courses %}
+              <option value="{{ course.id }}">{{ course.name }}</option>
+              {% endfor %}
+            </select>
+            {% if not assignable_courses %}
+            <div class="form-text">Tous les cours disponibles sont déjà affectés.</div>
+            {% endif %}
+          </div>
+          <button type="submit" class="btn btn-outline-primary" {% if not assignable_courses %}disabled{% endif %}>Assigner</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-8">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-info text-white">Créer une séance</div>
+      <div class="card-body">
+        {% if courses and rooms %}
+        <form method="post" class="row g-3">
+          <input type="hidden" name="form" value="create-session">
+          <div class="col-md-4">
+            <label class="form-label">Cours</label>
+            <select class="form-select" name="course_id">
+              {% for course in courses %}
+              <option value="{{ course.id }}" {% if course.id == default_course_id %}selected{% endif %}>{{ course.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Salle</label>
+            <select class="form-select" name="room_id">
+              {% for room in rooms %}
+              <option value="{{ room.id }}">{{ room.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Date</label>
+            <input type="date" class="form-control" name="date" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Heure de début</label>
+            <select class="form-select" name="start_time">
+              {% for start_time in start_times %}
+              <option value="{{ start_time.strftime('%H:%M') }}">
+                {{ start_time.strftime('%H:%M') }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Durée (heures)</label>
+            <input type="number" class="form-control" name="duration" value="2" min="1">
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-info text-white">Planifier</button>
+          </div>
+        </form>
+        {% else %}
+        <p class="text-muted mb-0">Ajoutez d'abord un cours et une salle pour planifier une séance.</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Calendrier de {{ teacher.name }}</div>
+      <div class="card-body">
+        <div id="teacher-calendar"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const calendarEl = document.getElementById('teacher-calendar');
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+      initialView: 'timeGridWeek',
+      locale: 'fr',
+      slotMinTime: '08:00:00',
+      slotMaxTime: '18:00:00',
+      events: {{ events_json|safe }},
+      headerToolbar: {
+        left: 'prev,next today',
+        center: 'title',
+        right: 'dayGridMonth,timeGridWeek,timeGridDay'
+      },
+    });
+    calendar.render();
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+{% block title %}Enseignants — Chronos{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Nouvel enseignant</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="create">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" name="name" class="form-control" required>
+          </div>
+          <div>
+            <label class="form-label">E-mail</label>
+            <input type="email" name="email" class="form-control">
+          </div>
+          <div>
+            <label class="form-label">Téléphone</label>
+            <input type="text" name="phone" class="form-control">
+          </div>
+          <div class="row g-2">
+            <div class="col">
+              <label class="form-label">Disponible de</label>
+              <input type="time" name="available_from" class="form-control" value="08:00">
+            </div>
+            <div class="col">
+              <label class="form-label">à</label>
+              <input type="time" name="available_until" class="form-control" value="18:00">
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Heures max / semaine</label>
+            <input type="number" name="max_hours_per_week" class="form-control" min="1" value="20">
+          </div>
+          <div>
+            <label class="form-label">Jours d'indisponibilité (YYYY-MM-DD, séparés par des virgules)</label>
+            <textarea name="unavailable_dates" class="form-control" rows="2"></textarea>
+          </div>
+          <div>
+            <label class="form-label">Notes</label>
+            <textarea name="notes" class="form-control" rows="3"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">Ajouter</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Enseignants existants</div>
+      <div class="table-responsive">
+        <table class="table table-striped align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Nom</th>
+              <th>Disponibilité</th>
+              <th>Max h/semaine</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for teacher in teachers %}
+            <tr>
+              <td>
+                <a href="{{ url_for('main.teacher_detail', teacher_id=teacher.id) }}">
+                  {{ teacher.name }}
+                </a>
+              </td>
+              <td>{{ teacher.available_from.strftime('%H:%M') }} - {{ teacher.available_until.strftime('%H:%M') }}</td>
+              <td>
+                <form method="post" class="d-flex align-items-center gap-2">
+                  <input type="hidden" name="form" value="update">
+                  <input type="hidden" name="teacher_id" value="{{ teacher.id }}">
+                  <input type="number" class="form-control form-control-sm" name="max_hours_per_week" value="{{ teacher.max_hours_per_week }}" min="1">
+                  <button class="btn btn-sm btn-outline-primary" type="submit">Mettre à jour</button>
+                </form>
+              </td>
+              <td>
+                <small>{{ teacher.email or '—' }}<br>{{ teacher.phone or '' }}</small>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

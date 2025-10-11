@@ -1,78 +1,77 @@
-# Planificateur d’emplois du temps — Flask + MariaDB
+# Chronos — Planificateur d'emplois du temps
 
-Chaque endpoint dispose d'une page HTML qui permet la gestion des elements
-Gestion et optimisation automatisée d’emplois du temps selon:
-- disponibilités enseignants  
-- capacités ,disponibilité et équipements des salles  
-- besoins des cours (Taille creneau, fenêtres de dates, logiciels, PC,priorité de placement dans l'emploi du temps)
-- Pour chaque pages génére un calendrier contenant tout les cours assigner a cette element
+Application Flask permettant de gérer enseignants, salles, cours et ressources pour construire un emploi du temps optimisé. Chaque section dispose d'une interface web dédiée avec calendrier FullCalendar pour visualiser les séances programmées.
 
-- Tableau de bord `/` avec visualisation globale du calendrier et formulaire rapide de planification.
-- Gestion des enseignants `/enseignant` + fiche détaillée `/enseignant/<id>` avec édition inline et calendrier dédié(disponibilité dans les creneaux Horaire, indisponibilité a la journée, nombre d'heure maximum).
-- Gestion des salles `/salle` + fiche `/salle/<id>` avec calendrier des réservations(nombre de place, nbr PC, Materiel).
-- Gestion des cours `/matiere` + fiche `/matiere/<id>` pour modifier contraintes et visualiser les séances(Besoin en materiel, Logiciel,nombre de seances, nbr creneaux / seance, plages de dates pour le placement automatique du cours, priorité de placement du cours).
+## Fonctionnalités
 
-Chaque page fiche intègre un formulaire de création, les fiches détaillées permettent l'édition et affichent automatiquement les séances planifiées.
-Generer les calendrier avec FullCalendar.js
-Plusieur enseignent peuvent être sur le meme cours
-Les élement comme [Logiciel,Materiel] sont generer avec une page CRUD et stocké en base de donnée pour standardisé les entrées
+- Tableau de bord avec calendrier global et formulaire de planification rapide.
+- Gestion des enseignants (disponibilités horaires, jours d'indisponibilité, charge hebdomadaire maximale) et assignation aux cours.
+- Gestion des salles avec capacités, postes informatiques, matériels et logiciels disponibles.
+- Gestion des cours avec contraintes (nombre de séances, durée, période de planification, priorité, équipements et logiciels requis, besoin en ordinateurs) et assignation multi-enseignants.
+- Référentiels centralisés pour les matériels et logiciels utilisés lors de la planification.
+- Génération automatique de séances respectant les contraintes (créneaux 8h-18h avec pauses définies, disponibilités enseignants, capacités des salles, matériel/logiciel requis).
+- Affichage des calendriers individuels (enseignant, salle, cours) via FullCalendar.
 
-## Organisation de Horaire
-    Plage Horaire: 8H a 18H en creneau de 1H
-        Pause matin: 10H a 10H15
-        Pause midi: 1H15 entre 12H et 14H
-        Pause aprés-midi: 15H15 a 15H30
+## Prérequis
 
-## Architecture cible
-- **ORM**: SQLAlchemy + Alembic
-- **DB**: MariaDB 10.6+
-- **Optimisation**: OR-Tools (CP-SAT)
-- **Config**: `.env`
-- **Conteneurs**: Docker + docker-compose
-- **Tests**: pytest
+- Python 3.11+
+- MariaDB 10.6+ (optionnel si vous utilisez SQLite pour des tests locaux)
 
-## Démarrage rapide
+## Installation
 
-### Option A — Docker
 ```bash
-cp .env.example .env
-docker compose up --build
-# Swagger: http://localhost:8000/api/docs
-```
-
-### Option B — Local (sans Docker)
-```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-# Adapter DATABASE_URL si besoin
-alembic upgrade head
-python seed.py
-flask --app app run --debug --port 8000
 ```
 
-## Variables d’environnement (`.env.example`)
-```
-FLASK_ENV=development
-SECRET_KEY=change_me
-DATABASE_URL=mariadb+mariadbconnector://warren@localhost:3306/chronos
-DB_ECHO=false
-API_TITLE=Chronos API
-API_VERSION=0.1.0
-ORIGIN=http://localhost:8000
+Créez un fichier `.env` (optionnel) pour définir la clé secrète et l'URL de base de données :
+
+```env
+SECRET_KEY=change-me
+DATABASE_URL=mysql+pymysql://user:password@localhost:3306/chronos
 ```
 
-## Pages principals
-- `GET /`
-- `GET /enseignant` Listing enseignants
-- `GET /enseignant/<id>` CRUD enseignant
-- `GET /salle` Listing salles
-- `GET /salle/<id>` CRUD salles  
-- `GET /matiere` Listing cours
-- `GET /matiere/<id>` CRUD cours
+Si `DATABASE_URL` n'est pas défini, l'application utilisera automatiquement une base SQLite `chronos.db` dans le répertoire du projet.
 
-## Génération du code avec Codex
-(voir le README complet fourni précédemment)
+## Lancement
+
+```bash
+flask --app app run --debug
+```
+
+À la première exécution l'application crée les tables automatiquement. Vous pouvez injecter des données de démonstration :
+
+```bash
+flask --app app seed
+```
+
+Les principales pages sont accessibles via :
+
+- `/` : tableau de bord et calendrier global
+- `/enseignant` : liste des enseignants
+- `/enseignant/<id>` : fiche enseignant + calendrier personnel
+- `/salle` : liste des salles
+- `/salle/<id>` : fiche salle + calendrier des réservations
+- `/matiere` : liste des cours
+- `/matiere/<id>` : fiche cours, contraintes et génération automatique
+- `/equipement` : gestion des matériels
+- `/logiciel` : gestion des logiciels
+
+## Tests rapides
+
+Pour vérifier que les dépendances Python sont installées correctement :
+
+```bash
+python -m compileall app
+```
+
+## Notes techniques
+
+- L'algorithme de génération automatique parcourt les jours ouvrés de la plage de dates définie et sélectionne les premiers créneaux disponibles respectant les contraintes (professeur disponible, salle adéquate, ressources requises et charge hebdomadaire maximale).
+- Les pauses sont prises en compte avec les créneaux suivants : 08h-09h, 09h-10h, 10h15-11h15, 11h15-12h15, 13h30-14h30, 14h30-15h30, 15h45-16h45, 16h45-17h45.
+- Les calendriers sont générés côté client avec FullCalendar (CDN).
 
 ## Licence
-MIT.
+
+MIT
