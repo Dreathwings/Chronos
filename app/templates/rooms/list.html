@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block title %}Salles — Chronos{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Nouvelle salle</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="create">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" class="form-control" name="name" required>
+          </div>
+          <div class="row g-2">
+            <div class="col">
+              <label class="form-label">Capacité</label>
+              <input type="number" class="form-control" name="capacity" value="20" min="1">
+            </div>
+            <div class="col">
+              <label class="form-label">PC</label>
+              <input type="number" class="form-control" name="computers" value="0" min="0">
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Notes</label>
+            <textarea name="notes" class="form-control" rows="3"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">Créer</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Salles</div>
+      <div class="table-responsive">
+        <table class="table table-striped align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Nom</th>
+              <th>Capacité</th>
+              <th>PC</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for room in rooms %}
+            <tr>
+              <td><a href="{{ url_for('main.room_detail', room_id=room.id) }}">{{ room.name }}</a></td>
+              <td>{{ room.capacity }}</td>
+              <td>{{ room.computers }}</td>
+              <td>{{ room.notes or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

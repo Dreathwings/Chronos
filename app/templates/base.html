@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Chronos{% endblock %}</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    >
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/main.min.css"
+    >
+    <style>
+      body {
+        padding-top: 4.5rem;
+      }
+      .fc-event-title {
+        white-space: normal;
+      }
+    </style>
+    <script>
+      window.CHRONOS_PAUSE_BACKGROUNDS = [
+        {
+          daysOfWeek: [1, 2, 3, 4, 5],
+          startTime: '10:00:00',
+          endTime: '10:15:00',
+          display: 'background',
+          overlap: false,
+          color: '{{ background_block_color }}'
+        },
+        {
+          daysOfWeek: [1, 2, 3, 4, 5],
+          startTime: '12:15:00',
+          endTime: '13:30:00',
+          display: 'background',
+          overlap: false,
+          color: '{{ background_block_color }}'
+        },
+        {
+          daysOfWeek: [1, 2, 3, 4, 5],
+          startTime: '15:30:00',
+          endTime: '15:45:00',
+          display: 'background',
+          overlap: false,
+          color: '{{ background_block_color }}'
+        }
+      ];
+      window.CHRONOS_DEFAULT_BACKGROUNDS = {{ default_backgrounds_json|safe }};
+      window.CHRONOS_SLOT_STARTS = {{ schedule_slot_starts_json|safe }};
+
+      function chronosSlotDateForDay(dayDate, timeString) {
+        const [hours, minutes, seconds] = timeString.split(':').map(function(part) {
+          return parseInt(part || '0', 10);
+        });
+        const candidate = new Date(dayDate.getTime());
+        candidate.setHours(hours || 0, minutes || 0, seconds || 0, 0);
+        return candidate;
+      }
+
+      function chronosSnapEventToSlots(event) {
+        if (!event.start) {
+          return;
+        }
+        const slotStarts = Array.isArray(window.CHRONOS_SLOT_STARTS)
+          ? window.CHRONOS_SLOT_STARTS
+          : [];
+        if (!slotStarts.length) {
+          return;
+        }
+        const originalStart = new Date(event.start.getTime());
+        const originalEnd = event.end ? new Date(event.end.getTime()) : null;
+        const duration = originalEnd ? originalEnd.getTime() - originalStart.getTime() : null;
+        const dayAnchor = new Date(originalStart.getTime());
+        dayAnchor.setHours(0, 0, 0, 0);
+
+        let bestStart = null;
+        let smallestDiff = Number.POSITIVE_INFINITY;
+        slotStarts.forEach(function(timeString) {
+          if (typeof timeString !== 'string' || !timeString.length) {
+            return;
+          }
+          const candidate = chronosSlotDateForDay(dayAnchor, timeString);
+          const diff = Math.abs(originalStart.getTime() - candidate.getTime());
+          if (diff < smallestDiff) {
+            smallestDiff = diff;
+            bestStart = candidate;
+          }
+        });
+
+        if (!bestStart) {
+          return;
+        }
+        const bestEnd = duration !== null ? new Date(bestStart.getTime() + duration) : null;
+        if (bestEnd) {
+          event.setDates(bestStart, bestEnd);
+        } else {
+          event.setStart(bestStart);
+        }
+      }
+
+      function chronosCloneEvents(events) {
+        if (!Array.isArray(events)) {
+          return [];
+        }
+        return events.map(function(event) { return Object.assign({}, event); });
+      }
+
+      function chronosPad(number) {
+        return String(number).padStart(2, '0');
+      }
+
+      function chronosFormatLocalISO(date) {
+        if (!(date instanceof Date)) {
+          return null;
+        }
+        return [
+          date.getFullYear(),
+          '-',
+          chronosPad(date.getMonth() + 1),
+          '-',
+          chronosPad(date.getDate()),
+          'T',
+          chronosPad(date.getHours()),
+          ':',
+          chronosPad(date.getMinutes()),
+          ':',
+          chronosPad(date.getSeconds()),
+        ].join('');
+      }
+
+      async function chronosUpdateSession(event) {
+        if (!event.end) {
+          throw new Error('La séance doit avoir une heure de fin définie');
+        }
+        const startIso = chronosFormatLocalISO(event.start);
+        const endIso = chronosFormatLocalISO(event.end);
+        if (!startIso || !endIso) {
+          throw new Error('Impossible de déterminer les horaires du déplacement');
+        }
+        const response = await fetch(`/sessions/${event.id}/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            start: startIso,
+            end: endIso,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message = payload.error || 'Impossible de déplacer la séance';
+          throw new Error(message);
+        }
+        if (payload.event) {
+          if (payload.event.title) {
+            event.setProp('title', payload.event.title);
+          }
+          const startDate = new Date(payload.event.start);
+          const endDate = new Date(payload.event.end);
+          event.setDates(startDate, endDate);
+          if (payload.event.extendedProps) {
+            Object.keys(payload.event.extendedProps).forEach(function(key) {
+              event.setExtendedProp(key, payload.event.extendedProps[key]);
+            });
+          }
+        }
+      }
+
+      async function chronosDeleteSession(event) {
+        const response = await fetch(`/sessions/${event.id}`, { method: 'DELETE' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message = payload.error || 'Impossible de supprimer la séance';
+          throw new Error(message);
+        }
+      }
+
+      window.createChronosCalendar = function(element, events, extraSources, overrides) {
+        extraSources = extraSources || [];
+        overrides = overrides || {};
+        const config = Object.assign({
+          initialView: 'timeGridWeek',
+          locale: 'fr',
+          slotMinTime: '07:00:00',
+          slotMaxTime: '19:00:00',
+          slotDuration: '01:00:00',
+          snapDuration: '00:15:00',
+          firstDay: 1,
+          weekends: false,
+          allDaySlot: false,
+          editable: true,
+          eventDurationEditable: false,
+          headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay'
+          },
+          events: events || [],
+          eventDrop: function(info) {
+            chronosSnapEventToSlots(info.event);
+            chronosUpdateSession(info.event).catch(function(error) {
+              info.revert();
+              window.alert(error.message || error);
+            });
+          },
+          eventClick: function(info) {
+            if (info.jsEvent) {
+              info.jsEvent.preventDefault();
+            }
+          },
+          eventDidMount: function(info) {
+            if (!info.el || info.el.dataset.chronosContextMenuBound === '1') {
+              return;
+            }
+            info.el.dataset.chronosContextMenuBound = '1';
+            info.el.addEventListener('contextmenu', function(event) {
+              event.preventDefault();
+              if (!window.confirm('Supprimer cette séance ?')) {
+                return;
+              }
+              chronosDeleteSession(info.event)
+                .then(function() {
+                  info.event.remove();
+                })
+                .catch(function(error) {
+                  window.alert(error.message || error);
+                });
+            });
+          },
+        }, overrides);
+
+        const calendar = new FullCalendar.Calendar(element, config);
+
+        if (Array.isArray(window.CHRONOS_DEFAULT_BACKGROUNDS) && window.CHRONOS_DEFAULT_BACKGROUNDS.length) {
+          calendar.addEventSource(chronosCloneEvents(window.CHRONOS_DEFAULT_BACKGROUNDS));
+        }
+        if (Array.isArray(window.CHRONOS_PAUSE_BACKGROUNDS) && window.CHRONOS_PAUSE_BACKGROUNDS.length) {
+          calendar.addEventSource(chronosCloneEvents(window.CHRONOS_PAUSE_BACKGROUNDS));
+        }
+        if (Array.isArray(extraSources)) {
+          extraSources.forEach(function(source) {
+            if (Array.isArray(source) && source.length) {
+              calendar.addEventSource(chronosCloneEvents(source));
+            }
+          });
+        }
+
+        return calendar;
+      };
+    </script>
+    {% block head %}{% endblock %}
+  </head>
+  <body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="{{ url_for('main.dashboard') }}">Chronos</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.dashboard') }}">Tableau de bord</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.teachers_list') }}">Enseignants</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.classes_list') }}">Classes</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.rooms_list') }}">Salles</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.courses_list') }}">Cours</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.equipment_list') }}">Équipements</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.software_list') }}">Logiciels</a></li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+    <main class="container-fluid">
+      {% with messages = get_flashed_messages(with_categories=True) %}
+        {% if messages %}
+          <div class="mt-3">
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

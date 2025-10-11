@@ -1,0 +1,174 @@
+{% extends 'base.html' %}
+{% block title %}{{ course.name }} — Cours{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-xl-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Contraintes du cours</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="update">
+          <div>
+            <label class="form-label">Description</label>
+            <textarea name="description" class="form-control" rows="3">{{ course.description }}</textarea>
+          </div>
+          <div class="row g-2">
+            <div class="col">
+              <label class="form-label">Étudiants attendus</label>
+              <input type="number" class="form-control" name="expected_students" value="{{ course.expected_students }}" min="1">
+            </div>
+            <div class="col">
+              <label class="form-label">Durée séance (h)</label>
+              <input type="number" class="form-control" name="session_length_hours" value="{{ course.session_length_hours }}" min="1">
+            </div>
+          </div>
+          <div class="row g-2">
+            <div class="col">
+              <label class="form-label">Séances requises</label>
+              <input type="number" class="form-control" name="sessions_required" value="{{ course.sessions_required }}" min="1">
+            </div>
+            <div class="col">
+              <label class="form-label">Priorité</label>
+              <input type="number" class="form-control" name="priority" value="{{ course.priority }}" min="1">
+            </div>
+          </div>
+          <div class="row g-2">
+            <div class="col">
+              <label class="form-label">Début</label>
+              <input type="date" class="form-control" name="start_date" value="{{ course.start_date }}">
+            </div>
+            <div class="col">
+              <label class="form-label">Fin</label>
+              <input type="date" class="form-control" name="end_date" value="{{ course.end_date }}">
+            </div>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="requires_computers" id="requires_computers" {% if course.requires_computers %}checked{% endif %}>
+            <label class="form-check-label" for="requires_computers">Ordinateurs requis</label>
+          </div>
+          <div>
+            <label class="form-label">Enseignants</label>
+            {% for teacher in teachers %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="teachers" value="{{ teacher.id }}" id="teacher-{{ teacher.id }}" {% if teacher in course.teachers %}checked{% endif %}>
+              <label class="form-check-label" for="teacher-{{ teacher.id }}">{{ teacher.name }}</label>
+            </div>
+            {% endfor %}
+          </div>
+          <div>
+            <label class="form-label">Classes associées</label>
+            {% for class_group in class_groups %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="classes" value="{{ class_group.id }}" id="class-{{ class_group.id }}" {% if class_group in course.classes %}checked{% endif %}>
+              <label class="form-check-label" for="class-{{ class_group.id }}">{{ class_group.name }}</label>
+            </div>
+            {% endfor %}
+          </div>
+          <div>
+            <label class="form-label">Équipements requis</label>
+            {% for equipment in equipments %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="equipments" value="{{ equipment.id }}" id="equip-{{ equipment.id }}" {% if equipment in course.equipments %}checked{% endif %}>
+              <label class="form-check-label" for="equip-{{ equipment.id }}">{{ equipment.name }}</label>
+            </div>
+            {% endfor %}
+          </div>
+          <div>
+            <label class="form-label">Logiciels requis</label>
+            {% for software in softwares %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="softwares" value="{{ software.id }}" id="soft-{{ software.id }}" {% if software in course.softwares %}checked{% endif %}>
+              <label class="form-check-label" for="soft-{{ software.id }}">{{ software.name }}</label>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </form>
+      </div>
+    </div>
+    <div class="d-grid gap-2 mt-4">
+      <form method="post">
+        <input type="hidden" name="form" value="auto-schedule">
+        <button class="btn btn-success" type="submit">Générer automatiquement</button>
+      </form>
+    </div>
+  </div>
+  <div class="col-xl-8">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-info text-white">Ajouter une séance manuelle</div>
+      <div class="card-body">
+        {% if teachers and rooms and course.classes %}
+        <form method="post" class="row g-3">
+          <input type="hidden" name="form" value="manual-session">
+          <div class="col-md-4">
+            <label class="form-label">Enseignant</label>
+            <select class="form-select" name="teacher_id">
+              {% for teacher in teachers %}
+              <option value="{{ teacher.id }}">{{ teacher.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Salle</label>
+            <select class="form-select" name="room_id">
+              {% for room in rooms %}
+              <option value="{{ room.id }}">{{ room.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Classe</label>
+            <select class="form-select" name="class_group_id">
+              {% for class_group in course.classes %}
+              <option value="{{ class_group.id }}">{{ class_group.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Date</label>
+            <input type="date" class="form-control" name="date" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Heure de début</label>
+            <select class="form-select" name="start_time">
+              {% for start_time in start_times %}
+              <option value="{{ start_time.strftime('%H:%M') }}">
+                {{ start_time.strftime('%H:%M') }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Durée (heures)</label>
+            <input type="number" class="form-control" name="duration" value="{{ course.session_length_hours }}" min="1">
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-info text-white">Ajouter</button>
+          </div>
+        </form>
+        {% else %}
+        <p class="text-muted mb-0">Ajoutez au moins un enseignant, une salle et associez une classe pour planifier manuellement une séance.</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Calendrier des séances</div>
+      <div class="card-body">
+        <div id="course-calendar"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const calendarEl = document.getElementById('course-calendar');
+    const events = {{ events_json|safe }};
+    const calendar = window.createChronosCalendar(calendarEl, events);
+    calendar.render();
+  });
+</script>
+{% endblock %}
