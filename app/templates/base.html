@@ -105,6 +105,8 @@
           locale: 'fr',
           slotMinTime: '07:00:00',
           slotMaxTime: '19:00:00',
+          slotDuration: '01:00:00',
+          snapDuration: '01:00:00',
           firstDay: 1,
           weekends: false,
           editable: true,
@@ -122,16 +124,28 @@
             });
           },
           eventClick: function(info) {
-            if (!window.confirm('Supprimer cette séance ?')) {
+            if (info.jsEvent) {
+              info.jsEvent.preventDefault();
+            }
+          },
+          eventDidMount: function(info) {
+            if (!info.el || info.el.dataset.chronosContextMenuBound === '1') {
               return;
             }
-            chronosDeleteSession(info.event)
-              .then(function() {
-                info.event.remove();
-              })
-              .catch(function(error) {
-                window.alert(error.message || error);
-              });
+            info.el.dataset.chronosContextMenuBound = '1';
+            info.el.addEventListener('contextmenu', function(event) {
+              event.preventDefault();
+              if (!window.confirm('Supprimer cette séance ?')) {
+                return;
+              }
+              chronosDeleteSession(info.event)
+                .then(function() {
+                  info.event.remove();
+                })
+                .catch(function(error) {
+                  window.alert(error.message || error);
+                });
+            });
           },
         }, overrides);
 
