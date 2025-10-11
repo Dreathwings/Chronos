@@ -107,16 +107,44 @@
         return events.map(function(event) { return Object.assign({}, event); });
       }
 
+      function chronosPad(number) {
+        return String(number).padStart(2, '0');
+      }
+
+      function chronosFormatLocalISO(date) {
+        if (!(date instanceof Date)) {
+          return null;
+        }
+        return [
+          date.getFullYear(),
+          '-',
+          chronosPad(date.getMonth() + 1),
+          '-',
+          chronosPad(date.getDate()),
+          'T',
+          chronosPad(date.getHours()),
+          ':',
+          chronosPad(date.getMinutes()),
+          ':',
+          chronosPad(date.getSeconds()),
+        ].join('');
+      }
+
       async function chronosUpdateSession(event) {
         if (!event.end) {
           throw new Error('La séance doit avoir une heure de fin définie');
+        }
+        const startIso = chronosFormatLocalISO(event.start);
+        const endIso = chronosFormatLocalISO(event.end);
+        if (!startIso || !endIso) {
+          throw new Error('Impossible de déterminer les horaires du déplacement');
         }
         const response = await fetch(`/sessions/${event.id}/move`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            start: event.start.toISOString(),
-            end: event.end.toISOString(),
+            start: startIso,
+            end: endIso,
           }),
         });
         const payload = await response.json().catch(() => ({}));
