@@ -28,7 +28,7 @@
           endTime: '10:15:00',
           display: 'background',
           overlap: false,
-          color: '#adb5bd'
+          color: '{{ background_block_color }}'
         },
         {
           daysOfWeek: [1, 2, 3, 4, 5],
@@ -36,7 +36,7 @@
           endTime: '13:30:00',
           display: 'background',
           overlap: false,
-          color: '#adb5bd'
+          color: '{{ background_block_color }}'
         },
         {
           daysOfWeek: [1, 2, 3, 4, 5],
@@ -44,9 +44,115 @@
           endTime: '15:45:00',
           display: 'background',
           overlap: false,
-          color: '#adb5bd'
+          color: '{{ background_block_color }}'
         }
       ];
+      window.CHRONOS_DEFAULT_BACKGROUNDS = {{ default_backgrounds_json|safe }};
+
+      function chronosCloneEvents(events) {
+        if (!Array.isArray(events)) {
+          return [];
+        }
+        return events.map(function(event) { return Object.assign({}, event); });
+      }
+
+      async function chronosUpdateSession(event) {
+        if (!event.end) {
+          throw new Error('La séance doit avoir une heure de fin définie');
+        }
+        const response = await fetch(`/sessions/${event.id}/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            start: event.start.toISOString(),
+            end: event.end.toISOString(),
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message = payload.error || 'Impossible de déplacer la séance';
+          throw new Error(message);
+        }
+        if (payload.event) {
+          if (payload.event.title) {
+            event.setProp('title', payload.event.title);
+          }
+          const startDate = new Date(payload.event.start);
+          const endDate = new Date(payload.event.end);
+          event.setDates(startDate, endDate);
+          if (payload.event.extendedProps) {
+            Object.keys(payload.event.extendedProps).forEach(function(key) {
+              event.setExtendedProp(key, payload.event.extendedProps[key]);
+            });
+          }
+        }
+      }
+
+      async function chronosDeleteSession(event) {
+        const response = await fetch(`/sessions/${event.id}`, { method: 'DELETE' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message = payload.error || 'Impossible de supprimer la séance';
+          throw new Error(message);
+        }
+      }
+
+      window.createChronosCalendar = function(element, events, extraSources, overrides) {
+        extraSources = extraSources || [];
+        overrides = overrides || {};
+        const config = Object.assign({
+          initialView: 'timeGridWeek',
+          locale: 'fr',
+          slotMinTime: '07:00:00',
+          slotMaxTime: '19:00:00',
+          firstDay: 1,
+          weekends: false,
+          editable: true,
+          eventDurationEditable: false,
+          headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay'
+          },
+          events: events || [],
+          eventDrop: function(info) {
+            chronosUpdateSession(info.event).catch(function(error) {
+              info.revert();
+              window.alert(error.message || error);
+            });
+          },
+          eventClick: function(info) {
+            if (!window.confirm('Supprimer cette séance ?')) {
+              return;
+            }
+            chronosDeleteSession(info.event)
+              .then(function() {
+                info.event.remove();
+              })
+              .catch(function(error) {
+                window.alert(error.message || error);
+              });
+          },
+        }, overrides);
+
+        const calendar = new FullCalendar.Calendar(element, config);
+
+        if (Array.isArray(window.CHRONOS_DEFAULT_BACKGROUNDS) && window.CHRONOS_DEFAULT_BACKGROUNDS.length) {
+          calendar.addEventSource(chronosCloneEvents(window.CHRONOS_DEFAULT_BACKGROUNDS));
+        }
+        if (Array.isArray(window.CHRONOS_PAUSE_BACKGROUNDS) && window.CHRONOS_PAUSE_BACKGROUNDS.length) {
+          calendar.addEventSource(chronosCloneEvents(window.CHRONOS_PAUSE_BACKGROUNDS));
+        }
+        if (Array.isArray(extraSources)) {
+          extraSources.forEach(function(source) {
+            if (Array.isArray(source) && source.length) {
+              calendar.addEventSource(chronosCloneEvents(source));
+            }
+          });
+        }
+
+        return calendar;
+      };
     </script>
     {% block head %}{% endblock %}
   </head>
@@ -61,6 +167,7 @@
           <ul class="navbar-nav me-auto mb-2 mb-lg-0">
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.dashboard') }}">Tableau de bord</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.teachers_list') }}">Enseignants</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.classes_list') }}">Classes</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.rooms_list') }}">Salles</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.courses_list') }}">Cours</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.equipment_list') }}">Équipements</a></li>

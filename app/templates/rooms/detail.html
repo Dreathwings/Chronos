@@ -62,23 +62,7 @@
   document.addEventListener('DOMContentLoaded', function() {
     const calendarEl = document.getElementById('room-calendar');
     const events = {{ events_json|safe }};
-    const calendar = new FullCalendar.Calendar(calendarEl, {
-      initialView: 'timeGridWeek',
-      locale: 'fr',
-      slotMinTime: '08:00:00',
-      slotMaxTime: '18:00:00',
-      firstDay: 1,
-      weekends: false,
-      events,
-      headerToolbar: {
-        left: 'prev,next today',
-        center: 'title',
-        right: 'dayGridMonth,timeGridWeek,timeGridDay'
-      },
-    });
-    if (window.CHRONOS_PAUSE_BACKGROUNDS) {
-      calendar.addEventSource(window.CHRONOS_PAUSE_BACKGROUNDS);
-    }
+    const calendar = window.createChronosCalendar(calendarEl, events);
     calendar.render();
   });
 </script>

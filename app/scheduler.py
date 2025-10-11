@@ -6,7 +6,7 @@ from typing import Iterable, List, Optional
 from flask import current_app
 
 from . import db
-from .models import Course, Room, Session, Teacher
+from .models import ClassGroup, Course, Room, Session, Teacher
 
 # Working windows respecting pauses
 WORKING_WINDOWS: List[tuple[time, time]] = [
@@ -93,51 +93,66 @@ def find_available_teacher(course: Course, start: datetime, end: datetime) -> Op
     return None
 
 
+def _class_sessions_needed(course: Course, class_group: ClassGroup) -> int:
+    existing = sum(1 for session in course.sessions if session.class_group_id == class_group.id)
+    return max(course.sessions_required - existing, 0)
+
+
 def generate_schedule(course: Course) -> list[Session]:
     if not course.start_date or not course.end_date:
         raise ValueError("Course must have start and end dates to schedule automatically.")
+    if not course.classes:
+        raise ValueError("Associez au moins une classe au cours avant de planifier.")
 
     created_sessions: list[Session] = []
-    existing_sessions = len(course.sessions)
-    sessions_to_create = max(course.sessions_required - existing_sessions, 0)
-    if sessions_to_create == 0:
-        return created_sessions
 
     slot_length_hours = course.session_length_hours
     slot_length = timedelta(hours=slot_length_hours)
 
     priority_days = sorted(daterange(course.start_date, course.end_date))
 
-    for day in priority_days:
+    for class_group in sorted(course.classes, key=lambda c: c.name.lower()):
+        sessions_to_create = _class_sessions_needed(course, class_group)
         if sessions_to_create == 0:
-            break
-        if day.weekday() >= 5:  # Skip weekends
             continue
-        for slot_start_time in START_TIMES:
-            start_dt = datetime.combine(day, slot_start_time)
-            end_dt = start_dt + slot_length
-            if not fits_in_windows(start_dt.time(), end_dt.time()):
-                continue
-            teacher = find_available_teacher(course, start_dt, end_dt)
-            if not teacher:
-                continue
-            room = find_available_room(course, start_dt, end_dt)
-            if not room:
-                continue
-            session = Session(
-                course=course,
-                teacher=teacher,
-                room=room,
-                start_time=start_dt,
-                end_time=end_dt,
-            )
-            db.session.add(session)
-            created_sessions.append(session)
-            sessions_to_create -= 1
+        for day in priority_days:
             if sessions_to_create == 0:
                 break
-    if sessions_to_create > 0:
-        current_app.logger.warning(
-            "Unable to schedule %s sessions for %s", sessions_to_create, course.name
-        )
+            if day.weekday() >= 5:
+                continue
+            if not class_group.is_available_on(day):
+                continue
+            for slot_start_time in START_TIMES:
+                start_dt = datetime.combine(day, slot_start_time)
+                end_dt = start_dt + slot_length
+                if not fits_in_windows(start_dt.time(), end_dt.time()):
+                    continue
+                if not class_group.is_available_during(start_dt, end_dt):
+                    continue
+                teacher = find_available_teacher(course, start_dt, end_dt)
+                if not teacher:
+                    continue
+                room = find_available_room(course, start_dt, end_dt)
+                if not room:
+                    continue
+                session = Session(
+                    course=course,
+                    teacher=teacher,
+                    room=room,
+                    class_group=class_group,
+                    start_time=start_dt,
+                    end_time=end_dt,
+                )
+                db.session.add(session)
+                created_sessions.append(session)
+                sessions_to_create -= 1
+                if sessions_to_create == 0:
+                    break
+        if sessions_to_create > 0:
+            current_app.logger.warning(
+                "Unable to schedule %s sessions for %s (%s)",
+                sessions_to_create,
+                course.name,
+                class_group.name,
+            )
     return created_sessions

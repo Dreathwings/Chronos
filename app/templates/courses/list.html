@@ -85,6 +85,7 @@
               <th>Période</th>
               <th>Séances</th>
               <th>Priorité</th>
+              <th>Classes</th>
             </tr>
           </thead>
           <tbody>
@@ -94,6 +95,7 @@
               <td>{{ course.start_date or '—' }} → {{ course.end_date or '—' }}</td>
               <td>{{ course.sessions|length }}/{{ course.sessions_required }}</td>
               <td>{{ course.priority }}</td>
+              <td>{{ course.classes | map(attribute='name') | join(', ') or '—' }}</td>
             </tr>
             {% endfor %}
           </tbody>

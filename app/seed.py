@@ -1,7 +1,16 @@
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from . import db
-from .models import Course, Equipment, Room, Software, Teacher, TeacherAvailability
+from .models import (
+    ClassGroup,
+    Course,
+    Equipment,
+    Room,
+    Session,
+    Software,
+    Teacher,
+    TeacherAvailability,
+)
 
 
 def seed_data() -> None:
@@ -53,5 +62,21 @@ def seed_data() -> None:
 
     python.teachers.append(teacher)
 
-    db.session.add_all([python, teacher, room, projector, vscode])
+    class_a = ClassGroup(name="Classe A", size=20)
+    python.classes.append(class_a)
+
+    db.session.add_all([python, teacher, room, projector, vscode, class_a])
+    db.session.flush()
+
+    sample_start = datetime.combine(today, time(8, 0))
+    sample_end = sample_start + timedelta(hours=2)
+    sample_session = Session(
+        course=python,
+        teacher=teacher,
+        room=room,
+        class_group=class_a,
+        start_time=sample_start,
+        end_time=sample_end,
+    )
+    db.session.add(sample_session)
     db.session.commit()

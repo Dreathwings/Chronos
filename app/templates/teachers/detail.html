@@ -118,26 +118,8 @@
     const calendarEl = document.getElementById('teacher-calendar');
     const events = {{ events_json|safe }};
     const unavailableBackgrounds = {{ unavailability_backgrounds_json|safe }};
-    const calendar = new FullCalendar.Calendar(calendarEl, {
-      initialView: 'timeGridWeek',
-      locale: 'fr',
-      slotMinTime: '07:00:00',
-      slotMaxTime: '19:00:00',
-      firstDay: 1,
-      weekends: false,
-      events,
-      headerToolbar: {
-        left: 'prev,next today',
-        center: 'title',
-        right: 'dayGridMonth,timeGridWeek,timeGridDay'
-      },
-    });
-    if (window.CHRONOS_PAUSE_BACKGROUNDS) {
-      calendar.addEventSource(window.CHRONOS_PAUSE_BACKGROUNDS);
-    }
-    if (Array.isArray(unavailableBackgrounds) && unavailableBackgrounds.length) {
-      calendar.addEventSource(unavailableBackgrounds);
-    }
+    const extras = Array.isArray(unavailableBackgrounds) ? [unavailableBackgrounds] : [];
+    const calendar = window.createChronosCalendar(calendarEl, events, extras);
     calendar.render();
   });
 </script>

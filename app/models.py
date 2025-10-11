@@ -57,6 +57,14 @@ course_teacher = Table(
 )
 
 
+course_class = Table(
+    "course_class",
+    db.Model.metadata,
+    Column("course_id", ForeignKey("course.id"), primary_key=True),
+    Column("class_group_id", ForeignKey("class_group.id"), primary_key=True),
+)
+
+
 def default_start_time() -> time:
     return time(8, 0)
 
@@ -158,6 +166,7 @@ class Course(db.Model, TimeStampedModel):
     teachers: Mapped[List[Teacher]] = relationship(secondary=course_teacher, back_populates="courses")
     softwares: Mapped[List["Software"]] = relationship(secondary=course_software, back_populates="courses")
     equipments: Mapped[List["Equipment"]] = relationship(secondary=course_equipment, back_populates="courses")
+    classes: Mapped[List["ClassGroup"]] = relationship(secondary=course_class, back_populates="courses")
     sessions: Mapped[List["Session"]] = relationship(back_populates="course", cascade="all, delete-orphan")
 
     __table_args__ = (
@@ -174,28 +183,33 @@ class Session(db.Model, TimeStampedModel):
     course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), nullable=False)
     teacher_id: Mapped[int] = mapped_column(ForeignKey("teacher.id"), nullable=False)
     room_id: Mapped[int] = mapped_column(ForeignKey("room.id"), nullable=False)
+    class_group_id: Mapped[int] = mapped_column(ForeignKey("class_group.id"), nullable=False)
     start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="sessions")
     teacher: Mapped[Teacher] = relationship(back_populates="sessions")
     room: Mapped[Room] = relationship(back_populates="sessions")
+    class_group: Mapped["ClassGroup"] = relationship(back_populates="sessions")
 
     __table_args__ = (
         CheckConstraint("end_time > start_time", name="chk_session_time_order"),
         UniqueConstraint("room_id", "start_time", name="uq_room_start_time"),
+        UniqueConstraint("class_group_id", "start_time", name="uq_class_start_time"),
     )
 
     def as_event(self) -> dict[str, str]:
+        title = f"{self.course.name} — {self.class_group.name} ({self.room.name})"
         return {
             "id": str(self.id),
-            "title": f"{self.course.name} — {self.room.name}",
+            "title": title,
             "start": self.start_time.isoformat(),
             "end": self.end_time.isoformat(),
             "extendedProps": {
                 "teacher": self.teacher.name,
                 "course": self.course.name,
                 "room": self.room.name,
+                "class_group": self.class_group.name,
             },
         }
 
@@ -244,3 +258,49 @@ class TeacherAvailability(db.Model, TimeStampedModel):
             f"TeacherAvailability<Teacher {self.teacher_id} day {self.weekday} "
             f"{self.start_time}-{self.end_time}>"
         )
+
+
+class ClassGroup(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
+    size: Mapped[int] = mapped_column(Integer, default=20)
+    unavailable_dates: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    courses: Mapped[List[Course]] = relationship(secondary=course_class, back_populates="classes")
+    sessions: Mapped[List[Session]] = relationship(
+        back_populates="class_group", cascade="all, delete-orphan"
+    )
+
+    @staticmethod
+    def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime) -> bool:
+        return max(a_start, b_start) < min(a_end, b_end)
+
+    def _unavailable_set(self) -> set[str]:
+        if not self.unavailable_dates:
+            return set()
+        tokens = self.unavailable_dates.replace("\n", ",").split(",")
+        return {token.strip() for token in tokens if token.strip()}
+
+    def is_available_on(self, day: datetime | date) -> bool:
+        target_date = day.date() if isinstance(day, datetime) else day
+        if target_date.weekday() >= 5:
+            return False
+        if target_date.strftime("%Y-%m-%d") in self._unavailable_set():
+            return False
+        return True
+
+    def is_available_during(
+        self, start: datetime, end: datetime, *, ignore_session_id: Optional[int] = None
+    ) -> bool:
+        if not self.is_available_on(start):
+            return False
+        for session in self.sessions:
+            if ignore_session_id and session.id == ignore_session_id:
+                continue
+            if self._overlaps(session.start_time, session.end_time, start, end):
+                return False
+        return True
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"ClassGroup<{self.id} {self.name}>"

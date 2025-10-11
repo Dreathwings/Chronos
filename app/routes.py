@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
 from . import db
 from .models import (
+    ClassGroup,
     Course,
     Equipment,
     Room,
@@ -16,20 +17,72 @@ from .models import (
     Teacher,
     TeacherAvailability,
 )
-from .scheduler import SCHEDULE_SLOTS, START_TIMES, fits_in_windows, generate_schedule
+from .scheduler import (
+    SCHEDULE_SLOTS,
+    START_TIMES,
+    fits_in_windows,
+    generate_schedule,
+    overlaps,
+)
 
 bp = Blueprint("main", __name__)
 
 
 WORKDAY_START = time(hour=7)
 WORKDAY_END = time(hour=19)
-BACKGROUND_BLOCK_COLOR = "#adb5bd"
+BACKGROUND_BLOCK_COLOR = "#6c757d"
 
 SCHEDULE_SLOT_LOOKUP = {start: end for start, end in SCHEDULE_SLOTS}
 SCHEDULE_SLOT_CHOICES = [
     {"start": start.strftime("%H:%M"), "end": end.strftime("%H:%M")}
     for start, end in SCHEDULE_SLOTS
 ]
+
+
+def _build_default_backgrounds() -> list[dict[str, object]]:
+    spans: list[tuple[time, time]] = []
+    pointer = WORKDAY_START
+    for slot_start, slot_end in SCHEDULE_SLOTS:
+        slot_start = max(slot_start, WORKDAY_START)
+        slot_end = min(slot_end, WORKDAY_END)
+        if slot_start > pointer:
+            spans.append((pointer, slot_start))
+        if slot_end > pointer:
+            pointer = slot_end
+    if pointer < WORKDAY_END:
+        spans.append((pointer, WORKDAY_END))
+
+    backgrounds: list[dict[str, object]] = []
+    for span_start, span_end in spans:
+        backgrounds.append(
+            {
+                "daysOfWeek": [1, 2, 3, 4, 5],
+                "startTime": span_start.strftime("%H:%M:%S"),
+                "endTime": span_end.strftime("%H:%M:%S"),
+                "display": "background",
+                "overlap": False,
+                "color": BACKGROUND_BLOCK_COLOR,
+            }
+        )
+    return backgrounds
+
+
+DEFAULT_WORKDAY_BACKGROUNDS = _build_default_backgrounds()
+
+
+def _parse_unavailability_tokens(raw: str | None) -> set[str]:
+    if not raw:
+        return set()
+    tokens = raw.replace("\n", ",").split(",")
+    return {token.strip() for token in tokens if token.strip()}
+
+
+@bp.app_context_processor
+def inject_calendar_defaults() -> dict[str, object]:
+    return {
+        "default_backgrounds_json": json.dumps(DEFAULT_WORKDAY_BACKGROUNDS),
+        "background_block_color": BACKGROUND_BLOCK_COLOR,
+    }
 
 
 def _parse_date(value: str | None) -> datetime.date | None:
@@ -105,27 +158,81 @@ def _teacher_unavailability_backgrounds(teacher: Teacher) -> list[dict[str, obje
                 }
             )
 
-    if teacher.unavailable_dates:
-        raw_dates = teacher.unavailable_dates.replace("\n", ",")
-        for token in raw_dates.split(","):
-            token = token.strip()
-            if not token:
-                continue
-            try:
-                day = datetime.strptime(token, "%Y-%m-%d").date()
-            except ValueError:
-                continue
-            backgrounds.append(
-                {
-                    "start": day.strftime("%Y-%m-%dT00:00:00"),
-                    "end": (day + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"),
-                    "display": "background",
-                    "overlap": False,
-                    "color": BACKGROUND_BLOCK_COLOR,
-                }
-            )
+    for token in _parse_unavailability_tokens(teacher.unavailable_dates):
+        try:
+            day = datetime.strptime(token, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        backgrounds.append(
+            {
+                "start": day.strftime("%Y-%m-%dT00:00:00"),
+                "end": (day + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"),
+                "display": "background",
+                "overlap": False,
+                "color": BACKGROUND_BLOCK_COLOR,
+            }
+        )
 
     return backgrounds
+
+
+def _class_unavailability_backgrounds(class_group: ClassGroup) -> list[dict[str, object]]:
+    backgrounds: list[dict[str, object]] = []
+    for token in _parse_unavailability_tokens(class_group.unavailable_dates):
+        try:
+            day = datetime.strptime(token, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        backgrounds.append(
+            {
+                "start": day.strftime("%Y-%m-%dT00:00:00"),
+                "end": (day + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"),
+                "display": "background",
+                "overlap": False,
+                "color": BACKGROUND_BLOCK_COLOR,
+            }
+        )
+    return backgrounds
+
+
+def _has_conflict(
+    sessions: list[Session],
+    start: datetime,
+    end: datetime,
+    *,
+    ignore_session_id: int | None = None,
+) -> bool:
+    for session in sessions:
+        if ignore_session_id and session.id == ignore_session_id:
+            continue
+        if overlaps(session.start_time, session.end_time, start, end):
+            return True
+    return False
+
+
+def _validate_session_constraints(
+    course: Course,
+    teacher: Teacher,
+    room: Room,
+    class_group: ClassGroup,
+    start_dt: datetime,
+    end_dt: datetime,
+    *,
+    ignore_session_id: int | None = None,
+) -> str | None:
+    if start_dt.weekday() >= 5:
+        return "Les séances doivent être planifiées du lundi au vendredi."
+    if not fits_in_windows(start_dt.time(), end_dt.time()):
+        return "Le créneau choisi dépasse les fenêtres horaires autorisées."
+    if not teacher.is_available_during(start_dt, end_dt):
+        return "L'enseignant n'est pas disponible sur ce créneau."
+    if _has_conflict(teacher.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
+        return "L'enseignant a déjà une séance sur ce créneau."
+    if _has_conflict(room.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
+        return "La salle est déjà réservée sur ce créneau."
+    if not class_group.is_available_during(start_dt, end_dt, ignore_session_id=ignore_session_id):
+        return "La classe est indisponible sur ce créneau."
+    return None
 
 
 @bp.route("/", methods=["GET", "POST"])
@@ -133,12 +240,18 @@ def dashboard():
     courses = Course.query.order_by(Course.priority.desc()).all()
     teachers = Teacher.query.order_by(Teacher.name).all()
     rooms = Room.query.order_by(Room.name).all()
+    class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
 
     if request.method == "POST":
         if request.form.get("form") == "quick-session":
             course_id = int(request.form["course_id"])
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
+            class_group_id_raw = request.form.get("class_group_id")
+            if not class_group_id_raw:
+                flash("Sélectionnez une classe pour la séance", "danger")
+                return redirect(url_for("main.dashboard"))
+            class_group_id = int(class_group_id_raw)
             date_str = request.form["date"]
             start_time_str = request.form["start_time"]
             course = Course.query.get_or_404(course_id)
@@ -147,17 +260,23 @@ def dashboard():
             duration = int(duration_raw) if duration_raw else course.session_length_hours
             start_dt = _parse_datetime(date_str, start_time_str)
             end_dt = start_dt + timedelta(hours=duration)
-            if not fits_in_windows(start_dt.time(), end_dt.time()):
-                flash("Le créneau choisi dépasse les fenêtres horaires autorisées", "danger")
+            class_group = ClassGroup.query.get_or_404(class_group_id)
+            if class_group not in course.classes:
+                flash("Associez la classe au cours avant de planifier", "danger")
                 return redirect(url_for("main.dashboard"))
-            if not teacher.is_available_during(start_dt, end_dt):
-                flash("L'enseignant n'est pas disponible sur ce créneau", "danger")
+            room = Room.query.get_or_404(room_id)
+            error_message = _validate_session_constraints(
+                course, teacher, room, class_group, start_dt, end_dt
+            )
+            if error_message:
+                flash(error_message, "danger")
                 return redirect(url_for("main.dashboard"))
 
             session = Session(
                 course_id=course_id,
                 teacher_id=teacher_id,
                 room_id=room_id,
+                class_group_id=class_group_id,
                 start_time=start_dt,
                 end_time=end_dt,
             )
@@ -172,6 +291,7 @@ def dashboard():
         courses=courses,
         teachers=teachers,
         rooms=rooms,
+        class_groups=class_groups,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
     )
@@ -311,6 +431,72 @@ def teacher_detail(teacher_id: int):
     )
 
 
+@bp.route("/classe", methods=["GET", "POST"])
+def classes_list():
+    if request.method == "POST":
+        action = request.form.get("form")
+        if action == "create":
+            class_group = ClassGroup(
+                name=request.form["name"],
+                size=int(request.form.get("size", 20)),
+                unavailable_dates=request.form.get("unavailable_dates"),
+                notes=request.form.get("notes"),
+            )
+            db.session.add(class_group)
+            try:
+                db.session.commit()
+                flash("Classe ajoutée", "success")
+            except IntegrityError:
+                db.session.rollback()
+                flash("Nom de classe déjà utilisé", "danger")
+        return redirect(url_for("main.classes_list"))
+
+    class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    return render_template("classes/list.html", class_groups=class_groups)
+
+
+@bp.route("/classe/<int:class_id>", methods=["GET", "POST"])
+def class_detail(class_id: int):
+    class_group = ClassGroup.query.get_or_404(class_id)
+    courses = Course.query.order_by(Course.name).all()
+    assignable_courses = [course for course in courses if class_group not in course.classes]
+
+    if request.method == "POST":
+        form_name = request.form.get("form")
+        if form_name == "update":
+            class_group.size = int(request.form.get("size", class_group.size))
+            class_group.unavailable_dates = request.form.get("unavailable_dates")
+            class_group.notes = request.form.get("notes")
+            db.session.commit()
+            flash("Classe mise à jour", "success")
+        elif form_name == "assign-course":
+            course_id = int(request.form["course_id"])
+            course = Course.query.get_or_404(course_id)
+            if class_group not in course.classes:
+                course.classes.append(class_group)
+                db.session.commit()
+                flash("Cours associé à la classe", "success")
+        elif form_name == "remove-course":
+            course_id = int(request.form["course_id"])
+            course = Course.query.get_or_404(course_id)
+            if class_group in course.classes:
+                course.classes.remove(class_group)
+                db.session.commit()
+                flash("Cours retiré de la classe", "success")
+        return redirect(url_for("main.class_detail", class_id=class_id))
+
+    events = [session.as_event() for session in class_group.sessions]
+    unavailability_backgrounds = _class_unavailability_backgrounds(class_group)
+    return render_template(
+        "classes/detail.html",
+        class_group=class_group,
+        courses=courses,
+        assignable_courses=assignable_courses,
+        events_json=json.dumps(events, ensure_ascii=False),
+        unavailability_backgrounds_json=json.dumps(unavailability_backgrounds, ensure_ascii=False),
+    )
+
+
 @bp.route("/salle", methods=["GET", "POST"])
 def rooms_list():
     equipments = Equipment.query.order_by(Equipment.name).all()
@@ -437,6 +623,7 @@ def course_detail(course_id: int):
     softwares = Software.query.order_by(Software.name).all()
     teachers = Teacher.query.order_by(Teacher.name).all()
     rooms = Room.query.order_by(Room.name).all()
+    class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -459,6 +646,12 @@ def course_detail(course_id: int):
                 for software in (Software.query.get(int(sid)) for sid in request.form.getlist("softwares"))
                 if software is not None
             ]
+            class_ids = {int(cid) for cid in request.form.getlist("classes")}
+            course.classes = [
+                class_group
+                for class_group in (ClassGroup.query.get(cid) for cid in class_ids)
+                if class_group is not None
+            ]
             teacher_ids = {int(tid) for tid in request.form.getlist("teachers")}
             course.teachers = [
                 teacher
@@ -480,17 +673,33 @@ def course_detail(course_id: int):
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
+            class_group_id = int(request.form["class_group_id"])
             start_dt = _parse_datetime(request.form["date"], request.form["start_time"])
             duration_raw = request.form.get("duration")
             duration = int(duration_raw) if duration_raw else course.session_length_hours
             end_dt = start_dt + timedelta(hours=duration)
-            if not fits_in_windows(start_dt.time(), end_dt.time()):
-                flash("Le créneau choisi dépasse les fenêtres horaires autorisées", "danger")
+            class_group = ClassGroup.query.get_or_404(class_group_id)
+            if class_group not in course.classes:
+                flash("Associez d'abord la classe au cours", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            teacher = Teacher.query.get_or_404(teacher_id)
+            room = Room.query.get_or_404(room_id)
+            error_message = _validate_session_constraints(
+                course,
+                teacher,
+                room,
+                class_group,
+                start_dt,
+                end_dt,
+            )
+            if error_message:
+                flash(error_message, "danger")
                 return redirect(url_for("main.course_detail", course_id=course_id))
             session = Session(
                 course_id=course.id,
                 teacher_id=teacher_id,
                 room_id=room_id,
+                class_group_id=class_group_id,
                 start_time=start_dt,
                 end_time=end_dt,
             )
@@ -507,6 +716,7 @@ def course_detail(course_id: int):
         softwares=softwares,
         teachers=teachers,
         rooms=rooms,
+        class_groups=class_groups,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
     )
@@ -546,3 +756,52 @@ def software_list():
 
     softwares = Software.query.order_by(Software.name).all()
     return render_template("software/list.html", softwares=softwares)
+
+
+def _parse_iso_datetime(value: str) -> datetime:
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+@bp.route("/sessions/<int:session_id>/move", methods=["POST"])
+def move_session(session_id: int):
+    session = Session.query.get_or_404(session_id)
+    payload = request.get_json(silent=True) or {}
+    start_raw = payload.get("start")
+    end_raw = payload.get("end")
+    if not start_raw or not end_raw:
+        return {"error": "Données incomplètes"}, 400
+    try:
+        start_dt = _parse_iso_datetime(start_raw)
+        end_dt = _parse_iso_datetime(end_raw)
+    except ValueError:
+        return {"error": "Format de date invalide"}, 400
+    if end_dt <= start_dt:
+        return {"error": "L'heure de fin doit être postérieure à l'heure de début"}, 400
+
+    error_message = _validate_session_constraints(
+        session.course,
+        session.teacher,
+        session.room,
+        session.class_group,
+        start_dt,
+        end_dt,
+        ignore_session_id=session.id,
+    )
+    if error_message:
+        return {"error": error_message}, 400
+
+    session.start_time = start_dt
+    session.end_time = end_dt
+    db.session.commit()
+    return {"event": session.as_event()}
+
+
+@bp.route("/sessions/<int:session_id>", methods=["DELETE"])
+def delete_session(session_id: int):
+    session = Session.query.get_or_404(session_id)
+    db.session.delete(session)
+    db.session.commit()
+    return {"status": "deleted"}
