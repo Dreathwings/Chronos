@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
@@ -19,12 +19,6 @@ from .models import (
 from .scheduler import START_TIMES, fits_in_windows, generate_schedule
 
 bp = Blueprint("main", __name__)
-
-
-def _parse_time(value: str | None) -> datetime.time | None:
-    if not value:
-        return None
-    return datetime.strptime(value, "%H:%M").time()
 
 
 def _parse_date(value: str | None) -> datetime.date | None:
@@ -124,7 +118,6 @@ def teacher_detail(teacher_id: int):
     teacher = Teacher.query.get_or_404(teacher_id)
     courses = Course.query.order_by(Course.name).all()
     assignable_courses = [course for course in courses if teacher not in course.teachers]
-    rooms = Room.query.order_by(Room.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -143,88 +136,73 @@ def teacher_detail(teacher_id: int):
                 course.teachers.append(teacher)
                 db.session.commit()
                 flash("Enseignant assigné au cours", "success")
-        elif form_name == "create-session":
-            course_id = int(request.form["course_id"])
-            room_id = int(request.form["room_id"])
-            course = Course.query.get_or_404(course_id)
-            start_dt = _parse_datetime(request.form["date"], request.form["start_time"])
-            duration_raw = request.form.get("duration")
-            duration = int(duration_raw) if duration_raw else course.session_length_hours
-            end_dt = start_dt + timedelta(hours=duration)
-            if not fits_in_windows(start_dt.time(), end_dt.time()):
-                flash("Le créneau choisi dépasse les fenêtres horaires autorisées", "danger")
-                return redirect(url_for("main.teacher_detail", teacher_id=teacher.id))
-            if not teacher.is_available_during(start_dt, end_dt):
-                flash("L'enseignant n'est pas disponible sur ce créneau", "danger")
-                return redirect(url_for("main.teacher_detail", teacher_id=teacher.id))
-            session = Session(
-                course_id=course_id,
-                teacher_id=teacher.id,
-                room_id=room_id,
-                start_time=start_dt,
-                end_time=end_dt,
-            )
-            db.session.add(session)
-            db.session.commit()
-            flash("Séance ajoutée", "success")
-        elif form_name == "add-availability":
-            weekday = int(request.form["weekday"])
-            start_time = _parse_time(request.form.get("start_time"))
-            end_time = _parse_time(request.form.get("end_time"))
-            if start_time is None or end_time is None:
-                flash("Merci de saisir des heures valides", "danger")
-                return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
-            if weekday < 0 or weekday > 6:
-                flash("Jour de la semaine invalide", "danger")
-                return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
-            if end_time <= start_time:
-                flash("L'heure de fin doit être supérieure à l'heure de début", "danger")
-                return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
-            overlap = [
-                a
-                for a in teacher.availabilities
-                if a.weekday == weekday
-                and not (a.end_time <= start_time or a.start_time >= end_time)
-            ]
-            if overlap:
-                flash("Ce créneau chevauche un créneau existant", "danger")
-                return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
-            availability = TeacherAvailability(
-                teacher=teacher,
-                weekday=weekday,
-                start_time=start_time,
-                end_time=end_time,
-            )
-            db.session.add(availability)
-            db.session.commit()
-            flash("Créneau de disponibilité ajouté", "success")
-        elif form_name == "delete-availability":
-            availability_id = int(request.form["availability_id"])
-            availability = TeacherAvailability.query.get_or_404(availability_id)
-            if availability.teacher_id != teacher.id:
-                flash("Créneau introuvable", "danger")
-            else:
+        elif form_name == "set-availability":
+            raw_slots = request.form.getlist("availability_slots")
+            slots_by_day: dict[int, set[int]] = {weekday: set() for weekday in range(5)}
+            for raw in raw_slots:
+                try:
+                    weekday_str, hour_str = raw.split("-")
+                    weekday = int(weekday_str)
+                    hour = int(hour_str)
+                except ValueError:
+                    continue
+                if weekday not in slots_by_day:
+                    continue
+                if hour < 8 or hour >= 18:
+                    continue
+                slots_by_day[weekday].add(hour)
+
+            for availability in list(teacher.availabilities):
                 db.session.delete(availability)
-                db.session.commit()
-                flash("Créneau de disponibilité supprimé", "success")
+
+            for weekday, hours in slots_by_day.items():
+                if not hours:
+                    continue
+                merged_hours = sorted(hours)
+                start_hour = merged_hours[0]
+                end_hour = start_hour + 1
+                for current_hour in merged_hours[1:]:
+                    if current_hour == end_hour:
+                        end_hour += 1
+                    else:
+                        db.session.add(
+                            TeacherAvailability(
+                                teacher=teacher,
+                                weekday=weekday,
+                                start_time=time(hour=start_hour),
+                                end_time=time(hour=end_hour),
+                            )
+                        )
+                        start_hour = current_hour
+                        end_hour = current_hour + 1
+                db.session.add(
+                    TeacherAvailability(
+                        teacher=teacher,
+                        weekday=weekday,
+                        start_time=time(hour=start_hour),
+                        end_time=time(hour=end_hour),
+                    )
+                )
+            db.session.commit()
+            flash("Disponibilités mises à jour", "success")
         return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
 
     events = [session.as_event() for session in teacher.sessions]
-    default_course_id = None
-    if teacher.courses:
-        default_course_id = teacher.courses[0].id
-    elif courses:
-        default_course_id = courses[0].id
+    selected_slots = set()
+    for availability in teacher.availabilities:
+        hour = availability.start_time.hour
+        while hour < availability.end_time.hour:
+            selected_slots.add((availability.weekday, hour))
+            hour += 1
 
     return render_template(
         "teachers/detail.html",
         teacher=teacher,
         courses=courses,
         assignable_courses=assignable_courses,
-        rooms=rooms,
         events_json=json.dumps(events, ensure_ascii=False),
-        start_times=START_TIMES,
-        default_course_id=default_course_id,
+        availability_hours=range(8, 18),
+        selected_availability_slots=selected_slots,
     )
 
 
