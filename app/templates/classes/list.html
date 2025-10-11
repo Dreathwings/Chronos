@@ -17,9 +17,28 @@
             <label class="form-label">Effectif</label>
             <input type="number" name="size" class="form-control" min="1" value="20">
           </div>
-          <div>
-            <label class="form-label">Jours d'indisponibilité (YYYY-MM-DD, séparés par des virgules)</label>
-            <textarea name="unavailable_dates" class="form-control" rows="2"></textarea>
+          <div data-chronos-unavailability>
+            <label class="form-label">Jours d'indisponibilité</label>
+            <input
+              type="hidden"
+              name="unavailable_dates"
+              value=""
+              data-role="unavailability-store"
+            >
+            <div class="input-group">
+              <input
+                type="date"
+                class="form-control"
+                data-role="unavailability-picker"
+              >
+              <button
+                class="btn btn-outline-secondary"
+                type="button"
+                data-role="unavailability-add"
+              >Ajouter</button>
+            </div>
+            <div class="form-text">Sélectionnez une date dans le calendrier puis cliquez sur «&nbsp;Ajouter&nbsp;». Utilisez la liste pour retirer une date.</div>
+            <ul class="list-group mt-2" data-role="unavailability-list"></ul>
           </div>
           <div>
             <label class="form-label">Notes</label>
