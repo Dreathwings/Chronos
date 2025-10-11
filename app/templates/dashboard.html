@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% block title %}Tableau de bord — Chronos{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-3">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Planification rapide</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="quick-session">
+          <div>
+            <label class="form-label">Cours</label>
+            <select class="form-select" name="course_id" required>
+              {% for course in courses %}
+              <option value="{{ course.id }}">{{ course.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Enseignant</label>
+            <select class="form-select" name="teacher_id" required>
+              {% for teacher in teachers %}
+              <option value="{{ teacher.id }}">{{ teacher.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Salle</label>
+            <select class="form-select" name="room_id" required>
+              {% for room in rooms %}
+              <option value="{{ room.id }}">{{ room.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Classe</label>
+            <select class="form-select" name="class_group_id" required>
+              {% for class_group in class_groups %}
+              <option value="{{ class_group.id }}">{{ class_group.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Date</label>
+            <input type="date" class="form-control" name="date" required>
+          </div>
+          <div>
+            <label class="form-label">Heure de début</label>
+            <select class="form-select" name="start_time" required>
+              {% for start_time in start_times %}
+              <option value="{{ start_time.strftime('%H:%M') }}">
+                {{ start_time.strftime('%H:%M') }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="form-label">Durée (heures)</label>
+            <input type="number" class="form-control" name="duration" min="1" value="2">
+          </div>
+          <button type="submit" class="btn btn-primary">Créer la séance</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-9">
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Calendrier global</div>
+      <div class="card-body">
+        <div id="global-calendar"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const calendarEl = document.getElementById('global-calendar');
+    const events = {{ events_json|safe }};
+    const calendar = window.createChronosCalendar(calendarEl, events);
+    calendar.render();
+  });
+</script>
+{% endblock %}

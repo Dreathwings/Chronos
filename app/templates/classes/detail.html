@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+{% block title %}{{ class_group.name }} — Classe{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-xl-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Informations</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="update">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" class="form-control" value="{{ class_group.name }}" disabled>
+          </div>
+          <div>
+            <label class="form-label">Effectif</label>
+            <input type="number" class="form-control" name="size" value="{{ class_group.size }}" min="1">
+          </div>
+          <div>
+            <label class="form-label">Jours d'indisponibilité (YYYY-MM-DD)</label>
+            <textarea name="unavailable_dates" class="form-control" rows="2">{{ class_group.unavailable_dates }}</textarea>
+          </div>
+          <div>
+            <label class="form-label">Notes</label>
+            <textarea name="notes" class="form-control" rows="3">{{ class_group.notes }}</textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </form>
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Associer un cours</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="assign-course">
+          <div>
+            <label class="form-label">Cours</label>
+            <select class="form-select" name="course_id" {% if not assignable_courses %}disabled{% endif %}>
+              {% for course in assignable_courses %}
+              <option value="{{ course.id }}">{{ course.name }}</option>
+              {% endfor %}
+            </select>
+            {% if not assignable_courses %}
+            <div class="form-text">Tous les cours disponibles sont déjà associés.</div>
+            {% endif %}
+          </div>
+          <button type="submit" class="btn btn-outline-primary" {% if not assignable_courses %}disabled{% endif %}>Associer</button>
+        </form>
+      </div>
+    </div>
+    {% if class_group.courses %}
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Cours associés</div>
+      <div class="card-body">
+        <div class="vstack gap-2">
+          {% for course in class_group.courses %}
+          <form method="post" class="d-flex justify-content-between align-items-center">
+            <span>{{ course.name }}</span>
+            <div>
+              <input type="hidden" name="form" value="remove-course">
+              <input type="hidden" name="course_id" value="{{ course.id }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Retirer</button>
+            </div>
+          </form>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  <div class="col-xl-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Calendrier de {{ class_group.name }}</div>
+      <div class="card-body">
+        <div id="class-calendar"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const calendarEl = document.getElementById('class-calendar');
+    const events = {{ events_json|safe }};
+    const backgrounds = {{ unavailability_backgrounds_json|safe }};
+    const extras = Array.isArray(backgrounds) ? [backgrounds] : [];
+    const calendar = window.createChronosCalendar(calendarEl, events, extras);
+    calendar.render();
+  });
+</script>
+{% endblock %}

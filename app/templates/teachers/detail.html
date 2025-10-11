@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+{% block title %}{{ teacher.name }} — Enseignant{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-xl-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Profil</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="update">
+          <div>
+            <label class="form-label">E-mail</label>
+            <input type="email" name="email" class="form-control" value="{{ teacher.email }}">
+          </div>
+          <div>
+            <label class="form-label">Téléphone</label>
+            <input type="text" name="phone" class="form-control" value="{{ teacher.phone }}">
+          </div>
+          <div>
+            <label class="form-label">Heures max / semaine</label>
+            <input type="number" name="max_hours_per_week" class="form-control" value="{{ teacher.max_hours_per_week }}" min="1">
+          </div>
+          <div>
+            <label class="form-label">Jours d'indisponibilité</label>
+            <textarea name="unavailable_dates" class="form-control" rows="2">{{ teacher.unavailable_dates }}</textarea>
+          </div>
+          <div>
+            <label class="form-label">Notes</label>
+            <textarea name="notes" class="form-control" rows="3">{{ teacher.notes }}</textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </form>
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Créneaux de disponibilité</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="set-availability">
+          <div class="table-responsive">
+            <table class="table table-bordered align-middle text-center availability-grid">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col" class="text-start">Créneau</th>
+                  {% for weekday, label in [(0, 'Lundi'), (1, 'Mardi'), (2, 'Mercredi'), (3, 'Jeudi'), (4, 'Vendredi')] %}
+                  <th scope="col">{{ label }}</th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for slot in availability_slots %}
+                {% set slot_label = slot.start ~ ' - ' ~ slot.end %}
+                <tr>
+                  <th scope="row" class="text-start">{{ slot_label }}</th>
+                  {% for weekday, _ in [(0, 'Lundi'), (1, 'Mardi'), (2, 'Mercredi'), (3, 'Jeudi'), (4, 'Vendredi')] %}
+                  {% set slot_value = weekday|string + '-' + slot.start %}
+                  <td>
+                    <div class="form-check justify-content-center d-flex">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        id="slot-{{ weekday }}-{{ slot.start | replace(':', '-') }}"
+                        name="availability_slots"
+                        value="{{ slot_value }}"
+                        {% if slot_value in selected_availability_slots %}checked{% endif %}
+                      >
+                    </div>
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="text-end">
+            <button type="submit" class="btn btn-outline-secondary">Enregistrer les disponibilités</button>
+          </div>
+        </form>
+        <p class="text-muted small mb-0">Sélectionnez les créneaux horaires disponibles pour cet enseignant. Les pauses communes restent grisées dans le calendrier.</p>
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Affecter un cours</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="assign-course">
+          <div>
+            <label class="form-label">Cours</label>
+            <select class="form-select" name="course_id" {% if not assignable_courses %}disabled{% endif %}>
+              {% for course in assignable_courses %}
+              <option value="{{ course.id }}">{{ course.name }}</option>
+              {% endfor %}
+            </select>
+            {% if not assignable_courses %}
+            <div class="form-text">Tous les cours disponibles sont déjà affectés.</div>
+            {% endif %}
+          </div>
+          <button type="submit" class="btn btn-outline-primary" {% if not assignable_courses %}disabled{% endif %}>Assigner</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Calendrier de {{ teacher.name }}</div>
+      <div class="card-body">
+        <div id="teacher-calendar"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const calendarEl = document.getElementById('teacher-calendar');
+    const events = {{ events_json|safe }};
+    const unavailableBackgrounds = {{ unavailability_backgrounds_json|safe }};
+    const extras = Array.isArray(unavailableBackgrounds) ? [unavailableBackgrounds] : [];
+    const calendar = window.createChronosCalendar(calendarEl, events, extras);
+    calendar.render();
+  });
+</script>
+{% endblock %}

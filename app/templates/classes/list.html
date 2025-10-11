@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block title %}Classes — Chronos{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Nouvelle classe</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="create">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" name="name" class="form-control" required>
+          </div>
+          <div>
+            <label class="form-label">Effectif</label>
+            <input type="number" name="size" class="form-control" min="1" value="20">
+          </div>
+          <div>
+            <label class="form-label">Jours d'indisponibilité (YYYY-MM-DD, séparés par des virgules)</label>
+            <textarea name="unavailable_dates" class="form-control" rows="2"></textarea>
+          </div>
+          <div>
+            <label class="form-label">Notes</label>
+            <textarea name="notes" class="form-control" rows="3"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">Ajouter</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Classes existantes</div>
+      <div class="table-responsive">
+        <table class="table table-striped align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Nom</th>
+              <th>Effectif</th>
+              <th>Cours associés</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for class_group in class_groups %}
+            <tr>
+              <td>
+                <a href="{{ url_for('main.class_detail', class_id=class_group.id) }}">
+                  {{ class_group.name }}
+                </a>
+              </td>
+              <td>{{ class_group.size }}</td>
+              <td>{{ class_group.courses|length }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
