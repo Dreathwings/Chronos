@@ -48,6 +48,57 @@
         }
       ];
       window.CHRONOS_DEFAULT_BACKGROUNDS = {{ default_backgrounds_json|safe }};
+      window.CHRONOS_SLOT_STARTS = {{ schedule_slot_starts_json|safe }};
+
+      function chronosSlotDateForDay(dayDate, timeString) {
+        const [hours, minutes, seconds] = timeString.split(':').map(function(part) {
+          return parseInt(part || '0', 10);
+        });
+        const candidate = new Date(dayDate.getTime());
+        candidate.setHours(hours || 0, minutes || 0, seconds || 0, 0);
+        return candidate;
+      }
+
+      function chronosSnapEventToSlots(event) {
+        if (!event.start) {
+          return;
+        }
+        const slotStarts = Array.isArray(window.CHRONOS_SLOT_STARTS)
+          ? window.CHRONOS_SLOT_STARTS
+          : [];
+        if (!slotStarts.length) {
+          return;
+        }
+        const originalStart = new Date(event.start.getTime());
+        const originalEnd = event.end ? new Date(event.end.getTime()) : null;
+        const duration = originalEnd ? originalEnd.getTime() - originalStart.getTime() : null;
+        const dayAnchor = new Date(originalStart.getTime());
+        dayAnchor.setHours(0, 0, 0, 0);
+
+        let bestStart = null;
+        let smallestDiff = Number.POSITIVE_INFINITY;
+        slotStarts.forEach(function(timeString) {
+          if (typeof timeString !== 'string' || !timeString.length) {
+            return;
+          }
+          const candidate = chronosSlotDateForDay(dayAnchor, timeString);
+          const diff = Math.abs(originalStart.getTime() - candidate.getTime());
+          if (diff < smallestDiff) {
+            smallestDiff = diff;
+            bestStart = candidate;
+          }
+        });
+
+        if (!bestStart) {
+          return;
+        }
+        const bestEnd = duration !== null ? new Date(bestStart.getTime() + duration) : null;
+        if (bestEnd) {
+          event.setDates(bestStart, bestEnd);
+        } else {
+          event.setStart(bestStart);
+        }
+      }
 
       function chronosCloneEvents(events) {
         if (!Array.isArray(events)) {
@@ -106,7 +157,7 @@
           slotMinTime: '07:00:00',
           slotMaxTime: '19:00:00',
           slotDuration: '01:00:00',
-          snapDuration: '01:00:00',
+          snapDuration: '00:15:00',
           firstDay: 1,
           weekends: false,
           editable: true,
@@ -118,6 +169,7 @@
           },
           events: events || [],
           eventDrop: function(info) {
+            chronosSnapEventToSlots(info.event);
             chronosUpdateSession(info.event).catch(function(error) {
               info.revert();
               window.alert(error.message || error);

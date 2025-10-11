@@ -79,9 +79,11 @@ def _parse_unavailability_tokens(raw: str | None) -> set[str]:
 
 @bp.app_context_processor
 def inject_calendar_defaults() -> dict[str, object]:
+    slot_starts = [start.strftime("%H:%M:%S") for start, _ in SCHEDULE_SLOTS]
     return {
         "default_backgrounds_json": json.dumps(DEFAULT_WORKDAY_BACKGROUNDS),
         "background_block_color": BACKGROUND_BLOCK_COLOR,
+        "schedule_slot_starts_json": json.dumps(slot_starts),
     }
 
 
