@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from sqlalchemy import select
 
 from .. import db
@@ -9,23 +17,58 @@ from ..models import Enseignant, Session
 bp = Blueprint("enseignant", __name__, url_prefix="/enseignant")
 
 
+def _payload() -> dict:
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        return data
+    return request.form.to_dict()
+
+
+def _to_int(value: object, default: int) -> int:
+    try:
+        if value is None:
+            raise ValueError
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clean_text(value: object) -> str | None:
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return value or None
+
+
+def _wants_json_response() -> bool:
+    return request.is_json or request.accept_mimetypes.best == "application/json"
+
+
 @bp.route("", methods=["GET", "POST"])
 def list_enseignants():
     if request.method == "POST":
-        nom = request.form.get("nom")
-        email = request.form.get("email")
-        max_heures = request.form.get("max_heures_semaine")
-        disponibilites = request.form.get("disponibilites")
-        indisponibilites = request.form.get("indisponibilites")
+        data = _payload()
+        nom = (data.get("nom") or "").strip()
+        if not nom:
+            if _wants_json_response():
+                return jsonify({"error": "Le nom de l'enseignant est requis."}), 400
+            flash("Le nom de l'enseignant est requis.", "danger")
+            return redirect(url_for("enseignant.list_enseignants"))
+
+        email = _clean_text(data.get("email"))
+        disponibilites = _clean_text(data.get("disponibilites"))
+        indisponibilites = _clean_text(data.get("indisponibilites"))
         enseignant = Enseignant(
             nom=nom,
-            email=email or None,
-            max_heures_semaine=int(max_heures or 20),
-            disponibilites=disponibilites or None,
-            indisponibilites=indisponibilites or None,
+            email=email,
+            max_heures_semaine=_to_int(data.get("max_heures_semaine"), 20),
+            disponibilites=disponibilites,
+            indisponibilites=indisponibilites,
         )
         db.session.add(enseignant)
         db.session.commit()
+        if _wants_json_response():
+            return jsonify({"id": enseignant.id, "nom": enseignant.nom}), 201
         flash("Enseignant créé", "success")
         return redirect(url_for("enseignant.list_enseignants"))
 
@@ -41,12 +84,24 @@ def detail_enseignant(enseignant_id: int):
         return redirect(url_for("enseignant.list_enseignants"))
 
     if request.method == "POST":
-        enseignant.nom = request.form.get("nom") or enseignant.nom
-        enseignant.email = request.form.get("email") or None
-        enseignant.max_heures_semaine = int(request.form.get("max_heures_semaine") or enseignant.max_heures_semaine)
-        enseignant.disponibilites = request.form.get("disponibilites") or None
-        enseignant.indisponibilites = request.form.get("indisponibilites") or None
+        data = _payload()
+
+        nom = (data.get("nom") or "").strip()
+        if nom:
+            enseignant.nom = nom
+
+        enseignant.email = _clean_text(data.get("email"))
+
+        enseignant.max_heures_semaine = _to_int(
+            data.get("max_heures_semaine"), enseignant.max_heures_semaine
+        )
+
+        for attr in ("disponibilites", "indisponibilites"):
+            setattr(enseignant, attr, _clean_text(data.get(attr)))
+
         db.session.commit()
+        if _wants_json_response():
+            return jsonify({"status": "updated", "id": enseignant.id})
         flash("Enseignant mis à jour", "success")
         return redirect(url_for("enseignant.detail_enseignant", enseignant_id=enseignant.id))
 

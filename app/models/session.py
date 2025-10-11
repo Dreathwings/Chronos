@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from typing import Optional
+
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .. import db
@@ -16,7 +18,7 @@ class Session(db.Model):
     fin: Mapped[datetime] = mapped_column(nullable=False)
 
     matiere: Mapped["Matiere"] = relationship(back_populates="sessions")
-    salle: Mapped["Salle" | None] = relationship(back_populates="sessions")
+    salle: Mapped[Optional["Salle"]] = relationship(back_populates="sessions")
     enseignants: Mapped[list["Enseignant"]] = relationship(
         secondary=session_enseignant,
         back_populates="sessions",
