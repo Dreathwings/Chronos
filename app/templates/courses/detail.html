@@ -76,22 +76,13 @@
                   </select>
                   <div class="form-text">Sélectionnez demi-groupes pour créer deux séances avec moitié d'effectif.</div>
                 </div>
-                {% if teachers %}
-                <div>
-                  <label class="form-label text-muted mb-1 small">Enseignant</label>
-                  <select class="form-select form-select-sm" name="class_group_teacher_{{ class_group.id }}">
-                    <option value="" {% if not link or not link.teacher_a %}selected{% endif %}>— Non défini —</option>
-                    {% for teacher in teachers %}
-                    <option value="{{ teacher.id }}" {% if link and link.teacher_a and teacher.id == link.teacher_a.id %}selected{% endif %}>{{ teacher.name }}</option>
-                    {% endfor %}
-                  </select>
-                  <div class="form-text">Le même enseignant est appliqué aux groupes A et B.</div>
-                </div>
-                {% endif %}
               </div>
             </div>
             {% endfor %}
           </div>
+          {% if course.class_links %}
+          <div class="form-text">Les enseignants sont définis depuis la section dédiée ci-dessous.</div>
+          {% endif %}
           <div>
             <label class="form-label">Équipements requis</label>
             {% for equipment in equipments %}
@@ -112,8 +103,42 @@
           </div>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </form>
+    </div>
+  </div>
+    {% if course.class_links %}
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Enseignants par classe</div>
+      <div class="card-body">
+        {% if teachers %}
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="update-class-teachers">
+          {% for link in course.class_links %}
+          {% set assigned_teacher = link.teacher_a or link.teacher_b %}
+          <div class="border rounded p-2">
+            <div class="fw-semibold">{{ link.class_group.name }}</div>
+            <div class="text-muted small mb-2">
+              {% if link.group_count == 2 %}
+              Demi-groupes A/B
+              {% else %}
+              Classe entière
+              {% endif %}
+            </div>
+            <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}">
+              <option value="" {% if not assigned_teacher %}selected{% endif %}>— Aucun enseignant —</option>
+              {% for teacher in teachers %}
+              <option value="{{ teacher.id }}" {% if assigned_teacher and teacher.id == assigned_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endfor %}
+          <button type="submit" class="btn btn-outline-secondary">Mettre à jour</button>
+        </form>
+        {% else %}
+        <p class="text-muted mb-0 small">Ajoutez des enseignants dans la liste ci-dessus pour les associer aux classes.</p>
+        {% endif %}
       </div>
     </div>
+    {% endif %}
     <div class="d-grid gap-2 mt-4">
       <form method="post">
         <input type="hidden" name="form" value="auto-schedule">

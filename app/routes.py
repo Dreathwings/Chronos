@@ -713,15 +713,10 @@ def courses_list():
                 group_count = _parse_group_count(
                     request.form.get(f"class_group_groups_{class_group.id}")
                 )
-                teacher = _parse_teacher_selection(
-                    request.form.get(f"class_group_teacher_{class_group.id}")
-                )
                 links.append(
                     CourseClassLink(
                         class_group=class_group,
                         group_count=group_count,
-                        teacher_a=teacher,
-                        teacher_b=teacher if group_count == 2 else None,
                     )
                 )
             course.class_links = links
@@ -785,15 +780,16 @@ def course_detail(course_id: int):
                 group_count = _parse_group_count(
                     request.form.get(f"class_group_groups_{class_group.id}")
                 )
-                teacher = _parse_teacher_selection(
-                    request.form.get(f"class_group_teacher_{class_group.id}")
-                )
+                existing_link = class_links_map.get(class_id)
+                existing_teacher = None
+                if existing_link is not None:
+                    existing_teacher = existing_link.teacher_a or existing_link.teacher_b
                 links.append(
                     CourseClassLink(
                         class_group=class_group,
                         group_count=group_count,
-                        teacher_a=teacher,
-                        teacher_b=teacher if group_count == 2 else None,
+                        teacher_a=existing_teacher,
+                        teacher_b=existing_teacher if group_count == 2 and existing_teacher else None,
                     )
                 )
             course.class_links = links
@@ -815,6 +811,15 @@ def course_detail(course_id: int):
                     flash("Aucune séance générée", "info")
             except ValueError as exc:
                 flash(str(exc), "danger")
+        elif form_name == "update-class-teachers":
+            for link in course.class_links:
+                teacher = _parse_teacher_selection(
+                    request.form.get(f"class_link_teacher_{link.class_group_id}")
+                )
+                link.teacher_a = teacher
+                link.teacher_b = teacher if link.group_count == 2 and teacher else None
+            db.session.commit()
+            flash("Enseignants par classe mis à jour", "success")
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
