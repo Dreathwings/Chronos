@@ -63,13 +63,38 @@
                     {{ class_group.name }} — {{ class_group.size }} étudiants
                   </label>
                 </div>
-                <div class="mt-2 ms-4">
-                  <label class="form-label text-muted mb-1 small">Répartition</label>
-                  <select class="form-select form-select-sm w-auto" name="class_group_groups_{{ class_group.id }}">
-                    <option value="1" selected>Classe entière</option>
-                    <option value="2">Demi-groupes (x2)</option>
-                  </select>
-                  <div class="form-text">Le mode demi-groupe planifie deux séances avec la moitié des étudiants.</div>
+                <div class="mt-2 ms-4 vstack gap-2">
+                  <div>
+                    <label class="form-label text-muted mb-1 small">Répartition</label>
+                    <select class="form-select form-select-sm w-auto" name="class_group_groups_{{ class_group.id }}">
+                      <option value="1" selected>Classe entière</option>
+                      <option value="2">Demi-groupes (x2)</option>
+                    </select>
+                    <div class="form-text">Le mode demi-groupe planifie deux séances avec la moitié des étudiants.</div>
+                  </div>
+                  {% if teachers %}
+                  <div class="row g-2">
+                    <div class="col-sm-6">
+                      <label class="form-label text-muted mb-1 small">Enseignant groupe A</label>
+                      <select class="form-select form-select-sm" name="class_group_teacher_{{ class_group.id }}_a">
+                        <option value="">— Non défini —</option>
+                        {% for teacher in teachers %}
+                        <option value="{{ teacher.id }}">{{ teacher.name }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="col-sm-6">
+                      <label class="form-label text-muted mb-1 small">Enseignant groupe B</label>
+                      <select class="form-select form-select-sm" name="class_group_teacher_{{ class_group.id }}_b">
+                        <option value="">— Non défini —</option>
+                        {% for teacher in teachers %}
+                        <option value="{{ teacher.id }}">{{ teacher.name }}</option>
+                        {% endfor %}
+                      </select>
+                      <div class="form-text">Utilisé uniquement pour le demi-groupe B.</div>
+                    </div>
+                  </div>
+                  {% endif %}
                 </div>
               </div>
               {% endfor %}
@@ -126,9 +151,26 @@
               <td>{{ course.priority }}</td>
               <td>
                 {% if course.class_links %}
-                <div class="vstack gap-1">
+                <div class="vstack gap-2">
                   {% for link in course.class_links %}
-                  <span>{{ link.class_group.name }}{% if link.group_count == 2 %} <span class="badge bg-info text-dark">Demi-groupes</span>{% endif %}</span>
+                  <div>
+                    <span class="fw-semibold">{{ link.class_group.name }}</span>
+                    {% if link.group_count == 2 %}
+                    <span class="badge bg-info text-dark ms-1">Demi-groupes</span>
+                    {% endif %}
+                    <ul class="list-unstyled ms-3 mb-0 small text-muted">
+                      {% for label, teacher in link.teacher_labels() %}
+                      <li>
+                        {% if label %}Groupe {{ label|upper }}{% else %}Classe entière{% endif %}
+                        {% if teacher %}
+                        — {{ teacher.name }}
+                        {% else %}
+                        — Aucun enseignant
+                        {% endif %}
+                      </li>
+                      {% endfor %}
+                    </ul>
+                  </div>
                   {% endfor %}
                 </div>
                 {% else %}

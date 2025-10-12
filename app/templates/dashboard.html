@@ -35,11 +35,14 @@
           </div>
           <div>
             <label class="form-label">Classe</label>
-            <select class="form-select" name="class_group_id" required>
+            <select class="form-select" name="class_group_choice" required>
               {% for class_group in class_groups %}
-              <option value="{{ class_group.id }}">{{ class_group.name }}</option>
+              <option value="{{ class_group.id }}:">{{ class_group.name }} — classe entière</option>
+              <option value="{{ class_group.id }}:A">{{ class_group.name }} — groupe A</option>
+              <option value="{{ class_group.id }}:B">{{ class_group.name }} — groupe B</option>
               {% endfor %}
             </select>
+            <div class="form-text">Sélectionnez le groupe A ou B pour les cours en demi-groupes.</div>
           </div>
           <div>
             <label class="form-label">Date</label>

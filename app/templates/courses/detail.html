@@ -67,13 +67,38 @@
                   {{ class_group.name }} — {{ class_group.size }} étudiants
                 </label>
               </div>
-              <div class="mt-2 ms-4">
-                <label class="form-label text-muted mb-1 small">Répartition</label>
-                <select class="form-select form-select-sm w-auto" name="class_group_groups_{{ class_group.id }}">
-                  <option value="1" {% if not link or link.group_count == 1 %}selected{% endif %}>Classe entière</option>
-                  <option value="2" {% if link and link.group_count == 2 %}selected{% endif %}>Demi-groupes (x2)</option>
-                </select>
-                <div class="form-text">Sélectionnez demi-groupes pour créer deux séances avec moitié d'effectif.</div>
+              <div class="mt-2 ms-4 vstack gap-2">
+                <div>
+                  <label class="form-label text-muted mb-1 small">Répartition</label>
+                  <select class="form-select form-select-sm w-auto" name="class_group_groups_{{ class_group.id }}">
+                    <option value="1" {% if not link or link.group_count == 1 %}selected{% endif %}>Classe entière</option>
+                    <option value="2" {% if link and link.group_count == 2 %}selected{% endif %}>Demi-groupes (x2)</option>
+                  </select>
+                  <div class="form-text">Sélectionnez demi-groupes pour créer deux séances avec moitié d'effectif.</div>
+                </div>
+                {% if teachers %}
+                <div class="row g-2">
+                  <div class="col-sm-6">
+                    <label class="form-label text-muted mb-1 small">Enseignant groupe A</label>
+                    <select class="form-select form-select-sm" name="class_group_teacher_{{ class_group.id }}_a">
+                      <option value="" {% if not link or not link.teacher_a %}selected{% endif %}>— Non défini —</option>
+                      {% for teacher in teachers %}
+                      <option value="{{ teacher.id }}" {% if link and link.teacher_a and teacher.id == link.teacher_a.id %}selected{% endif %}>{{ teacher.name }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-6">
+                    <label class="form-label text-muted mb-1 small">Enseignant groupe B</label>
+                    <select class="form-select form-select-sm" name="class_group_teacher_{{ class_group.id }}_b">
+                      <option value="" {% if not link or not link.teacher_b %}selected{% endif %}>— Non défini —</option>
+                      {% for teacher in teachers %}
+                      <option value="{{ teacher.id }}" {% if link and link.teacher_b and teacher.id == link.teacher_b.id %}selected{% endif %}>{{ teacher.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <div class="form-text">Sélectionnez uniquement si le cours est en demi-groupes.</div>
+                  </div>
+                </div>
+                {% endif %}
               </div>
             </div>
             {% endfor %}
@@ -132,11 +157,16 @@
           </div>
           <div class="col-md-4">
             <label class="form-label">Classe</label>
-            <select class="form-select" name="class_group_id">
+            <select class="form-select" name="class_group_choice">
               {% for link in course.class_links %}
-              <option value="{{ link.class_group.id }}">
-                {{ link.class_group.name }}{% if link.group_count == 2 %} — demi-groupes{% endif %}
-              </option>
+                {% for subgroup_label in link.group_labels() %}
+                {% set value = link.class_group.id ~ ':' ~ (subgroup_label if subgroup_label else '') %}
+                {% set assigned_teacher = link.teacher_for_label(subgroup_label) %}
+                <option value="{{ value }}">
+                  {{ link.class_group.name }} — {% if subgroup_label %}groupe {{ subgroup_label|upper }}{% else %}classe entière{% endif %}
+                  {% if assigned_teacher %}( {{ assigned_teacher.name }} ){% else %}( Aucun enseignant ){% endif %}
+                </option>
+                {% endfor %}
               {% endfor %}
             </select>
           </div>

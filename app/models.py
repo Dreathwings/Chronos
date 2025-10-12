@@ -191,6 +191,12 @@ class Course(db.Model, TimeStampedModel):
         link = self.class_link_for(class_group)
         return link.group_count if link else 1
 
+    def group_labels_for(self, class_group: "ClassGroup" | int) -> list[str | None]:
+        link = self.class_link_for(class_group)
+        if link is None:
+            return [None]
+        return link.group_labels()
+
     def capacity_needed_for(self, class_group: "ClassGroup" | int) -> int:
         link = self.class_link_for(class_group)
         if isinstance(class_group, int):
@@ -211,6 +217,7 @@ class Session(db.Model, TimeStampedModel):
     teacher_id: Mapped[int] = mapped_column(ForeignKey("teacher.id"), nullable=False)
     room_id: Mapped[int] = mapped_column(ForeignKey("room.id"), nullable=False)
     class_group_id: Mapped[int] = mapped_column(ForeignKey("class_group.id"), nullable=False)
+    subgroup_label: Mapped[Optional[str]] = mapped_column(String(1))
     start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
@@ -226,7 +233,8 @@ class Session(db.Model, TimeStampedModel):
     )
 
     def as_event(self) -> dict[str, str]:
-        title = f"{self.course.name} — {self.class_group.name} ({self.room.name})"
+        group_suffix = f" — groupe {self.subgroup_label}" if self.subgroup_label else ""
+        title = f"{self.course.name} — {self.class_group.name}{group_suffix} ({self.room.name})"
         return {
             "id": str(self.id),
             "title": title,
@@ -237,6 +245,7 @@ class Session(db.Model, TimeStampedModel):
                 "course": self.course.name,
                 "room": self.room.name,
                 "class_group": self.class_group.name,
+                "subgroup": self.subgroup_label,
             },
         }
 
@@ -348,9 +357,13 @@ class CourseClassLink(db.Model):
     course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), primary_key=True)
     class_group_id: Mapped[int] = mapped_column(ForeignKey("class_group.id"), primary_key=True)
     group_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    teacher_a_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teacher.id"))
+    teacher_b_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teacher.id"))
 
     course: Mapped[Course] = relationship(back_populates="class_links")
     class_group: Mapped[ClassGroup] = relationship(back_populates="course_links")
+    teacher_a: Mapped[Optional[Teacher]] = relationship("Teacher", foreign_keys=[teacher_a_id])
+    teacher_b: Mapped[Optional[Teacher]] = relationship("Teacher", foreign_keys=[teacher_b_id])
 
     __table_args__ = (
         CheckConstraint("group_count >= 1 AND group_count <= 2", name="chk_course_class_group_count"),
@@ -362,6 +375,23 @@ class CourseClassLink(db.Model):
 
     def group_label(self) -> str:
         return "Demi-groupes" if self.is_half_group else "Classe entière"
+
+    def group_labels(self) -> list[str | None]:
+        if self.group_count == 2:
+            return ["A", "B"]
+        return [None]
+
+    def teacher_for_label(self, subgroup_label: str | None) -> Optional[Teacher]:
+        if self.group_count == 1:
+            return self.teacher_a
+        if subgroup_label and subgroup_label.upper() == "B":
+            return self.teacher_b or self.teacher_a
+        return self.teacher_a
+
+    def teacher_labels(self) -> list[tuple[str, Optional[Teacher]]]:
+        if self.group_count == 2:
+            return [("A", self.teacher_a), ("B", self.teacher_b or self.teacher_a)]
+        return [("", self.teacher_a)]
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return (

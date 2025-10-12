@@ -207,6 +207,28 @@ def _parse_group_count(raw_value: str | None) -> int:
     return 2 if parsed >= 2 else 1
 
 
+def _parse_teacher_selection(raw_value: str | None) -> Teacher | None:
+    if not raw_value:
+        return None
+    try:
+        teacher_id = int(raw_value)
+    except (TypeError, ValueError):
+        return None
+    return Teacher.query.get(teacher_id)
+
+
+def _parse_class_group_choice(raw_value: str | None) -> tuple[int, str | None] | None:
+    if not raw_value:
+        return None
+    class_part, _, label_part = raw_value.partition(":")
+    try:
+        class_id = int(class_part)
+    except ValueError:
+        return None
+    label = label_part.strip().upper() if label_part else ""
+    return class_id, (label or None)
+
+
 def _has_conflict(
     sessions: list[Session],
     start: datetime,
@@ -271,11 +293,11 @@ def dashboard():
             course_id = int(request.form["course_id"])
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
-            class_group_id_raw = request.form.get("class_group_id")
-            if not class_group_id_raw:
+            class_choice = _parse_class_group_choice(request.form.get("class_group_choice"))
+            if class_choice is None:
                 flash("Sélectionnez une classe pour la séance", "danger")
                 return redirect(url_for("main.dashboard"))
-            class_group_id = int(class_group_id_raw)
+            class_group_id, subgroup_label = class_choice
             date_str = request.form["date"]
             start_time_str = request.form["start_time"]
             course = Course.query.get_or_404(course_id)
@@ -287,6 +309,14 @@ def dashboard():
             class_group = ClassGroup.query.get_or_404(class_group_id)
             if class_group not in course.classes:
                 flash("Associez la classe au cours avant de planifier", "danger")
+                return redirect(url_for("main.dashboard"))
+            link = course.class_link_for(class_group)
+            if link is None:
+                flash("Associez la classe au cours avant de planifier", "danger")
+                return redirect(url_for("main.dashboard"))
+            valid_labels = {label or None for label in link.group_labels()}
+            if subgroup_label not in valid_labels:
+                flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
                 return redirect(url_for("main.dashboard"))
             room = Room.query.get_or_404(room_id)
             error_message = _validate_session_constraints(
@@ -301,6 +331,7 @@ def dashboard():
                 teacher_id=teacher_id,
                 room_id=room_id,
                 class_group_id=class_group_id,
+                subgroup_label=subgroup_label,
                 start_time=start_dt,
                 end_time=end_dt,
             )
@@ -498,6 +529,7 @@ def class_detail(class_id: int):
     class_group = ClassGroup.query.get_or_404(class_id)
     courses = Course.query.order_by(Course.name).all()
     assignable_courses = [course for course in courses if class_group not in course.classes]
+    teachers = Teacher.query.order_by(Teacher.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -512,8 +544,19 @@ def class_detail(class_id: int):
             course = Course.query.get_or_404(course_id)
             if class_group not in course.classes:
                 group_count = _parse_group_count(request.form.get("group_count"))
+                teacher_a = _parse_teacher_selection(request.form.get("teacher_a"))
+                teacher_b = (
+                    _parse_teacher_selection(request.form.get("teacher_b"))
+                    if group_count == 2
+                    else None
+                )
                 course.class_links.append(
-                    CourseClassLink(class_group=class_group, group_count=group_count)
+                    CourseClassLink(
+                        class_group=class_group,
+                        group_count=group_count,
+                        teacher_a=teacher_a,
+                        teacher_b=teacher_b if group_count == 2 else None,
+                    )
                 )
                 db.session.commit()
                 flash("Cours associé à la classe", "success")
@@ -534,6 +577,7 @@ def class_detail(class_id: int):
         class_group=class_group,
         courses=courses,
         assignable_courses=assignable_courses,
+        teachers=teachers,
         events_json=json.dumps(events, ensure_ascii=False),
         unavailability_backgrounds_json=json.dumps(unavailability_backgrounds, ensure_ascii=False),
     )
@@ -616,6 +660,7 @@ def courses_list():
     equipments = Equipment.query.order_by(Equipment.name).all()
     softwares = Software.query.order_by(Software.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    teachers = Teacher.query.order_by(Teacher.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -642,18 +687,33 @@ def courses_list():
                 if software is not None
             ]
             selected_class_ids = {int(cid) for cid in request.form.getlist("classes")}
-            course.class_links = [
-                CourseClassLink(
-                    class_group=class_group,
-                    group_count=_parse_group_count(
-                        request.form.get(f"class_group_groups_{class_group.id}")
-                    ),
+            links: list[CourseClassLink] = []
+            for class_id in selected_class_ids:
+                class_group = ClassGroup.query.get(class_id)
+                if class_group is None:
+                    continue
+                group_count = _parse_group_count(
+                    request.form.get(f"class_group_groups_{class_group.id}")
                 )
-                for class_group in (
-                    ClassGroup.query.get(class_id) for class_id in selected_class_ids
+                teacher_a = _parse_teacher_selection(
+                    request.form.get(f"class_group_teacher_{class_group.id}_a")
                 )
-                if class_group is not None
-            ]
+                teacher_b = (
+                    _parse_teacher_selection(
+                        request.form.get(f"class_group_teacher_{class_group.id}_b")
+                    )
+                    if group_count == 2
+                    else None
+                )
+                links.append(
+                    CourseClassLink(
+                        class_group=class_group,
+                        group_count=group_count,
+                        teacher_a=teacher_a,
+                        teacher_b=teacher_b if group_count == 2 else None,
+                    )
+                )
+            course.class_links = links
             db.session.add(course)
             try:
                 db.session.commit()
@@ -670,6 +730,7 @@ def courses_list():
         equipments=equipments,
         softwares=softwares,
         class_groups=class_groups,
+        teachers=teachers,
     )
 
 
@@ -705,16 +766,33 @@ def course_detail(course_id: int):
                 if software is not None
             ]
             class_ids = {int(cid) for cid in request.form.getlist("classes")}
-            course.class_links = [
-                CourseClassLink(
-                    class_group=class_group,
-                    group_count=_parse_group_count(
-                        request.form.get(f"class_group_groups_{class_group.id}")
-                    ),
+            links: list[CourseClassLink] = []
+            for class_id in class_ids:
+                class_group = ClassGroup.query.get(class_id)
+                if class_group is None:
+                    continue
+                group_count = _parse_group_count(
+                    request.form.get(f"class_group_groups_{class_group.id}")
                 )
-                for class_group in (ClassGroup.query.get(cid) for cid in class_ids)
-                if class_group is not None
-            ]
+                teacher_a = _parse_teacher_selection(
+                    request.form.get(f"class_group_teacher_{class_group.id}_a")
+                )
+                teacher_b = (
+                    _parse_teacher_selection(
+                        request.form.get(f"class_group_teacher_{class_group.id}_b")
+                    )
+                    if group_count == 2
+                    else None
+                )
+                links.append(
+                    CourseClassLink(
+                        class_group=class_group,
+                        group_count=group_count,
+                        teacher_a=teacher_a,
+                        teacher_b=teacher_b if group_count == 2 else None,
+                    )
+                )
+            course.class_links = links
             teacher_ids = {int(tid) for tid in request.form.getlist("teachers")}
             course.teachers = [
                 teacher
@@ -736,7 +814,11 @@ def course_detail(course_id: int):
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
-            class_group_id = int(request.form["class_group_id"])
+            class_choice = _parse_class_group_choice(request.form.get("class_group_choice"))
+            if class_choice is None:
+                flash("Sélectionnez un groupe valide pour la classe", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            class_group_id, subgroup_label = class_choice
             start_dt = _parse_datetime(request.form["date"], request.form["start_time"])
             duration_raw = request.form.get("duration")
             duration = int(duration_raw) if duration_raw else course.session_length_hours
@@ -744,6 +826,14 @@ def course_detail(course_id: int):
             class_group = ClassGroup.query.get_or_404(class_group_id)
             if class_group not in course.classes:
                 flash("Associez d'abord la classe au cours", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            link = course.class_link_for(class_group)
+            if link is None:
+                flash("Associez d'abord la classe au cours", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            valid_labels = {label or None for label in link.group_labels()}
+            if subgroup_label not in valid_labels:
+                flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
                 return redirect(url_for("main.course_detail", course_id=course_id))
             teacher = Teacher.query.get_or_404(teacher_id)
             room = Room.query.get_or_404(room_id)
@@ -763,6 +853,7 @@ def course_detail(course_id: int):
                 teacher_id=teacher_id,
                 room_id=room_id,
                 class_group_id=class_group_id,
+                subgroup_label=subgroup_label,
                 start_time=start_dt,
                 end_time=end_dt,
             )
