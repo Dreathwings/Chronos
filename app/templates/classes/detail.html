@@ -53,26 +53,15 @@
             </select>
           </div>
           {% if teachers %}
-          <div class="row g-2">
-            <div class="col-sm-6">
-              <label class="form-label text-muted mb-1 small">Enseignant groupe A</label>
-              <select class="form-select" name="teacher_a" {% if not assignable_courses %}disabled{% endif %}>
-                <option value="">— Non défini —</option>
-                {% for teacher in teachers %}
-                <option value="{{ teacher.id }}">{{ teacher.name }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-sm-6">
-              <label class="form-label text-muted mb-1 small">Enseignant groupe B</label>
-              <select class="form-select" name="teacher_b" {% if not assignable_courses %}disabled{% endif %}>
-                <option value="">— Non défini —</option>
-                {% for teacher in teachers %}
-                <option value="{{ teacher.id }}">{{ teacher.name }}</option>
-                {% endfor %}
-              </select>
-              <div class="form-text">Utilisé lorsque le cours est en demi-groupes.</div>
-            </div>
+          <div>
+            <label class="form-label text-muted mb-1 small">Enseignant</label>
+            <select class="form-select" name="teacher" {% if not assignable_courses %}disabled{% endif %}>
+              <option value="">— Non défini —</option>
+              {% for teacher in teachers %}
+              <option value="{{ teacher.id }}">{{ teacher.name }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Le même enseignant couvrira les groupes A et B.</div>
           </div>
           {% endif %}
           <button type="submit" class="btn btn-outline-primary" {% if not assignable_courses %}disabled{% endif %}>Associer</button>

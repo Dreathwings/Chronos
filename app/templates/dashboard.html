@@ -35,14 +35,24 @@
           </div>
           <div>
             <label class="form-label">Classe</label>
-            <select class="form-select" name="class_group_choice" required>
-              {% for class_group in class_groups %}
-              <option value="{{ class_group.id }}:">{{ class_group.name }} — classe entière</option>
-              <option value="{{ class_group.id }}:A">{{ class_group.name }} — groupe A</option>
-              <option value="{{ class_group.id }}:B">{{ class_group.name }} — groupe B</option>
-              {% endfor %}
+            {% set default_course = courses[0] if courses else None %}
+            {% set default_options = course_class_options.get(default_course.id) if default_course else [] %}
+            <select class="form-select" name="class_group_choice" id="quick-class-select" {% if not default_options %}disabled{% else %}required{% endif %}>
+              {% if default_options %}
+                {% for option in default_options %}
+                <option value="{{ option.value }}" {% if loop.first %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+              {% else %}
+                <option value="" disabled selected>Aucune classe disponible</option>
+              {% endif %}
             </select>
-            <div class="form-text">Sélectionnez le groupe A ou B pour les cours en demi-groupes.</div>
+            <div class="form-text" id="class-help">
+              {% if default_options %}
+              Sélectionnez le groupe A ou B pour les cours en demi-groupes.
+              {% else %}
+              Associez des classes au cours sélectionné pour le planifier ici.
+              {% endif %}
+            </div>
           </div>
           <div>
             <label class="form-label">Date</label>
@@ -62,7 +72,7 @@
             <label class="form-label">Durée (heures)</label>
             <input type="number" class="form-control" name="duration" min="1" value="2">
           </div>
-          <button type="submit" class="btn btn-primary">Créer la séance</button>
+          <button type="submit" class="btn btn-primary" id="quick-session-submit" {% if not default_options %}disabled{% endif %}>Créer la séance</button>
         </form>
       </div>
     </div>
@@ -85,6 +95,62 @@
     const events = {{ events_json|safe }};
     const calendar = window.createChronosCalendar(calendarEl, events);
     calendar.render();
+
+    const courseClasses = {{ course_class_options_json|safe }};
+    const courseSelect = document.querySelector('select[name="course_id"]');
+    const classSelect = document.getElementById('quick-class-select');
+    const submitButton = document.getElementById('quick-session-submit');
+    const helpText = document.getElementById('class-help');
+
+    function refreshClassChoices() {
+      if (!courseSelect || !classSelect) {
+        return;
+      }
+      const courseId = courseSelect.value;
+      const options = courseClasses[courseId] || [];
+      classSelect.innerHTML = '';
+
+      if (!options.length) {
+        classSelect.disabled = true;
+        if (submitButton) {
+          submitButton.disabled = true;
+        }
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        placeholder.textContent = 'Aucune classe disponible';
+        classSelect.appendChild(placeholder);
+        if (helpText) {
+          helpText.textContent = 'Associez des classes au cours sélectionné pour le planifier ici.';
+        }
+        return;
+      }
+
+      classSelect.disabled = false;
+      if (submitButton) {
+        submitButton.disabled = false;
+      }
+
+      options.forEach((option, index) => {
+        const optionEl = document.createElement('option');
+        optionEl.value = option.value;
+        optionEl.textContent = option.label;
+        if (index === 0) {
+          optionEl.selected = true;
+        }
+        classSelect.appendChild(optionEl);
+      });
+
+      if (helpText) {
+        helpText.textContent = 'Sélectionnez le groupe A ou B pour les cours en demi-groupes.';
+      }
+    }
+
+    if (courseSelect) {
+      courseSelect.addEventListener('change', refreshClassChoices);
+      refreshClassChoices();
+    }
   });
 </script>
 {% endblock %}

@@ -288,6 +288,27 @@ def dashboard():
     rooms = Room.query.order_by(Room.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
 
+    course_class_options: dict[int, list[dict[str, str]]] = {}
+    for course in courses:
+        options: list[dict[str, str]] = []
+        links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
+        for link in links:
+            for subgroup_label in link.group_labels():
+                value_suffix = subgroup_label or ""
+                option_value = f"{link.class_group_id}:{value_suffix}"
+                base_label = (
+                    f"{link.class_group.name} — groupe {subgroup_label.upper()}"
+                    if subgroup_label
+                    else f"{link.class_group.name} — classe entière"
+                )
+                teacher = link.teacher_for_label(subgroup_label)
+                if teacher:
+                    option_label = f"{base_label} ({teacher.name})"
+                else:
+                    option_label = f"{base_label} (Aucun enseignant)"
+                options.append({"value": option_value, "label": option_label})
+        course_class_options[course.id] = options
+
     if request.method == "POST":
         if request.form.get("form") == "quick-session":
             course_id = int(request.form["course_id"])
@@ -347,6 +368,8 @@ def dashboard():
         teachers=teachers,
         rooms=rooms,
         class_groups=class_groups,
+        course_class_options=course_class_options,
+        course_class_options_json=json.dumps(course_class_options, ensure_ascii=False),
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
     )
@@ -544,18 +567,13 @@ def class_detail(class_id: int):
             course = Course.query.get_or_404(course_id)
             if class_group not in course.classes:
                 group_count = _parse_group_count(request.form.get("group_count"))
-                teacher_a = _parse_teacher_selection(request.form.get("teacher_a"))
-                teacher_b = (
-                    _parse_teacher_selection(request.form.get("teacher_b"))
-                    if group_count == 2
-                    else None
-                )
+                teacher = _parse_teacher_selection(request.form.get("teacher"))
                 course.class_links.append(
                     CourseClassLink(
                         class_group=class_group,
                         group_count=group_count,
-                        teacher_a=teacher_a,
-                        teacher_b=teacher_b if group_count == 2 else None,
+                        teacher_a=teacher,
+                        teacher_b=teacher if group_count == 2 else None,
                     )
                 )
                 db.session.commit()
@@ -695,22 +713,15 @@ def courses_list():
                 group_count = _parse_group_count(
                     request.form.get(f"class_group_groups_{class_group.id}")
                 )
-                teacher_a = _parse_teacher_selection(
-                    request.form.get(f"class_group_teacher_{class_group.id}_a")
-                )
-                teacher_b = (
-                    _parse_teacher_selection(
-                        request.form.get(f"class_group_teacher_{class_group.id}_b")
-                    )
-                    if group_count == 2
-                    else None
+                teacher = _parse_teacher_selection(
+                    request.form.get(f"class_group_teacher_{class_group.id}")
                 )
                 links.append(
                     CourseClassLink(
                         class_group=class_group,
                         group_count=group_count,
-                        teacher_a=teacher_a,
-                        teacher_b=teacher_b if group_count == 2 else None,
+                        teacher_a=teacher,
+                        teacher_b=teacher if group_count == 2 else None,
                     )
                 )
             course.class_links = links
@@ -774,22 +785,15 @@ def course_detail(course_id: int):
                 group_count = _parse_group_count(
                     request.form.get(f"class_group_groups_{class_group.id}")
                 )
-                teacher_a = _parse_teacher_selection(
-                    request.form.get(f"class_group_teacher_{class_group.id}_a")
-                )
-                teacher_b = (
-                    _parse_teacher_selection(
-                        request.form.get(f"class_group_teacher_{class_group.id}_b")
-                    )
-                    if group_count == 2
-                    else None
+                teacher = _parse_teacher_selection(
+                    request.form.get(f"class_group_teacher_{class_group.id}")
                 )
                 links.append(
                     CourseClassLink(
                         class_group=class_group,
                         group_count=group_count,
-                        teacher_a=teacher_a,
-                        teacher_b=teacher_b if group_count == 2 else None,
+                        teacher_a=teacher,
+                        teacher_b=teacher if group_count == 2 else None,
                     )
                 )
             course.class_links = links

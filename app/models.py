@@ -382,16 +382,17 @@ class CourseClassLink(db.Model):
         return [None]
 
     def teacher_for_label(self, subgroup_label: str | None) -> Optional[Teacher]:
+        """Return the configured teacher irrespective of subgroup."""
+
         if self.group_count == 1:
-            return self.teacher_a
-        if subgroup_label and subgroup_label.upper() == "B":
-            return self.teacher_b or self.teacher_a
-        return self.teacher_a
+            return self.teacher_a or self.teacher_b
+        return self.teacher_a or self.teacher_b
 
     def teacher_labels(self) -> list[tuple[str, Optional[Teacher]]]:
+        teacher = self.teacher_a or self.teacher_b
         if self.group_count == 2:
-            return [("A", self.teacher_a), ("B", self.teacher_b or self.teacher_a)]
-        return [("", self.teacher_a)]
+            return [("A/B", teacher)]
+        return [("", teacher)]
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return (
