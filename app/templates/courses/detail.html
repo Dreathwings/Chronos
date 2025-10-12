@@ -49,36 +49,52 @@
           </div>
           <div>
             <label class="form-label">Enseignants</label>
-            {% for teacher in teachers %}
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="teachers" value="{{ teacher.id }}" id="teacher-{{ teacher.id }}" {% if teacher in course.teachers %}checked{% endif %}>
-              <label class="form-check-label" for="teacher-{{ teacher.id }}">{{ teacher.name }}</label>
+            <input
+              type="search"
+              class="form-control form-control-sm mb-2"
+              placeholder="Rechercher un enseignant..."
+              data-filter-target="#course-teachers-list"
+            >
+            <div id="course-teachers-list" class="vstack gap-1">
+              {% for teacher in teachers %}
+              <div class="form-check" data-filter-item data-filter-text="{{ teacher.name|lower|e }}">
+                <input class="form-check-input" type="checkbox" name="teachers" value="{{ teacher.id }}" id="teacher-{{ teacher.id }}" {% if teacher in course.teachers %}checked{% endif %}>
+                <label class="form-check-label" for="teacher-{{ teacher.id }}">{{ teacher.name }}</label>
+              </div>
+              {% endfor %}
             </div>
-            {% endfor %}
           </div>
           <div>
             <label class="form-label">Classes associées</label>
-            {% for class_group in class_groups %}
-            {% set link = class_links_map.get(class_group.id) %}
-            <div class="border rounded p-2 mb-2">
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" name="classes" value="{{ class_group.id }}" id="class-{{ class_group.id }}" {% if link %}checked{% endif %}>
-                <label class="form-check-label" for="class-{{ class_group.id }}">
-                  {{ class_group.name }} — {{ class_group.size }} étudiants
-                </label>
-              </div>
-              <div class="mt-2 ms-4 vstack gap-2">
-                <div>
-                  <label class="form-label text-muted mb-1 small">Répartition</label>
-                  <select class="form-select form-select-sm w-auto" name="class_group_groups_{{ class_group.id }}">
-                    <option value="1" {% if not link or link.group_count == 1 %}selected{% endif %}>Classe entière</option>
-                    <option value="2" {% if link and link.group_count == 2 %}selected{% endif %}>Demi-groupes (x2)</option>
-                  </select>
-                  <div class="form-text">Sélectionnez demi-groupes pour créer deux séances avec moitié d'effectif.</div>
+            <input
+              type="search"
+              class="form-control form-control-sm mb-2"
+              placeholder="Rechercher une classe..."
+              data-filter-target="#course-classes-list"
+            >
+            <div id="course-classes-list" class="vstack">
+              {% for class_group in class_groups %}
+              {% set link = class_links_map.get(class_group.id) %}
+              <div class="border rounded p-2 mb-2" data-filter-item data-filter-text="{{ class_group.name|lower|e }}">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="classes" value="{{ class_group.id }}" id="class-{{ class_group.id }}" {% if link %}checked{% endif %}>
+                  <label class="form-check-label" for="class-{{ class_group.id }}">
+                    {{ class_group.name }} — {{ class_group.size }} étudiants
+                  </label>
+                </div>
+                <div class="mt-2 ms-4 vstack gap-2">
+                  <div>
+                    <label class="form-label text-muted mb-1 small">Répartition</label>
+                    <select class="form-select form-select-sm w-auto" name="class_group_groups_{{ class_group.id }}">
+                      <option value="1" {% if not link or link.group_count == 1 %}selected{% endif %}>Classe entière</option>
+                      <option value="2" {% if link and link.group_count == 2 %}selected{% endif %}>Demi-groupes (x2)</option>
+                    </select>
+                    <div class="form-text">Sélectionnez demi-groupes pour créer deux séances avec moitié d'effectif.</div>
+                  </div>
                 </div>
               </div>
+              {% endfor %}
             </div>
-            {% endfor %}
           </div>
           {% if course.class_links %}
           <div class="form-text">Les enseignants sont définis depuis la section dédiée ci-dessous.</div>
@@ -222,8 +238,37 @@
 {% endblock %}
 
 {% block scripts %}
+{{ super() }}
 <script>
+  function chronosBindFilterInputs() {
+    document.querySelectorAll('[data-filter-target]').forEach(function(input) {
+      const targetSelector = input.getAttribute('data-filter-target');
+      if (!targetSelector) {
+        return;
+      }
+      const target = document.querySelector(targetSelector);
+      if (!target) {
+        return;
+      }
+      const updateVisibility = function() {
+        const query = (input.value || '').trim().toLowerCase();
+        const items = target.querySelectorAll('[data-filter-item]');
+        items.forEach(function(item) {
+          const filterText = (item.getAttribute('data-filter-text') || item.textContent || '').toLowerCase();
+          if (!query || filterText.indexOf(query) !== -1) {
+            item.classList.remove('d-none');
+          } else {
+            item.classList.add('d-none');
+          }
+        });
+      };
+      input.addEventListener('input', updateVisibility);
+      updateVisibility();
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function() {
+    chronosBindFilterInputs();
     const calendarEl = document.getElementById('course-calendar');
     const events = {{ events_json|safe }};
     const calendar = window.createChronosCalendar(calendarEl, events);
