@@ -24,6 +24,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     with app.app_context():
         db.create_all()
         _ensure_session_class_group_column()
+        _ensure_course_class_group_count_column()
 
     from .routes import bp as main_bp
 
@@ -90,4 +91,45 @@ def _ensure_session_class_group_column() -> None:
         except SQLAlchemyError:
             current_app.logger.warning(
                 "Unable to tighten constraints on session.class_group_id; continuing with nullable column."
+            )
+
+
+def _ensure_course_class_group_count_column() -> None:
+    """Add the group_count column to existing course_class tables if missing."""
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course_class" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course_class")}
+    if "group_count" in existing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            default_clause = " DEFAULT 1" if engine.dialect.name != "sqlite" else ""
+            connection.execute(
+                text(
+                    "ALTER TABLE course_class ADD COLUMN group_count INTEGER"
+                    f"{default_clause}"
+                )
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard for legacy DBs
+        current_app.logger.warning("Unable to add group_count column: %s", exc)
+        return
+
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE course_class SET group_count = 1 WHERE group_count IS NULL"))
+
+    if engine.dialect.name not in {"sqlite"}:
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE course_class MODIFY group_count INTEGER NOT NULL DEFAULT 1"
+                    )
+                )
+        except SQLAlchemyError:
+            current_app.logger.warning(
+                "Unable to enforce non-null constraint on course_class.group_count; continuing with nullable column."
             )
