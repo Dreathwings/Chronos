@@ -24,6 +24,11 @@ from .scheduler import (
     generate_schedule,
     overlaps,
 )
+from .utils import (
+    parse_unavailability_ranges,
+    ranges_as_payload,
+    serialise_unavailability_ranges,
+)
 
 bp = Blueprint("main", __name__)
 
@@ -160,15 +165,11 @@ def _teacher_unavailability_backgrounds(teacher: Teacher) -> list[dict[str, obje
                 }
             )
 
-    for token in _parse_unavailability_tokens(teacher.unavailable_dates):
-        try:
-            day = datetime.strptime(token, "%Y-%m-%d").date()
-        except ValueError:
-            continue
+    for start_day, end_day in parse_unavailability_ranges(teacher.unavailable_dates):
         backgrounds.append(
             {
-                "start": day.strftime("%Y-%m-%dT00:00:00"),
-                "end": (day + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"),
+                "start": start_day.strftime("%Y-%m-%dT00:00:00"),
+                "end": (end_day + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"),
                 "display": "background",
                 "overlap": False,
                 "color": BACKGROUND_BLOCK_COLOR,
@@ -304,12 +305,18 @@ def teachers_list():
     if request.method == "POST":
         action = request.form.get("form")
         if action == "create":
+            unavailability_value = serialise_unavailability_ranges(
+                parse_unavailability_ranges(
+                    request.form.get("unavailability_ranges")
+                    or request.form.get("unavailable_dates")
+                )
+            )
             teacher = Teacher(
                 name=request.form["name"],
                 email=request.form.get("email"),
                 phone=request.form.get("phone"),
                 max_hours_per_week=int(request.form.get("max_hours_per_week", 20)),
-                unavailable_dates=request.form.get("unavailable_dates"),
+                unavailable_dates=unavailability_value,
                 notes=request.form.get("notes"),
             )
             db.session.add(teacher)
@@ -344,7 +351,12 @@ def teacher_detail(teacher_id: int):
             teacher.email = request.form.get("email")
             teacher.phone = request.form.get("phone")
             teacher.max_hours_per_week = int(request.form.get("max_hours_per_week", teacher.max_hours_per_week))
-            teacher.unavailable_dates = request.form.get("unavailable_dates")
+            teacher.unavailable_dates = serialise_unavailability_ranges(
+                parse_unavailability_ranges(
+                    request.form.get("unavailability_ranges")
+                    or request.form.get("unavailable_dates")
+                )
+            )
             teacher.notes = request.form.get("notes")
             db.session.commit()
             flash("Fiche enseignant mise à jour", "success")
@@ -430,6 +442,9 @@ def teacher_detail(teacher_id: int):
         availability_slots=SCHEDULE_SLOT_CHOICES,
         selected_availability_slots=selected_slots,
         unavailability_backgrounds_json=json.dumps(backgrounds, ensure_ascii=False),
+        unavailability_ranges=ranges_as_payload(
+            parse_unavailability_ranges(teacher.unavailable_dates)
+        ),
     )
 
 

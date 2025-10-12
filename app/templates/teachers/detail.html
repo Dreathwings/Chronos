@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import 'teachers/_macros.html' as teacher_macros %}
 {% block title %}{{ teacher.name }} — Enseignant{% endblock %}
 
 {% block content %}
@@ -21,10 +22,14 @@
             <label class="form-label">Heures max / semaine</label>
             <input type="number" name="max_hours_per_week" class="form-control" value="{{ teacher.max_hours_per_week }}" min="1">
           </div>
-          <div>
-            <label class="form-label">Jours d'indisponibilité</label>
-            <textarea name="unavailable_dates" class="form-control" rows="2">{{ teacher.unavailable_dates }}</textarea>
-          </div>
+          {{
+            teacher_macros.unavailability_ranges_widget(
+              'unavailability_ranges',
+              unavailability_ranges,
+              "Plages d'indisponibilité",
+              "Ajoutez les périodes pendant lesquelles l'enseignant n'est pas disponible."
+            )
+          }}
           <div>
             <label class="form-label">Notes</label>
             <textarea name="notes" class="form-control" rows="3">{{ teacher.notes }}</textarea>
@@ -113,8 +118,13 @@
 {% endblock %}
 
 {% block scripts %}
+{% include 'teachers/_unavailability_script.html' %}
 <script>
   document.addEventListener('DOMContentLoaded', function() {
+    if (typeof setupUnavailabilityWidgets === 'function') {
+      setupUnavailabilityWidgets();
+    }
+
     const calendarEl = document.getElementById('teacher-calendar');
     const events = {{ events_json|safe }};
     const unavailableBackgrounds = {{ unavailability_backgrounds_json|safe }};
