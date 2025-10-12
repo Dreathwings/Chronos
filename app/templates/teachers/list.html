@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import 'teachers/_macros.html' as teacher_macros %}
 {% block title %}Enseignants — Chronos{% endblock %}
 
 {% block content %}
@@ -25,10 +26,14 @@
             <label class="form-label">Heures max / semaine</label>
             <input type="number" name="max_hours_per_week" class="form-control" min="1" value="20">
           </div>
-          <div>
-            <label class="form-label">Jours d'indisponibilité (YYYY-MM-DD, séparés par des virgules)</label>
-            <textarea name="unavailable_dates" class="form-control" rows="2"></textarea>
-          </div>
+          {{
+            teacher_macros.unavailability_ranges_widget(
+              'unavailability_ranges',
+              [],
+              "Plages d'indisponibilité",
+              "Ajoutez autant de plages que nécessaire pour indiquer les indisponibilités."
+            )
+          }}
           <div>
             <label class="form-label">Notes</label>
             <textarea name="notes" class="form-control" rows="3"></textarea>
@@ -79,4 +84,15 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% include 'teachers/_unavailability_script.html' %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    if (typeof setupUnavailabilityWidgets === 'function') {
+      setupUnavailabilityWidgets();
+    }
+  });
+</script>
 {% endblock %}

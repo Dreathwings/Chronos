@@ -19,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from . import db
+from .utils import parse_unavailability_ranges
 
 
 course_software = Table(
@@ -103,9 +104,8 @@ class Teacher(db.Model, TimeStampedModel):
         target_date = day.date() if isinstance(day, datetime) else day
         if target_date.weekday() >= 5:
             return False
-        if self.unavailable_dates:
-            unavailable = {d.strip() for d in self.unavailable_dates.split(",") if d.strip()}
-            if target_date.strftime("%Y-%m-%d") in unavailable:
+        for start, end in parse_unavailability_ranges(self.unavailable_dates):
+            if start <= target_date <= end:
                 return False
         return any(a.weekday == target_date.weekday() for a in self.availabilities)
 

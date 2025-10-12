@@ -1,0 +1,25 @@
+{% macro unavailability_ranges_widget(field_name, initial_ranges, label_text, help_text=None) %}
+  <div class="vstack gap-2" data-component="unavailability-ranges" data-field-name="{{ field_name }}" data-initial='{{ initial_ranges | tojson }}'>
+    <div>
+      <label class="form-label">{{ label_text }}</label>
+    </div>
+    <div class="vstack gap-2 border rounded p-3 bg-light" data-role="list"></div>
+    <div class="row g-2 align-items-end">
+      <div class="col-sm-6">
+        <label class="form-label">Début</label>
+        <input type="date" class="form-control" data-role="start">
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">Fin</label>
+        <input type="date" class="form-control" data-role="end">
+      </div>
+      <div class="col-12 text-end">
+        <button type="button" class="btn btn-outline-secondary" data-action="add">Ajouter la plage</button>
+      </div>
+    </div>
+    {% if help_text %}
+    <div class="form-text">{{ help_text }}</div>
+    {% endif %}
+    <input type="hidden" name="{{ field_name }}" value="[]">
+  </div>
+{% endmacro %}

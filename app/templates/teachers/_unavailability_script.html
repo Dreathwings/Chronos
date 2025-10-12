@@ -1,0 +1,104 @@
+<script>
+  function setupUnavailabilityWidgets() {
+    const widgets = document.querySelectorAll('[data-component="unavailability-ranges"]');
+    widgets.forEach(function(widget) {
+      const listEl = widget.querySelector('[data-role="list"]');
+      const startInput = widget.querySelector('[data-role="start"]');
+      const endInput = widget.querySelector('[data-role="end"]');
+      const addButton = widget.querySelector('[data-action="add"]');
+      const hiddenInput = widget.querySelector('input[type="hidden"][name="' + widget.dataset.fieldName + '"]');
+      if (!listEl || !startInput || !endInput || !addButton || !hiddenInput) {
+        return;
+      }
+
+      let ranges;
+      try {
+        ranges = JSON.parse(widget.dataset.initial || '[]');
+      } catch (err) {
+        ranges = [];
+      }
+
+      function sortRanges() {
+        ranges.sort(function(a, b) {
+          return a.start.localeCompare(b.start) || a.end.localeCompare(b.end);
+        });
+      }
+
+      function updateStorage() {
+        hiddenInput.value = JSON.stringify(ranges);
+      }
+
+      function renderRanges() {
+        listEl.innerHTML = '';
+        if (!ranges.length) {
+          const empty = document.createElement('p');
+          empty.className = 'text-muted small mb-0';
+          empty.textContent = "Aucune plage définie pour le moment.";
+          listEl.appendChild(empty);
+          return;
+        }
+
+        ranges.forEach(function(range, index) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'd-flex justify-content-between align-items-center gap-2';
+
+          const label = document.createElement('div');
+          label.className = 'fw-semibold';
+          if (range.start === range.end) {
+            label.textContent = 'Indisponible le ' + range.start;
+          } else {
+            label.textContent = 'Indisponible du ' + range.start + ' au ' + range.end;
+          }
+
+          const removeButton = document.createElement('button');
+          removeButton.type = 'button';
+          removeButton.className = 'btn btn-sm btn-outline-danger';
+          removeButton.textContent = 'Supprimer';
+          removeButton.addEventListener('click', function() {
+            ranges.splice(index, 1);
+            sortRanges();
+            updateStorage();
+            renderRanges();
+          });
+
+          wrapper.appendChild(label);
+          wrapper.appendChild(removeButton);
+          listEl.appendChild(wrapper);
+        });
+      }
+
+      function addRange() {
+        const startValue = startInput.value;
+        if (!startValue) {
+          return;
+        }
+        let endValue = endInput.value || startValue;
+        let normalisedStart = startValue;
+        let normalisedEnd = endValue;
+        if (normalisedEnd < normalisedStart) {
+          const tmp = normalisedStart;
+          normalisedStart = normalisedEnd;
+          normalisedEnd = tmp;
+        }
+        const normalised = { start: normalisedStart, end: normalisedEnd };
+        const exists = ranges.some(function(range) {
+          return range.start === normalised.start && range.end === normalised.end;
+        });
+        if (!exists) {
+          ranges.push(normalised);
+          sortRanges();
+          updateStorage();
+          renderRanges();
+        }
+        startInput.value = '';
+        endInput.value = '';
+      }
+
+      sortRanges();
+      updateStorage();
+      renderRanges();
+
+      addButton.addEventListener('click', addRange);
+    });
+  }
+</script>
