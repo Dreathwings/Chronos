@@ -160,6 +160,7 @@ class Course(db.Model, TimeStampedModel):
     start_date: Mapped[Optional[date]] = mapped_column(Date)
     end_date: Mapped[Optional[date]] = mapped_column(Date)
     priority: Mapped[int] = mapped_column(Integer, default=1)
+    subgroup_count: Mapped[int] = mapped_column(Integer, default=1)
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
 
@@ -172,10 +173,25 @@ class Course(db.Model, TimeStampedModel):
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
+        CheckConstraint("subgroup_count > 0", name="chk_course_subgroup_positive"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Course<{self.id} {self.name}>"
+
+    def expected_students_per_session(self) -> int:
+        subgroup = max(self.subgroup_count, 1)
+        if subgroup == 1:
+            return self.expected_students
+        return (self.expected_students + subgroup - 1) // subgroup
+
+    def total_required_sessions(self) -> int:
+        subgroup = max(self.subgroup_count, 1)
+        base = self.sessions_required * subgroup
+        class_count = len(self.classes)
+        if class_count <= 1:
+            return base
+        return base * class_count
 
 
 class Session(db.Model, TimeStampedModel):

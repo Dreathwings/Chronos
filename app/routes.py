@@ -233,6 +233,8 @@ def _validate_session_constraints(
         return "L'enseignant a déjà une séance sur ce créneau."
     if _has_conflict(room.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "La salle est déjà réservée sur ce créneau."
+    if room.capacity < course.expected_students_per_session():
+        return "La salle sélectionnée ne peut pas accueillir ce groupe."
     if not class_group.is_available_during(start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "La classe est indisponible sur ce créneau."
     return None
@@ -590,10 +592,18 @@ def room_detail(room_id: int):
 def courses_list():
     equipments = Equipment.query.order_by(Equipment.name).all()
     softwares = Software.query.order_by(Software.name).all()
+    class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "create":
+            subgroup_raw = request.form.get("subgroup_count")
+            try:
+                subgroup_count = int(subgroup_raw) if subgroup_raw else 1
+            except (TypeError, ValueError):
+                subgroup_count = 1
+            if subgroup_count < 1:
+                subgroup_count = 1
             course = Course(
                 name=request.form["name"],
                 description=request.form.get("description"),
@@ -604,6 +614,7 @@ def courses_list():
                 end_date=_parse_date(request.form.get("end_date")),
                 priority=int(request.form.get("priority", 1)),
                 requires_computers=bool(request.form.get("requires_computers")),
+                subgroup_count=subgroup_count,
             )
             course.equipments = [
                 equipment
@@ -615,6 +626,16 @@ def courses_list():
                 for software in (Software.query.get(int(sid)) for sid in request.form.getlist("softwares"))
                 if software is not None
             ]
+            selected_classes: list[ClassGroup] = []
+            for raw_cid in request.form.getlist("classes"):
+                try:
+                    cid = int(raw_cid)
+                except (TypeError, ValueError):
+                    continue
+                class_group = ClassGroup.query.get(cid)
+                if class_group is not None:
+                    selected_classes.append(class_group)
+            course.classes = selected_classes
             db.session.add(course)
             try:
                 db.session.commit()
@@ -630,6 +651,7 @@ def courses_list():
         courses=courses,
         equipments=equipments,
         softwares=softwares,
+        class_groups=class_groups,
     )
 
 
@@ -653,6 +675,13 @@ def course_detail(course_id: int):
             course.end_date = _parse_date(request.form.get("end_date"))
             course.priority = int(request.form.get("priority", course.priority))
             course.requires_computers = bool(request.form.get("requires_computers"))
+            subgroup_raw = request.form.get("subgroup_count")
+            try:
+                course.subgroup_count = int(subgroup_raw) if subgroup_raw else course.subgroup_count
+            except (TypeError, ValueError):
+                pass
+            if course.subgroup_count < 1:
+                course.subgroup_count = 1
             course.equipments = [
                 equipment
                 for equipment in (Equipment.query.get(int(eid)) for eid in request.form.getlist("equipments"))
@@ -663,12 +692,16 @@ def course_detail(course_id: int):
                 for software in (Software.query.get(int(sid)) for sid in request.form.getlist("softwares"))
                 if software is not None
             ]
-            class_ids = {int(cid) for cid in request.form.getlist("classes")}
-            course.classes = [
-                class_group
-                for class_group in (ClassGroup.query.get(cid) for cid in class_ids)
-                if class_group is not None
-            ]
+            updated_classes: list[ClassGroup] = []
+            for raw_cid in request.form.getlist("classes"):
+                try:
+                    cid = int(raw_cid)
+                except (TypeError, ValueError):
+                    continue
+                class_group = ClassGroup.query.get(cid)
+                if class_group is not None:
+                    updated_classes.append(class_group)
+            course.classes = updated_classes
             teacher_ids = {int(tid) for tid in request.form.getlist("teachers")}
             course.teachers = [
                 teacher

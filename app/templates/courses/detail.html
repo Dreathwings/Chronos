@@ -35,6 +35,16 @@
           </div>
           <div class="row g-2">
             <div class="col">
+              <label class="form-label">Organisation</label>
+              <select class="form-select" name="subgroup_count">
+                <option value="1" {% if course.subgroup_count == 1 %}selected{% endif %}>Classe entière</option>
+                <option value="2" {% if course.subgroup_count == 2 %}selected{% endif %}>Demi-groupes (2)</option>
+              </select>
+              <div class="form-text">En demi-groupes, chaque séance ne regroupe qu'une moitié des étudiants ({{ course.expected_students_per_session() }} étudiants par séance).</div>
+            </div>
+          </div>
+          <div class="row g-2">
+            <div class="col">
               <label class="form-label">Début</label>
               <input type="date" class="form-control" name="start_date" value="{{ course.start_date }}">
             </div>

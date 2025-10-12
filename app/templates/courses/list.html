@@ -39,6 +39,16 @@
           </div>
           <div class="row g-2">
             <div class="col">
+              <label class="form-label">Organisation</label>
+              <select class="form-select" name="subgroup_count">
+                <option value="1" selected>Classe entière</option>
+                <option value="2">Demi-groupes (2)</option>
+              </select>
+              <div class="form-text">Choisissez 2 pour planifier le cours en deux demi-groupes.</div>
+            </div>
+          </div>
+          <div class="row g-2">
+            <div class="col">
               <label class="form-label">Début</label>
               <input type="date" class="form-control" name="start_date">
             </div>
@@ -69,6 +79,19 @@
             </div>
             {% endfor %}
           </div>
+          <div>
+            <label class="form-label">Classes associées</label>
+            {% if class_groups %}
+            {% for class_group in class_groups %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="classes" value="{{ class_group.id }}" id="new-class-{{ class_group.id }}">
+              <label class="form-check-label" for="new-class-{{ class_group.id }}">{{ class_group.name }}</label>
+            </div>
+            {% endfor %}
+            {% else %}
+            <p class="text-muted mb-0">Aucune classe disponible. Ajoutez des classes depuis l'onglet dédié.</p>
+            {% endif %}
+          </div>
           <button type="submit" class="btn btn-primary">Créer</button>
         </form>
       </div>
@@ -93,7 +116,7 @@
             <tr>
               <td><a href="{{ url_for('main.course_detail', course_id=course.id) }}">{{ course.name }}</a></td>
               <td>{{ course.start_date or '—' }} → {{ course.end_date or '—' }}</td>
-              <td>{{ course.sessions|length }}/{{ course.sessions_required }}</td>
+              <td>{{ course.sessions|length }}/{{ course.total_required_sessions() }}</td>
               <td>{{ course.priority }}</td>
               <td>{{ course.classes | map(attribute='name') | join(', ') or '—' }}</td>
             </tr>
