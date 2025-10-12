@@ -6,7 +6,7 @@ from typing import Iterable, List, Optional
 from flask import current_app
 
 from . import db
-from .models import ClassGroup, Course, Room, Session, Teacher
+from .models import ClassGroup, Course, CourseClassAssociation, Room, Session, Teacher
 
 # Working windows respecting pauses
 WORKING_WINDOWS: List[tuple[time, time]] = [
@@ -58,12 +58,18 @@ def teacher_hours_in_week(teacher: Teacher, week_start: date) -> float:
     return total
 
 
-def find_available_room(course: Course, start: datetime, end: datetime) -> Optional[Room]:
+def find_available_room(
+    course: Course,
+    class_group: ClassGroup,
+    start: datetime,
+    end: datetime,
+) -> Optional[Room]:
+    expected_students = course.expected_students_for(class_group)
     rooms = Room.query.order_by(Room.capacity.asc()).all()
     for room in rooms:
-        if room.capacity < course.expected_students:
+        if room.capacity < expected_students:
             continue
-        if course.requires_computers and room.computers <= 0:
+        if course.requires_computers and room.computers < expected_students:
             continue
         if any(eq not in room.equipments for eq in course.equipments):
             continue
@@ -93,9 +99,12 @@ def find_available_teacher(course: Course, start: datetime, end: datetime) -> Op
     return None
 
 
-def _class_sessions_needed(course: Course, class_group: ClassGroup) -> int:
-    existing = sum(1 for session in course.sessions if session.class_group_id == class_group.id)
-    return max(course.sessions_required - existing, 0)
+def _class_sessions_needed(course: Course, association: CourseClassAssociation) -> int:
+    required = course.sessions_required * max(association.group_count, 1)
+    existing = sum(
+        1 for session in course.sessions if session.class_group_id == association.class_group_id
+    )
+    return max(required - existing, 0)
 
 
 def generate_schedule(course: Course) -> list[Session]:
@@ -111,8 +120,14 @@ def generate_schedule(course: Course) -> list[Session]:
 
     priority_days = sorted(daterange(course.start_date, course.end_date))
 
-    for class_group in sorted(course.classes, key=lambda c: c.name.lower()):
-        sessions_to_create = _class_sessions_needed(course, class_group)
+    sorted_associations = sorted(
+        course.class_associations,
+        key=lambda assoc: assoc.class_group.name.lower(),
+    )
+
+    for association in sorted_associations:
+        class_group = association.class_group
+        sessions_to_create = _class_sessions_needed(course, association)
         if sessions_to_create == 0:
             continue
         for day in priority_days:
@@ -132,7 +147,7 @@ def generate_schedule(course: Course) -> list[Session]:
                 teacher = find_available_teacher(course, start_dt, end_dt)
                 if not teacher:
                     continue
-                room = find_available_room(course, start_dt, end_dt)
+                room = find_available_room(course, class_group, start_dt, end_dt)
                 if not room:
                     continue
                 session = Session(

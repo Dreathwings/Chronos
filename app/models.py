@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+import math
 from typing import List, Optional
 
 from sqlalchemy import (
@@ -16,6 +17,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
 )
+from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from . import db
@@ -55,14 +57,6 @@ course_teacher = Table(
     db.Model.metadata,
     Column("course_id", ForeignKey("course.id"), primary_key=True),
     Column("teacher_id", ForeignKey("teacher.id"), primary_key=True),
-)
-
-
-course_class = Table(
-    "course_class",
-    db.Model.metadata,
-    Column("course_id", ForeignKey("course.id"), primary_key=True),
-    Column("class_group_id", ForeignKey("class_group.id"), primary_key=True),
 )
 
 
@@ -166,13 +160,34 @@ class Course(db.Model, TimeStampedModel):
     teachers: Mapped[List[Teacher]] = relationship(secondary=course_teacher, back_populates="courses")
     softwares: Mapped[List["Software"]] = relationship(secondary=course_software, back_populates="courses")
     equipments: Mapped[List["Equipment"]] = relationship(secondary=course_equipment, back_populates="courses")
-    classes: Mapped[List["ClassGroup"]] = relationship(secondary=course_class, back_populates="courses")
+    class_associations: Mapped[List["CourseClassAssociation"]] = relationship(
+        back_populates="course",
+        cascade="all, delete-orphan",
+        order_by="CourseClassAssociation.class_group_id",
+    )
+    classes = association_proxy(
+        "class_associations",
+        "class_group",
+        creator=lambda class_group: CourseClassAssociation(class_group=class_group),
+    )
     sessions: Mapped[List["Session"]] = relationship(back_populates="course", cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
     )
+
+    def class_association_for(self, class_group_id: int) -> CourseClassAssociation | None:
+        for association in self.class_associations:
+            if association.class_group_id == class_group_id:
+                return association
+        return None
+
+    def expected_students_for(self, class_group: ClassGroup) -> int:
+        association = self.class_association_for(class_group.id)
+        if association is not None:
+            return association.expected_students
+        return max(self.expected_students, 1)
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Course<{self.id} {self.name}>"
@@ -267,7 +282,16 @@ class ClassGroup(db.Model, TimeStampedModel):
     unavailable_dates: Mapped[Optional[str]] = mapped_column(Text)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
-    courses: Mapped[List[Course]] = relationship(secondary=course_class, back_populates="classes")
+    course_associations: Mapped[List["CourseClassAssociation"]] = relationship(
+        back_populates="class_group",
+        cascade="all, delete-orphan",
+        order_by="CourseClassAssociation.course_id",
+    )
+    courses = association_proxy(
+        "course_associations",
+        "course",
+        creator=lambda course: CourseClassAssociation(course=course),
+    )
     sessions: Mapped[List[Session]] = relationship(
         back_populates="class_group", cascade="all, delete-orphan"
     )
@@ -304,3 +328,35 @@ class ClassGroup(db.Model, TimeStampedModel):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"ClassGroup<{self.id} {self.name}>"
+
+
+class CourseClassAssociation(db.Model):
+    __tablename__ = "course_class"
+
+    course_id: Mapped[int] = mapped_column(
+        ForeignKey("course.id"), primary_key=True, nullable=False
+    )
+    class_group_id: Mapped[int] = mapped_column(
+        ForeignKey("class_group.id"), primary_key=True, nullable=False
+    )
+    group_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    course: Mapped[Course] = relationship(back_populates="class_associations")
+    class_group: Mapped[ClassGroup] = relationship(back_populates="course_associations")
+
+    __table_args__ = (
+        CheckConstraint("group_count >= 1", name="chk_course_class_group_count_positive"),
+    )
+
+    @property
+    def expected_students(self) -> int:
+        class_size = self.class_group.size or 0
+        base = class_size if class_size > 0 else self.course.expected_students
+        group_size = max(self.group_count, 1)
+        return max(1, math.ceil(base / group_size))
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"CourseClassAssociation<Course {self.course_id} "
+            f"Class {self.class_group_id} groups={self.group_count}>"
+        )

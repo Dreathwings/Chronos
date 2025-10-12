@@ -10,6 +10,7 @@ from . import db
 from .models import (
     ClassGroup,
     Course,
+    CourseClassAssociation,
     Equipment,
     Room,
     Session,
@@ -227,6 +228,17 @@ def _validate_session_constraints(
         return "Les séances doivent être planifiées du lundi au vendredi."
     if not fits_in_windows(start_dt.time(), end_dt.time()):
         return "Le créneau choisi dépasse les fenêtres horaires autorisées."
+    expected_attendees = course.expected_students_for(class_group)
+    if room.capacity < expected_attendees:
+        return (
+            "La salle est trop petite pour la séance (capacité "
+            f"{room.capacity}, besoin {expected_attendees})."
+        )
+    if course.requires_computers and room.computers < expected_attendees:
+        return (
+            "Le nombre de postes informatiques est insuffisant pour cette séance "
+            f"({room.computers} disponibles, besoin {expected_attendees})."
+        )
     if not teacher.is_available_during(start_dt, end_dt):
         return "L'enseignant n'est pas disponible sur ce créneau."
     if _has_conflict(teacher.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
@@ -489,10 +501,22 @@ def class_detail(class_id: int):
         elif form_name == "assign-course":
             course_id = int(request.form["course_id"])
             course = Course.query.get_or_404(course_id)
-            if class_group not in course.classes:
-                course.classes.append(class_group)
-                db.session.commit()
+            group_raw = request.form.get("group_count")
+            try:
+                group_count = int(group_raw) if group_raw else 1
+            except (TypeError, ValueError):
+                group_count = 1
+            group_count = max(group_count, 1)
+            association = course.class_association_for(class_group.id)
+            if association is None:
+                course.class_associations.append(
+                    CourseClassAssociation(class_group=class_group, group_count=group_count)
+                )
                 flash("Cours associé à la classe", "success")
+            else:
+                association.group_count = group_count
+                flash("Paramètres de groupe mis à jour", "success")
+            db.session.commit()
         elif form_name == "remove-course":
             course_id = int(request.form["course_id"])
             course = Course.query.get_or_404(course_id)
@@ -509,6 +533,7 @@ def class_detail(class_id: int):
         class_group=class_group,
         courses=courses,
         assignable_courses=assignable_courses,
+        course_associations=class_group.course_associations,
         events_json=json.dumps(events, ensure_ascii=False),
         unavailability_backgrounds_json=json.dumps(unavailability_backgrounds, ensure_ascii=False),
     )
@@ -518,6 +543,7 @@ def class_detail(class_id: int):
 def rooms_list():
     equipments = Equipment.query.order_by(Equipment.name).all()
     softwares = Software.query.order_by(Software.name).all()
+    class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -590,6 +616,7 @@ def room_detail(room_id: int):
 def courses_list():
     equipments = Equipment.query.order_by(Equipment.name).all()
     softwares = Software.query.order_by(Software.name).all()
+    class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -615,6 +642,20 @@ def courses_list():
                 for software in (Software.query.get(int(sid)) for sid in request.form.getlist("softwares"))
                 if software is not None
             ]
+            class_ids = {int(cid) for cid in request.form.getlist("classes")}
+            for class_id in class_ids:
+                class_group = ClassGroup.query.get(class_id)
+                if class_group is None:
+                    continue
+                group_raw = request.form.get(f"class_group_{class_id}_groups")
+                try:
+                    group_count = int(group_raw) if group_raw else 1
+                except (TypeError, ValueError):
+                    group_count = 1
+                group_count = max(group_count, 1)
+                course.class_associations.append(
+                    CourseClassAssociation(class_group=class_group, group_count=group_count)
+                )
             db.session.add(course)
             try:
                 db.session.commit()
@@ -630,6 +671,7 @@ def courses_list():
         courses=courses,
         equipments=equipments,
         softwares=softwares,
+        class_groups=class_groups,
     )
 
 
@@ -664,11 +706,29 @@ def course_detail(course_id: int):
                 if software is not None
             ]
             class_ids = {int(cid) for cid in request.form.getlist("classes")}
-            course.classes = [
-                class_group
-                for class_group in (ClassGroup.query.get(cid) for cid in class_ids)
-                if class_group is not None
-            ]
+            existing_associations = {
+                association.class_group_id: association for association in course.class_associations
+            }
+            for association in list(course.class_associations):
+                if association.class_group_id not in class_ids:
+                    course.class_associations.remove(association)
+            for class_id in class_ids:
+                group_raw = request.form.get(f"class_group_{class_id}_groups")
+                try:
+                    group_count = int(group_raw) if group_raw else 1
+                except (TypeError, ValueError):
+                    group_count = 1
+                group_count = max(group_count, 1)
+                association = existing_associations.get(class_id)
+                if association is None:
+                    class_group = ClassGroup.query.get(class_id)
+                    if class_group is None:
+                        continue
+                    course.class_associations.append(
+                        CourseClassAssociation(class_group=class_group, group_count=group_count)
+                    )
+                else:
+                    association.group_count = group_count
             teacher_ids = {int(tid) for tid in request.form.getlist("teachers")}
             course.teachers = [
                 teacher
@@ -726,6 +786,10 @@ def course_detail(course_id: int):
         return redirect(url_for("main.course_detail", course_id=course_id))
 
     events = [session.as_event() for session in course.sessions]
+    association_map = {
+        association.class_group_id: association for association in course.class_associations
+    }
+
     return render_template(
         "courses/detail.html",
         course=course,
@@ -734,6 +798,7 @@ def course_detail(course_id: int):
         teachers=teachers,
         rooms=rooms,
         class_groups=class_groups,
+        association_map=association_map,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
     )
