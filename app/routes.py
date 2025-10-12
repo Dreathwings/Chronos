@@ -16,6 +16,8 @@ from .models import (
     Software,
     Teacher,
     TeacherAvailability,
+    parse_teacher_unavailability,
+    serialize_teacher_unavailability,
 )
 from .scheduler import (
     SCHEDULE_SLOTS,
@@ -160,15 +162,11 @@ def _teacher_unavailability_backgrounds(teacher: Teacher) -> list[dict[str, obje
                 }
             )
 
-    for token in _parse_unavailability_tokens(teacher.unavailable_dates):
-        try:
-            day = datetime.strptime(token, "%Y-%m-%d").date()
-        except ValueError:
-            continue
+    for window_start, window_end in teacher.unavailability_windows():
         backgrounds.append(
             {
-                "start": day.strftime("%Y-%m-%dT00:00:00"),
-                "end": (day + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"),
+                "start": window_start.isoformat(),
+                "end": window_end.isoformat(),
                 "display": "background",
                 "overlap": False,
                 "color": BACKGROUND_BLOCK_COLOR,
@@ -309,7 +307,6 @@ def teachers_list():
                 email=request.form.get("email"),
                 phone=request.form.get("phone"),
                 max_hours_per_week=int(request.form.get("max_hours_per_week", 20)),
-                unavailable_dates=request.form.get("unavailable_dates"),
                 notes=request.form.get("notes"),
             )
             db.session.add(teacher)
@@ -344,7 +341,6 @@ def teacher_detail(teacher_id: int):
             teacher.email = request.form.get("email")
             teacher.phone = request.form.get("phone")
             teacher.max_hours_per_week = int(request.form.get("max_hours_per_week", teacher.max_hours_per_week))
-            teacher.unavailable_dates = request.form.get("unavailable_dates")
             teacher.notes = request.form.get("notes")
             db.session.commit()
             flash("Fiche enseignant mise à jour", "success")
@@ -407,6 +403,39 @@ def teacher_detail(teacher_id: int):
                 )
             db.session.commit()
             flash("Disponibilités mises à jour", "success")
+        elif form_name == "add-unavailability":
+            day = _parse_date(request.form.get("date"))
+            start_time = _parse_time_only(request.form.get("start_time"))
+            end_time = _parse_time_only(request.form.get("end_time"))
+            if not day or not start_time or not end_time:
+                flash(
+                    "Veuillez renseigner une date ainsi qu'une heure de début et de fin.",
+                    "danger",
+                )
+            elif end_time <= start_time:
+                flash("L'heure de fin doit être postérieure à l'heure de début.", "danger")
+            else:
+                entries = parse_teacher_unavailability(teacher.unavailable_dates)
+                start_dt = datetime.combine(day, start_time)
+                end_dt = datetime.combine(day, end_time)
+                entries.append((start_dt, end_dt))
+                entries.sort(key=lambda item: item[0])
+                teacher.unavailable_dates = serialize_teacher_unavailability(entries)
+                db.session.commit()
+                flash("Plage d'indisponibilité ajoutée", "success")
+        elif form_name == "remove-unavailability":
+            try:
+                entry_index = int(request.form.get("entry_index", ""))
+            except ValueError:
+                entry_index = -1
+            entries = parse_teacher_unavailability(teacher.unavailable_dates)
+            if 0 <= entry_index < len(entries):
+                entries.pop(entry_index)
+                teacher.unavailable_dates = serialize_teacher_unavailability(entries)
+                db.session.commit()
+                flash("Plage d'indisponibilité supprimée", "success")
+            else:
+                flash("Impossible de trouver la plage à supprimer.", "danger")
         return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
 
     events = [session.as_event() for session in teacher.sessions]
@@ -421,6 +450,22 @@ def teacher_detail(teacher_id: int):
 
     backgrounds = _teacher_unavailability_backgrounds(teacher)
 
+    unavailability_entries = []
+    for index, (start_dt, end_dt) in enumerate(teacher.unavailability_windows()):
+        is_full_day = start_dt.time() == time.min and end_dt - start_dt >= timedelta(days=1)
+        time_label = (
+            "Toute la journée"
+            if is_full_day
+            else f"{start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}"
+        )
+        unavailability_entries.append(
+            {
+                "index": index,
+                "date_label": start_dt.strftime("%d/%m/%Y"),
+                "time_label": time_label,
+            }
+        )
+
     return render_template(
         "teachers/detail.html",
         teacher=teacher,
@@ -430,6 +475,7 @@ def teacher_detail(teacher_id: int):
         availability_slots=SCHEDULE_SLOT_CHOICES,
         selected_availability_slots=selected_slots,
         unavailability_backgrounds_json=json.dumps(backgrounds, ensure_ascii=False),
+        unavailability_entries=unavailability_entries,
     )
 
 

@@ -22,15 +22,54 @@
             <input type="number" name="max_hours_per_week" class="form-control" value="{{ teacher.max_hours_per_week }}" min="1">
           </div>
           <div>
-            <label class="form-label">Jours d'indisponibilité</label>
-            <textarea name="unavailable_dates" class="form-control" rows="2">{{ teacher.unavailable_dates }}</textarea>
-          </div>
-          <div>
             <label class="form-label">Notes</label>
             <textarea name="notes" class="form-control" rows="3">{{ teacher.notes }}</textarea>
           </div>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </form>
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Indisponibilités ponctuelles</div>
+      <div class="card-body">
+        <form method="post" class="row g-3 align-items-end">
+          <input type="hidden" name="form" value="add-unavailability">
+          <div class="col-md-4">
+            <label class="form-label">Date</label>
+            <input type="date" name="date" class="form-control" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Début</label>
+            <input type="time" name="start_time" class="form-control" step="900" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Fin</label>
+            <input type="time" name="end_time" class="form-control" step="900" required>
+          </div>
+          <div class="col-md-2 text-md-end">
+            <button type="submit" class="btn btn-outline-secondary w-100">Ajouter</button>
+          </div>
+        </form>
+        {% if unavailability_entries %}
+        <ul class="list-group list-group-flush mt-3">
+          {% for entry in unavailability_entries %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+              <strong>{{ entry.date_label }}</strong>
+              <div class="small text-muted">{{ entry.time_label }}</div>
+            </div>
+            <form method="post" class="ms-3">
+              <input type="hidden" name="form" value="remove-unavailability">
+              <input type="hidden" name="entry_index" value="{{ entry.index }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Retirer</button>
+            </form>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted small mb-0 mt-3">Aucune plage d'indisponibilité n'a encore été enregistrée.</p>
+        {% endif %}
+        <p class="text-muted small mt-3 mb-0">Ces plages sont prises en compte dans la planification en complément des disponibilités hebdomadaires.</p>
       </div>
     </div>
     <div class="card shadow-sm mt-4">

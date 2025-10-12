@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
-from typing import List, Optional
+from datetime import date, datetime, time, timedelta
+from typing import Iterable, List, Optional, Tuple
 
 from sqlalchemy import (
     CheckConstraint,
@@ -78,6 +78,69 @@ class TimeStampedModel:
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+def _normalize_unavailability_tokens(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    tokens = raw.replace("\n", ",").split(",")
+    return [token.strip() for token in tokens if token.strip()]
+
+
+def parse_teacher_unavailability(
+    raw: str | None,
+) -> List[Tuple[datetime, datetime]]:
+    """Return the list of unavailability windows for a teacher."""
+
+    entries: List[Tuple[datetime, datetime]] = []
+    for token in _normalize_unavailability_tokens(raw):
+        if " " not in token:
+            try:
+                day = datetime.strptime(token, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            start_dt = datetime.combine(day, time.min)
+            entries.append((start_dt, start_dt + timedelta(days=1)))
+            continue
+
+        try:
+            date_part, times_part = token.split(" ", 1)
+            day = datetime.strptime(date_part, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+
+        try:
+            start_str, end_str = (value.strip() for value in times_part.split("-", 1))
+            start_time = datetime.strptime(start_str, "%H:%M").time()
+            end_time = datetime.strptime(end_str, "%H:%M").time()
+        except (ValueError, TypeError):
+            continue
+
+        if end_time <= start_time:
+            continue
+
+        start_dt = datetime.combine(day, start_time)
+        end_dt = datetime.combine(day, end_time)
+        entries.append((start_dt, end_dt))
+
+    entries.sort(key=lambda entry: entry[0])
+    return entries
+
+
+def serialize_teacher_unavailability(
+    entries: Iterable[Tuple[datetime, datetime]]
+) -> str:
+    tokens: list[str] = []
+    for start_dt, end_dt in entries:
+        if end_dt <= start_dt:
+            continue
+        if start_dt.time() == time.min and end_dt - start_dt >= timedelta(days=1):
+            tokens.append(start_dt.strftime("%Y-%m-%d"))
+        else:
+            tokens.append(
+                f"{start_dt.strftime('%Y-%m-%d')} {start_dt.strftime('%H:%M')}-{end_dt.strftime('%H:%M')}"
+            )
+    return "\n".join(tokens)
+
+
 class Teacher(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
@@ -99,13 +162,17 @@ class Teacher(db.Model, TimeStampedModel):
         order_by="TeacherAvailability.weekday",
     )
 
+    def unavailability_windows(self) -> List[Tuple[datetime, datetime]]:
+        return parse_teacher_unavailability(self.unavailable_dates)
+
     def is_available_on(self, day: datetime | date) -> bool:
         target_date = day.date() if isinstance(day, datetime) else day
         if target_date.weekday() >= 5:
             return False
-        if self.unavailable_dates:
-            unavailable = {d.strip() for d in self.unavailable_dates.split(",") if d.strip()}
-            if target_date.strftime("%Y-%m-%d") in unavailable:
+        for start_dt, end_dt in self.unavailability_windows():
+            if start_dt.date() != target_date:
+                continue
+            if start_dt.time() == time.min and end_dt - start_dt >= timedelta(days=1):
                 return False
         return any(a.weekday == target_date.weekday() for a in self.availabilities)
 
@@ -128,8 +195,13 @@ class Teacher(db.Model, TimeStampedModel):
             if slot.end_time > coverage:
                 coverage = slot.end_time
             if coverage >= target_end:
-                return True
-        return False
+                break
+        if coverage < target_end:
+            return False
+        for window_start, window_end in self.unavailability_windows():
+            if max(window_start, start) < min(window_end, end):
+                return False
+        return True
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"Teacher<{self.id} {self.name}>"
