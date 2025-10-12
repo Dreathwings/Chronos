@@ -59,9 +59,22 @@
           <div>
             <label class="form-label">Classes associées</label>
             {% for class_group in class_groups %}
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="classes" value="{{ class_group.id }}" id="class-{{ class_group.id }}" {% if class_group in course.classes %}checked{% endif %}>
-              <label class="form-check-label" for="class-{{ class_group.id }}">{{ class_group.name }}</label>
+            {% set link = class_links_map.get(class_group.id) %}
+            <div class="border rounded p-2 mb-2">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="classes" value="{{ class_group.id }}" id="class-{{ class_group.id }}" {% if link %}checked{% endif %}>
+                <label class="form-check-label" for="class-{{ class_group.id }}">
+                  {{ class_group.name }} — {{ class_group.size }} étudiants
+                </label>
+              </div>
+              <div class="mt-2 ms-4">
+                <label class="form-label text-muted mb-1 small">Répartition</label>
+                <select class="form-select form-select-sm w-auto" name="class_group_groups_{{ class_group.id }}">
+                  <option value="1" {% if not link or link.group_count == 1 %}selected{% endif %}>Classe entière</option>
+                  <option value="2" {% if link and link.group_count == 2 %}selected{% endif %}>Demi-groupes (x2)</option>
+                </select>
+                <div class="form-text">Sélectionnez demi-groupes pour créer deux séances avec moitié d'effectif.</div>
+              </div>
             </div>
             {% endfor %}
           </div>
@@ -98,7 +111,7 @@
     <div class="card shadow-sm mb-4">
       <div class="card-header bg-info text-white">Ajouter une séance manuelle</div>
       <div class="card-body">
-        {% if teachers and rooms and course.classes %}
+        {% if teachers and rooms and course.class_links %}
         <form method="post" class="row g-3">
           <input type="hidden" name="form" value="manual-session">
           <div class="col-md-4">
@@ -120,8 +133,10 @@
           <div class="col-md-4">
             <label class="form-label">Classe</label>
             <select class="form-select" name="class_group_id">
-              {% for class_group in course.classes %}
-              <option value="{{ class_group.id }}">{{ class_group.name }}</option>
+              {% for link in course.class_links %}
+              <option value="{{ link.class_group.id }}">
+                {{ link.class_group.name }}{% if link.group_count == 2 %} — demi-groupes{% endif %}
+              </option>
               {% endfor %}
             </select>
           </div>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from math import ceil
 from typing import List, Optional
 
 from sqlalchemy import (
@@ -16,6 +17,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
 )
+from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from . import db
@@ -55,14 +57,6 @@ course_teacher = Table(
     db.Model.metadata,
     Column("course_id", ForeignKey("course.id"), primary_key=True),
     Column("teacher_id", ForeignKey("teacher.id"), primary_key=True),
-)
-
-
-course_class = Table(
-    "course_class",
-    db.Model.metadata,
-    Column("course_id", ForeignKey("course.id"), primary_key=True),
-    Column("class_group_id", ForeignKey("class_group.id"), primary_key=True),
 )
 
 
@@ -166,7 +160,16 @@ class Course(db.Model, TimeStampedModel):
     teachers: Mapped[List[Teacher]] = relationship(secondary=course_teacher, back_populates="courses")
     softwares: Mapped[List["Software"]] = relationship(secondary=course_software, back_populates="courses")
     equipments: Mapped[List["Equipment"]] = relationship(secondary=course_equipment, back_populates="courses")
-    classes: Mapped[List["ClassGroup"]] = relationship(secondary=course_class, back_populates="courses")
+    class_links: Mapped[List["CourseClassLink"]] = relationship(
+        "CourseClassLink",
+        back_populates="course",
+        cascade="all, delete-orphan",
+    )
+    classes = association_proxy(
+        "class_links",
+        "class_group",
+        creator=lambda class_group: CourseClassLink(class_group=class_group),
+    )
     sessions: Mapped[List["Session"]] = relationship(back_populates="course", cascade="all, delete-orphan")
 
     __table_args__ = (
@@ -176,6 +179,30 @@ class Course(db.Model, TimeStampedModel):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Course<{self.id} {self.name}>"
+
+    def class_link_for(self, class_group: "ClassGroup" | int) -> "CourseClassLink" | None:
+        class_id = class_group if isinstance(class_group, int) else class_group.id
+        for link in self.class_links:
+            if link.class_group_id == class_id:
+                return link
+        return None
+
+    def group_count_for(self, class_group: "ClassGroup" | int) -> int:
+        link = self.class_link_for(class_group)
+        return link.group_count if link else 1
+
+    def capacity_needed_for(self, class_group: "ClassGroup" | int) -> int:
+        link = self.class_link_for(class_group)
+        if isinstance(class_group, int):
+            target = next((cls for cls in self.classes if cls.id == class_group), None)
+        else:
+            target = class_group
+        if target is None:
+            return max(self.expected_students, 1)
+        baseline = max(self.expected_students, target.size)
+        if link and link.group_count > 1:
+            return max(1, ceil(baseline / link.group_count))
+        return max(1, baseline)
 
 
 class Session(db.Model, TimeStampedModel):
@@ -267,7 +294,16 @@ class ClassGroup(db.Model, TimeStampedModel):
     unavailable_dates: Mapped[Optional[str]] = mapped_column(Text)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
-    courses: Mapped[List[Course]] = relationship(secondary=course_class, back_populates="classes")
+    course_links: Mapped[List["CourseClassLink"]] = relationship(
+        "CourseClassLink",
+        back_populates="class_group",
+        cascade="all, delete-orphan",
+    )
+    courses = association_proxy(
+        "course_links",
+        "course",
+        creator=lambda course: CourseClassLink(course=course),
+    )
     sessions: Mapped[List[Session]] = relationship(
         back_populates="class_group", cascade="all, delete-orphan"
     )
@@ -304,3 +340,31 @@ class ClassGroup(db.Model, TimeStampedModel):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"ClassGroup<{self.id} {self.name}>"
+
+
+class CourseClassLink(db.Model):
+    __tablename__ = "course_class"
+
+    course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), primary_key=True)
+    class_group_id: Mapped[int] = mapped_column(ForeignKey("class_group.id"), primary_key=True)
+    group_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    course: Mapped[Course] = relationship(back_populates="class_links")
+    class_group: Mapped[ClassGroup] = relationship(back_populates="course_links")
+
+    __table_args__ = (
+        CheckConstraint("group_count >= 1 AND group_count <= 2", name="chk_course_class_group_count"),
+    )
+
+    @property
+    def is_half_group(self) -> bool:
+        return self.group_count == 2
+
+    def group_label(self) -> str:
+        return "Demi-groupes" if self.is_half_group else "Classe entière"
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"CourseClassLink<Course {self.course_id} / Class {self.class_group_id} "
+            f"groups={self.group_count}>"
+        )

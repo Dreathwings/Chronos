@@ -58,10 +58,17 @@ def teacher_hours_in_week(teacher: Teacher, week_start: date) -> float:
     return total
 
 
-def find_available_room(course: Course, start: datetime, end: datetime) -> Optional[Room]:
+def find_available_room(
+    course: Course,
+    start: datetime,
+    end: datetime,
+    *,
+    required_capacity: int | None = None,
+) -> Optional[Room]:
     rooms = Room.query.order_by(Room.capacity.asc()).all()
+    required_students = required_capacity or course.expected_students
     for room in rooms:
-        if room.capacity < course.expected_students:
+        if room.capacity < required_students:
             continue
         if course.requires_computers and room.computers <= 0:
             continue
@@ -95,7 +102,8 @@ def find_available_teacher(course: Course, start: datetime, end: datetime) -> Op
 
 def _class_sessions_needed(course: Course, class_group: ClassGroup) -> int:
     existing = sum(1 for session in course.sessions if session.class_group_id == class_group.id)
-    return max(course.sessions_required - existing, 0)
+    required_total = course.sessions_required * course.group_count_for(class_group)
+    return max(required_total - existing, 0)
 
 
 def generate_schedule(course: Course) -> list[Session]:
@@ -132,7 +140,13 @@ def generate_schedule(course: Course) -> list[Session]:
                 teacher = find_available_teacher(course, start_dt, end_dt)
                 if not teacher:
                     continue
-                room = find_available_room(course, start_dt, end_dt)
+                required_capacity = course.capacity_needed_for(class_group)
+                room = find_available_room(
+                    course,
+                    start_dt,
+                    end_dt,
+                    required_capacity=required_capacity,
+                )
                 if not room:
                     continue
                 session = Session(
