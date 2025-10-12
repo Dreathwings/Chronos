@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from math import ceil
 from typing import List, Optional
 
 from sqlalchemy import (
@@ -160,6 +161,7 @@ class Course(db.Model, TimeStampedModel):
     start_date: Mapped[Optional[date]] = mapped_column(Date)
     end_date: Mapped[Optional[date]] = mapped_column(Date)
     priority: Mapped[int] = mapped_column(Integer, default=1)
+    group_count: Mapped[int] = mapped_column(Integer, default=1)
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
 
@@ -172,10 +174,25 @@ class Course(db.Model, TimeStampedModel):
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
+        CheckConstraint("group_count >= 1 AND group_count <= 2", name="chk_group_count_range"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Course<{self.id} {self.name}>"
+
+    def expected_students_for(self, class_group: "ClassGroup" | int | None = None) -> int:
+        base = self.expected_students
+        target_group: Optional["ClassGroup"] = None
+        if isinstance(class_group, int):
+            target_group = next((cg for cg in self.classes if cg.id == class_group), None)
+        elif class_group is not None:
+            target_group = class_group
+        if target_group is not None:
+            base = min(base, target_group.size)
+        base = max(base, 1)
+        if self.group_count <= 1:
+            return base
+        return max(1, ceil(base / self.group_count))
 
 
 class Session(db.Model, TimeStampedModel):

@@ -115,6 +115,14 @@ def _parse_time_only(value: str | None) -> time | None:
         return None
 
 
+def _parse_group_count(value: str | None) -> int:
+    try:
+        parsed = int(value) if value is not None else 1
+    except (TypeError, ValueError):
+        return 1
+    return 2 if parsed >= 2 else 1
+
+
 def _teacher_unavailability_backgrounds(teacher: Teacher) -> list[dict[str, object]]:
     backgrounds: list[dict[str, object]] = []
     for weekday in range(5):
@@ -231,6 +239,11 @@ def _validate_session_constraints(
         return "L'enseignant n'est pas disponible sur ce créneau."
     if _has_conflict(teacher.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "L'enseignant a déjà une séance sur ce créneau."
+    required_students = course.expected_students_for(class_group)
+    if room.capacity < required_students:
+        return "La capacité de la salle est insuffisante pour ce groupe."
+    if course.requires_computers and room.computers < required_students:
+        return "La salle ne dispose pas d'assez de postes informatiques pour ce groupe."
     if _has_conflict(room.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "La salle est déjà réservée sur ce créneau."
     if not class_group.is_available_during(start_dt, end_dt, ignore_session_id=ignore_session_id):
@@ -590,6 +603,7 @@ def room_detail(room_id: int):
 def courses_list():
     equipments = Equipment.query.order_by(Equipment.name).all()
     softwares = Software.query.order_by(Software.name).all()
+    class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -604,6 +618,7 @@ def courses_list():
                 end_date=_parse_date(request.form.get("end_date")),
                 priority=int(request.form.get("priority", 1)),
                 requires_computers=bool(request.form.get("requires_computers")),
+                group_count=_parse_group_count(request.form.get("group_count")),
             )
             course.equipments = [
                 equipment
@@ -614,6 +629,12 @@ def courses_list():
                 software
                 for software in (Software.query.get(int(sid)) for sid in request.form.getlist("softwares"))
                 if software is not None
+            ]
+            class_ids = {int(cid) for cid in request.form.getlist("classes")}
+            course.classes = [
+                class_group
+                for class_group in (ClassGroup.query.get(cid) for cid in class_ids)
+                if class_group is not None
             ]
             db.session.add(course)
             try:
@@ -630,6 +651,7 @@ def courses_list():
         courses=courses,
         equipments=equipments,
         softwares=softwares,
+        class_groups=class_groups,
     )
 
 
@@ -653,6 +675,7 @@ def course_detail(course_id: int):
             course.end_date = _parse_date(request.form.get("end_date"))
             course.priority = int(request.form.get("priority", course.priority))
             course.requires_computers = bool(request.form.get("requires_computers"))
+            course.group_count = _parse_group_count(request.form.get("group_count"))
             course.equipments = [
                 equipment
                 for equipment in (Equipment.query.get(int(eid)) for eid in request.form.getlist("equipments"))

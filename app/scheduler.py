@@ -58,12 +58,17 @@ def teacher_hours_in_week(teacher: Teacher, week_start: date) -> float:
     return total
 
 
-def find_available_room(course: Course, start: datetime, end: datetime) -> Optional[Room]:
+def find_available_room(
+    course: Course,
+    start: datetime,
+    end: datetime,
+    required_capacity: int,
+) -> Optional[Room]:
     rooms = Room.query.order_by(Room.capacity.asc()).all()
     for room in rooms:
-        if room.capacity < course.expected_students:
+        if room.capacity < required_capacity:
             continue
-        if course.requires_computers and room.computers <= 0:
+        if course.requires_computers and room.computers < required_capacity:
             continue
         if any(eq not in room.equipments for eq in course.equipments):
             continue
@@ -132,7 +137,8 @@ def generate_schedule(course: Course) -> list[Session]:
                 teacher = find_available_teacher(course, start_dt, end_dt)
                 if not teacher:
                     continue
-                room = find_available_room(course, start_dt, end_dt)
+                required_capacity = course.expected_students_for(class_group)
+                room = find_available_room(course, start_dt, end_dt, required_capacity)
                 if not room:
                     continue
                 session = Session(

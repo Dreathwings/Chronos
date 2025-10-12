@@ -29,6 +29,7 @@ def seed_data() -> None:
         end_date=today + timedelta(days=10),
         priority=1,
         requires_computers=True,
+        group_count=1,
     )
 
     teacher = Teacher(
