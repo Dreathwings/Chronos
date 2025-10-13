@@ -30,8 +30,10 @@ def _sessions_can_chain(previous: Session, current: Session) -> bool:
         return False
     if gap <= MAX_SLOT_GAP:
         return True
+    # Les pauses étendues (midi, fin de matinée, etc.) doivent interrompre
+    # l'affichage groupé afin de refléter les coupures dans l'emploi du temps.
     if (previous.end_time.time(), current.start_time.time()) in EXTENDED_BREAKS:
-        return True
+        return False
     return False
 
 
