@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, TypeVar
 
 from flask import current_app
 
@@ -28,6 +28,23 @@ SCHEDULE_SLOTS: List[tuple[time, time]] = [
 ]
 
 START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
+
+
+T = TypeVar("T")
+
+
+def _spread_sequence(items: Iterable[T]) -> list[T]:
+    ordered = list(items)
+    spread: list[T] = []
+    left = 0
+    right = len(ordered) - 1
+    while left <= right:
+        spread.append(ordered[left])
+        left += 1
+        if left <= right:
+            spread.append(ordered[right])
+            right -= 1
+    return spread
 
 
 def daterange(start: date, end: date) -> Iterable[date]:
@@ -109,7 +126,8 @@ def generate_schedule(course: Course) -> list[Session]:
     slot_length_hours = course.session_length_hours
     slot_length = timedelta(hours=slot_length_hours)
 
-    priority_days = sorted(daterange(course.start_date, course.end_date))
+    priority_days = _spread_sequence(sorted(daterange(course.start_date, course.end_date)))
+    priority_start_times = _spread_sequence(START_TIMES)
 
     for class_group in sorted(course.classes, key=lambda c: c.name.lower()):
         sessions_to_create = _class_sessions_needed(course, class_group)
@@ -122,7 +140,7 @@ def generate_schedule(course: Course) -> list[Session]:
                 continue
             if not class_group.is_available_on(day):
                 continue
-            for slot_start_time in START_TIMES:
+            for slot_start_time in priority_start_times:
                 start_dt = datetime.combine(day, slot_start_time)
                 end_dt = start_dt + slot_length
                 if not fits_in_windows(start_dt.time(), end_dt.time()):

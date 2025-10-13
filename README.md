@@ -72,9 +72,36 @@ python -m compileall app
 
 ## Notes techniques
 
-- L'algorithme de génération automatique parcourt les jours ouvrés de la plage de dates définie et sélectionne les premiers créneaux disponibles respectant les contraintes (professeur disponible, salle adéquate, ressources requises et charge hebdomadaire maximale).
+- L'algorithme de génération automatique parcourt les jours ouvrés de la plage de dates définie en alternant entre les extrémités de la plage (début/fin) et sélectionne des créneaux répartis sur l'ensemble de la journée pour éviter un empilement en début de période, tout en respectant les contraintes (professeur disponible, salle adéquate, ressources requises et charge hebdomadaire maximale).
 - Les pauses sont prises en compte avec les créneaux suivants : 08h-09h, 09h-10h, 10h15-11h15, 11h15-12h15, 13h30-14h30, 14h30-15h30, 15h45-16h45, 16h45-17h45.
 - Les calendriers sont générés côté client avec FullCalendar (CDN), affichent les journées de 07h à 19h et grisent automatiquement les pauses ainsi que les plages indisponibles (enseignants et classes).
+
+## Paramétrer l'auto-placement des cours
+
+Pour utiliser la génération automatique depuis la fiche d'un cours (`/matiere/<id>`), assurez-vous que :
+
+1. **Le cours est correctement paramétré** :
+   - Renseignez les dates de début et de fin, le nombre de séances requises et la durée d'une séance dans le formulaire « Contraintes du cours ».
+   - Associez au moins une classe au cours, ainsi que les enseignants susceptibles d'intervenir, les équipements/logiciels requis et le besoin éventuel en ordinateurs.
+2. **Les ressources sont prêtes** :
+   - Pour chaque enseignant sélectionné, configurez ses disponibilités hebdomadaires et sa charge maximale dans l'onglet enseignant afin que l'algorithme puisse vérifier la disponibilité et le volume horaire.
+   - Vérifiez que les salles disposent de capacités, d'ordinateurs, de matériels et de logiciels conformes aux contraintes du cours.
+   - Saisissez les indisponibilités ponctuelles des classes si nécessaire afin d'éviter des conflits.
+3. **Lancez la génération** :
+   - Depuis la fiche du cours, cliquez sur **« Générer automatiquement »**. L'application créera autant de séances que nécessaire en respectant les fenêtres horaires de travail (08h-18h avec pauses définies) et en cherchant un créneau compatible pour la classe, un enseignant disponible et une salle adaptée.
+
+En cas d'échec (séances restantes), un avertissement est consigné dans les logs et vous pouvez compléter la planification manuellement à l'aide du formulaire « Ajouter une séance manuelle ».
+
+## Modifier le comportement de l'algorithme
+
+L'algorithme de génération automatique est centralisé dans [`app/scheduler.py`](app/scheduler.py). Les principales zones à ajuster sont :
+
+- **Plages de travail et créneaux testés** : les constantes `WORKING_WINDOWS`, `SCHEDULE_SLOTS` et `START_TIMES` définissent respectivement les amplitudes journalières autorisées, les découpages d'une heure utilisés pour tester un placement, ainsi que la liste des heures de début. Modifiez-les pour élargir ou restreindre les journées travaillées, ou pour tester des durées différentes (par exemple des créneaux de 90 minutes).
+- **Heuristiques de priorisation** : les fonctions `find_available_teacher` et `find_available_room` appliquent les critères de tri (capacité croissante pour les salles, charge hebdomadaire maximale pour les enseignants). Vous pouvez y modifier l'ordre de tri ou ajouter d'autres critères (distance entre salles, préférences d'affectation…) avant le filtre sur les conflits. La fonction `_spread_sequence` est utilisée dans `generate_schedule` pour alterner les créneaux sélectionnés entre le début et la fin de la plage ; adaptez-la si vous souhaitez d'autres stratégies de répartition.
+- **Gestion des contraintes supplémentaires** : ajoutez vos propres validations dans `generate_schedule` (ex. interdire deux séances consécutives pour une même classe) en insérant des `continue` lorsque les nouvelles règles ne sont pas respectées.
+- **Journalisation et retours utilisateur** : personnalisez les messages envoyés dans les logs via `current_app.logger` pour faciliter le diagnostic, ou complétez la réponse HTTP renvoyée dans `app/routes.py` lorsque `generate_schedule` échoue.
+
+Après toute modification, relancez la commande `flask --app app run --debug` afin de recharger le serveur, puis effectuez une génération automatique sur un cours test pour valider le nouveau comportement.
 
 ## Licence
 
