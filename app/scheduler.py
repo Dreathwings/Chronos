@@ -6,7 +6,7 @@ from typing import Iterable, List, Optional, TypeVar
 from flask import current_app
 
 from . import db
-from .models import ClassGroup, Course, Room, Session, Teacher
+from .models import ClassGroup, Course, CourseClassLink, Room, Session, Teacher
 
 # Working windows respecting pauses
 WORKING_WINDOWS: List[tuple[time, time]] = [
@@ -75,10 +75,17 @@ def teacher_hours_in_week(teacher: Teacher, week_start: date) -> float:
     return total
 
 
-def find_available_room(course: Course, start: datetime, end: datetime) -> Optional[Room]:
+def find_available_room(
+    course: Course,
+    start: datetime,
+    end: datetime,
+    *,
+    required_capacity: int | None = None,
+) -> Optional[Room]:
     rooms = Room.query.order_by(Room.capacity.asc()).all()
+    required_students = required_capacity or course.expected_students
     for room in rooms:
-        if room.capacity < course.expected_students:
+        if room.capacity < required_students:
             continue
         if course.requires_computers and room.computers <= 0:
             continue
@@ -96,9 +103,27 @@ def find_available_room(course: Course, start: datetime, end: datetime) -> Optio
     return None
 
 
-def find_available_teacher(course: Course, start: datetime, end: datetime) -> Optional[Teacher]:
-    candidate_teachers = course.teachers if course.teachers else Teacher.query.all()
-    for teacher in sorted(candidate_teachers, key=lambda t: t.max_hours_per_week):
+def find_available_teacher(
+    course: Course,
+    start: datetime,
+    end: datetime,
+    *,
+    link: CourseClassLink | None = None,
+    subgroup_label: str | None = None,
+) -> Optional[Teacher]:
+    preferred: list[Teacher] = []
+    if link is not None:
+        assigned = link.teacher_for_label(subgroup_label)
+        if assigned is not None:
+            preferred.append(assigned)
+
+    if course.teachers:
+        fallback_pool = list(course.teachers)
+    else:
+        fallback_pool = Teacher.query.all()
+
+    candidates = preferred + [teacher for teacher in fallback_pool if teacher not in preferred]
+    for teacher in sorted(candidates, key=lambda t: t.max_hours_per_week):
         if not teacher.is_available_during(start, end):
             continue
         if any(overlaps(s.start_time, s.end_time, start, end) for s in teacher.sessions):
@@ -110,9 +135,22 @@ def find_available_teacher(course: Course, start: datetime, end: datetime) -> Op
     return None
 
 
-def _class_sessions_needed(course: Course, class_group: ClassGroup) -> int:
-    existing = sum(1 for session in course.sessions if session.class_group_id == class_group.id)
-    return max(course.sessions_required - existing, 0)
+def _normalise_label(label: str | None) -> str:
+    return (label or "").upper()
+
+
+def _class_sessions_needed(
+    course: Course, class_group: ClassGroup, subgroup_label: str | None
+) -> int:
+    target_label = _normalise_label(subgroup_label)
+    existing = sum(
+        1
+        for session in course.sessions
+        if session.class_group_id == class_group.id
+        and _normalise_label(session.subgroup_label) == target_label
+    )
+    required_total = course.sessions_required
+    return max(required_total - existing, 0)
 
 
 def _day_search_order(available_days: list[date], anchor_index: int) -> list[date]:
