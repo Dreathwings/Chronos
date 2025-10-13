@@ -27,6 +27,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_session_subgroup_column()
         _ensure_course_class_group_count_column()
         _ensure_course_class_teacher_columns()
+        _ensure_course_type_column()
 
     from .routes import bp as main_bp
 
@@ -174,3 +175,41 @@ def _ensure_course_class_teacher_columns() -> None:
                 connection.execute(text(statement))
     except SQLAlchemyError as exc:  # pragma: no cover
         current_app.logger.warning("Unable to add teacher columns to course_class: %s", exc)
+
+
+def _ensure_course_type_column() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course")}
+    if "course_type" in existing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE course ADD COLUMN course_type VARCHAR(2) NOT NULL DEFAULT 'CM'"
+                )
+            )
+            connection.execute(
+                text("UPDATE course SET course_type = 'CM' WHERE course_type IS NULL")
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        current_app.logger.warning("Unable to add course_type column to course: %s", exc)
+        return
+
+    if engine.dialect.name not in {"sqlite"}:
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE course MODIFY course_type VARCHAR(2) NOT NULL DEFAULT 'CM'"
+                    )
+                )
+        except SQLAlchemyError:
+            current_app.logger.warning(
+                "Unable to tighten constraints on course.course_type; continuing with relaxed column."
+            )

@@ -45,13 +45,6 @@
             <div class="form-text">Tous les cours disponibles sont déjà associés.</div>
             {% endif %}
           </div>
-          <div>
-            <label class="form-label">Répartition</label>
-            <select class="form-select" name="group_count" {% if not assignable_courses %}disabled{% endif %}>
-              <option value="1" selected>Classe entière</option>
-              <option value="2">Demi-groupes (x2)</option>
-            </select>
-          </div>
           {% if teachers %}
           <div>
             <label class="form-label text-muted mb-1 small">Enseignant</label>
@@ -78,7 +71,7 @@
             <div>
               <span class="fw-semibold">{{ link.course.name }}</span>
               {% if link.group_count == 2 %}
-              <span class="badge bg-info text-dark ms-1">Demi-groupes</span>
+              <span class="badge bg-info text-dark ms-1">Travaux pratiques</span>
               {% else %}
               <span class="badge bg-secondary ms-1">Classe entière</span>
               {% endif %}

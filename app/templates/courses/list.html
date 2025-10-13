@@ -19,8 +19,12 @@
           </div>
           <div class="row g-2">
             <div class="col">
-              <label class="form-label">Étudiants attendus</label>
-              <input type="number" class="form-control" name="expected_students" value="10" min="1">
+              <label class="form-label">Type de cours</label>
+              <select class="form-select" name="course_type">
+                <option value="CM">Cours magistral</option>
+                <option value="TD">Travaux dirigés</option>
+                <option value="TP">Travaux pratiques</option>
+              </select>
             </div>
             <div class="col">
               <label class="form-label">Durée séance (h)</label>
@@ -63,15 +67,8 @@
                     {{ class_group.name }} — {{ class_group.size }} étudiants
                   </label>
                 </div>
-                <div class="mt-2 ms-4 vstack gap-2">
-                  <div>
-                    <label class="form-label text-muted mb-1 small">Répartition</label>
-                    <select class="form-select form-select-sm w-auto" name="class_group_groups_{{ class_group.id }}">
-                      <option value="1" selected>Classe entière</option>
-                      <option value="2">Demi-groupes (x2)</option>
-                    </select>
-                    <div class="form-text">Le mode demi-groupe planifie deux séances avec la moitié des étudiants.</div>
-                  </div>
+                <div class="mt-2 ms-4 text-muted small">
+                  Les travaux pratiques seront automatiquement répartis en demi-groupes.
                 </div>
               </div>
               {% endfor %}
@@ -111,8 +108,9 @@
           <thead>
             <tr>
               <th>Nom</th>
+              <th>Type</th>
               <th>Période</th>
-              <th>Séances</th>
+              <th>Heures planifiées</th>
               <th>Priorité</th>
               <th>Classes</th>
             </tr>
@@ -121,10 +119,11 @@
             {% for course in courses %}
             <tr>
               <td><a href="{{ url_for('main.course_detail', course_id=course.id) }}">{{ course.name }}</a></td>
+              <td>{{ course_type_labels.get(course.course_type, course.course_type) }}</td>
               <td>{{ course.start_date or '—' }} → {{ course.end_date or '—' }}</td>
               {% set group_total = course.class_links | map(attribute='group_count') | sum %}
-              {% set required_total = course.sessions_required * (group_total if group_total else 1) %}
-              <td>{{ course.sessions|length }}/{{ required_total }}</td>
+              {% set required_hours = course.total_required_hours %}
+              <td>{{ course.scheduled_hours }}h/{{ required_hours }}h</td>
               <td>{{ course.priority }}</td>
               <td>
                 {% if course.class_links %}
