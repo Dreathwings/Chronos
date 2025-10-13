@@ -4,6 +4,7 @@ from . import db
 from .models import (
     ClassGroup,
     Course,
+    CourseClassLink,
     Equipment,
     Room,
     Session,
@@ -63,7 +64,7 @@ def seed_data() -> None:
     python.teachers.append(teacher)
 
     class_a = ClassGroup(name="Classe A", size=20)
-    python.classes.append(class_a)
+    python.class_links.append(CourseClassLink(class_group=class_a))
 
     db.session.add_all([python, teacher, room, projector, vscode, class_a])
     db.session.flush()

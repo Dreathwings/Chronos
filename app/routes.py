@@ -10,6 +10,7 @@ from . import db
 from .models import (
     ClassGroup,
     Course,
+    CourseClassLink,
     Equipment,
     Room,
     Session,
@@ -198,6 +199,36 @@ def _class_unavailability_backgrounds(class_group: ClassGroup) -> list[dict[str,
     return backgrounds
 
 
+def _parse_group_count(raw_value: str | None) -> int:
+    try:
+        parsed = int(raw_value) if raw_value is not None else 1
+    except ValueError:
+        parsed = 1
+    return 2 if parsed >= 2 else 1
+
+
+def _parse_teacher_selection(raw_value: str | None) -> Teacher | None:
+    if not raw_value:
+        return None
+    try:
+        teacher_id = int(raw_value)
+    except (TypeError, ValueError):
+        return None
+    return Teacher.query.get(teacher_id)
+
+
+def _parse_class_group_choice(raw_value: str | None) -> tuple[int, str | None] | None:
+    if not raw_value:
+        return None
+    class_part, _, label_part = raw_value.partition(":")
+    try:
+        class_id = int(class_part)
+    except ValueError:
+        return None
+    label = label_part.strip().upper() if label_part else ""
+    return class_id, (label or None)
+
+
 def _has_conflict(
     sessions: list[Session],
     start: datetime,
@@ -235,6 +266,18 @@ def _validate_session_constraints(
         return "La salle est déjà réservée sur ce créneau."
     if not class_group.is_available_during(start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "La classe est indisponible sur ce créneau."
+    required_capacity = course.capacity_needed_for(class_group)
+    if room.capacity < required_capacity:
+        return (
+            "La salle ne peut pas accueillir la taille du groupe demandée "
+            f"({required_capacity} étudiants)."
+        )
+    if course.requires_computers and room.computers <= 0:
+        return "La salle ne dispose pas d'ordinateurs alors que le cours en requiert."
+    if any(eq not in room.equipments for eq in course.equipments):
+        return "La salle ne possède pas l'équipement requis pour ce cours."
+    if any(sw not in room.softwares for sw in course.softwares):
+        return "La salle ne possède pas le logiciel requis pour ce cours."
     return None
 
 
@@ -245,16 +288,37 @@ def dashboard():
     rooms = Room.query.order_by(Room.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
 
+    course_class_options: dict[int, list[dict[str, str]]] = {}
+    for course in courses:
+        options: list[dict[str, str]] = []
+        links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
+        for link in links:
+            for subgroup_label in link.group_labels():
+                value_suffix = subgroup_label or ""
+                option_value = f"{link.class_group_id}:{value_suffix}"
+                base_label = (
+                    f"{link.class_group.name} — groupe {subgroup_label.upper()}"
+                    if subgroup_label
+                    else f"{link.class_group.name} — classe entière"
+                )
+                teacher = link.teacher_for_label(subgroup_label)
+                if teacher:
+                    option_label = f"{base_label} ({teacher.name})"
+                else:
+                    option_label = f"{base_label} (Aucun enseignant)"
+                options.append({"value": option_value, "label": option_label})
+        course_class_options[course.id] = options
+
     if request.method == "POST":
         if request.form.get("form") == "quick-session":
             course_id = int(request.form["course_id"])
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
-            class_group_id_raw = request.form.get("class_group_id")
-            if not class_group_id_raw:
+            class_choice = _parse_class_group_choice(request.form.get("class_group_choice"))
+            if class_choice is None:
                 flash("Sélectionnez une classe pour la séance", "danger")
                 return redirect(url_for("main.dashboard"))
-            class_group_id = int(class_group_id_raw)
+            class_group_id, subgroup_label = class_choice
             date_str = request.form["date"]
             start_time_str = request.form["start_time"]
             course = Course.query.get_or_404(course_id)
@@ -266,6 +330,14 @@ def dashboard():
             class_group = ClassGroup.query.get_or_404(class_group_id)
             if class_group not in course.classes:
                 flash("Associez la classe au cours avant de planifier", "danger")
+                return redirect(url_for("main.dashboard"))
+            link = course.class_link_for(class_group)
+            if link is None:
+                flash("Associez la classe au cours avant de planifier", "danger")
+                return redirect(url_for("main.dashboard"))
+            valid_labels = {label or None for label in link.group_labels()}
+            if subgroup_label not in valid_labels:
+                flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
                 return redirect(url_for("main.dashboard"))
             room = Room.query.get_or_404(room_id)
             error_message = _validate_session_constraints(
@@ -280,6 +352,7 @@ def dashboard():
                 teacher_id=teacher_id,
                 room_id=room_id,
                 class_group_id=class_group_id,
+                subgroup_label=subgroup_label,
                 start_time=start_dt,
                 end_time=end_dt,
             )
@@ -295,6 +368,8 @@ def dashboard():
         teachers=teachers,
         rooms=rooms,
         class_groups=class_groups,
+        course_class_options=course_class_options,
+        course_class_options_json=json.dumps(course_class_options, ensure_ascii=False),
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
     )
@@ -477,6 +552,7 @@ def class_detail(class_id: int):
     class_group = ClassGroup.query.get_or_404(class_id)
     courses = Course.query.order_by(Course.name).all()
     assignable_courses = [course for course in courses if class_group not in course.classes]
+    teachers = Teacher.query.order_by(Teacher.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -490,14 +566,24 @@ def class_detail(class_id: int):
             course_id = int(request.form["course_id"])
             course = Course.query.get_or_404(course_id)
             if class_group not in course.classes:
-                course.classes.append(class_group)
+                group_count = _parse_group_count(request.form.get("group_count"))
+                teacher = _parse_teacher_selection(request.form.get("teacher"))
+                course.class_links.append(
+                    CourseClassLink(
+                        class_group=class_group,
+                        group_count=group_count,
+                        teacher_a=teacher,
+                        teacher_b=teacher if group_count == 2 else None,
+                    )
+                )
                 db.session.commit()
                 flash("Cours associé à la classe", "success")
         elif form_name == "remove-course":
             course_id = int(request.form["course_id"])
             course = Course.query.get_or_404(course_id)
-            if class_group in course.classes:
-                course.classes.remove(class_group)
+            link = course.class_link_for(class_group)
+            if link is not None:
+                course.class_links.remove(link)
                 db.session.commit()
                 flash("Cours retiré de la classe", "success")
         return redirect(url_for("main.class_detail", class_id=class_id))
@@ -509,6 +595,7 @@ def class_detail(class_id: int):
         class_group=class_group,
         courses=courses,
         assignable_courses=assignable_courses,
+        teachers=teachers,
         events_json=json.dumps(events, ensure_ascii=False),
         unavailability_backgrounds_json=json.dumps(unavailability_backgrounds, ensure_ascii=False),
     )
@@ -590,6 +677,8 @@ def room_detail(room_id: int):
 def courses_list():
     equipments = Equipment.query.order_by(Equipment.name).all()
     softwares = Software.query.order_by(Software.name).all()
+    class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    teachers = Teacher.query.order_by(Teacher.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -615,6 +704,22 @@ def courses_list():
                 for software in (Software.query.get(int(sid)) for sid in request.form.getlist("softwares"))
                 if software is not None
             ]
+            selected_class_ids = {int(cid) for cid in request.form.getlist("classes")}
+            links: list[CourseClassLink] = []
+            for class_id in selected_class_ids:
+                class_group = ClassGroup.query.get(class_id)
+                if class_group is None:
+                    continue
+                group_count = _parse_group_count(
+                    request.form.get(f"class_group_groups_{class_group.id}")
+                )
+                links.append(
+                    CourseClassLink(
+                        class_group=class_group,
+                        group_count=group_count,
+                    )
+                )
+            course.class_links = links
             db.session.add(course)
             try:
                 db.session.commit()
@@ -630,6 +735,8 @@ def courses_list():
         courses=courses,
         equipments=equipments,
         softwares=softwares,
+        class_groups=class_groups,
+        teachers=teachers,
     )
 
 
@@ -641,6 +748,7 @@ def course_detail(course_id: int):
     teachers = Teacher.query.order_by(Teacher.name).all()
     rooms = Room.query.order_by(Room.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    class_links_map = {link.class_group_id: link for link in course.class_links}
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -664,11 +772,27 @@ def course_detail(course_id: int):
                 if software is not None
             ]
             class_ids = {int(cid) for cid in request.form.getlist("classes")}
-            course.classes = [
-                class_group
-                for class_group in (ClassGroup.query.get(cid) for cid in class_ids)
-                if class_group is not None
-            ]
+            links: list[CourseClassLink] = []
+            for class_id in class_ids:
+                class_group = ClassGroup.query.get(class_id)
+                if class_group is None:
+                    continue
+                group_count = _parse_group_count(
+                    request.form.get(f"class_group_groups_{class_group.id}")
+                )
+                existing_link = class_links_map.get(class_id)
+                existing_teacher = None
+                if existing_link is not None:
+                    existing_teacher = existing_link.teacher_a or existing_link.teacher_b
+                links.append(
+                    CourseClassLink(
+                        class_group=class_group,
+                        group_count=group_count,
+                        teacher_a=existing_teacher,
+                        teacher_b=existing_teacher if group_count == 2 and existing_teacher else None,
+                    )
+                )
+            course.class_links = links
             teacher_ids = {int(tid) for tid in request.form.getlist("teachers")}
             course.teachers = [
                 teacher
@@ -687,10 +811,23 @@ def course_detail(course_id: int):
                     flash("Aucune séance générée", "info")
             except ValueError as exc:
                 flash(str(exc), "danger")
+        elif form_name == "update-class-teachers":
+            for link in course.class_links:
+                teacher = _parse_teacher_selection(
+                    request.form.get(f"class_link_teacher_{link.class_group_id}")
+                )
+                link.teacher_a = teacher
+                link.teacher_b = teacher if link.group_count == 2 and teacher else None
+            db.session.commit()
+            flash("Enseignants par classe mis à jour", "success")
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
-            class_group_id = int(request.form["class_group_id"])
+            class_choice = _parse_class_group_choice(request.form.get("class_group_choice"))
+            if class_choice is None:
+                flash("Sélectionnez un groupe valide pour la classe", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            class_group_id, subgroup_label = class_choice
             start_dt = _parse_datetime(request.form["date"], request.form["start_time"])
             duration_raw = request.form.get("duration")
             duration = int(duration_raw) if duration_raw else course.session_length_hours
@@ -698,6 +835,14 @@ def course_detail(course_id: int):
             class_group = ClassGroup.query.get_or_404(class_group_id)
             if class_group not in course.classes:
                 flash("Associez d'abord la classe au cours", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            link = course.class_link_for(class_group)
+            if link is None:
+                flash("Associez d'abord la classe au cours", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            valid_labels = {label or None for label in link.group_labels()}
+            if subgroup_label not in valid_labels:
+                flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
                 return redirect(url_for("main.course_detail", course_id=course_id))
             teacher = Teacher.query.get_or_404(teacher_id)
             room = Room.query.get_or_404(room_id)
@@ -717,6 +862,7 @@ def course_detail(course_id: int):
                 teacher_id=teacher_id,
                 room_id=room_id,
                 class_group_id=class_group_id,
+                subgroup_label=subgroup_label,
                 start_time=start_dt,
                 end_time=end_dt,
             )
@@ -734,6 +880,7 @@ def course_detail(course_id: int):
         teachers=teachers,
         rooms=rooms,
         class_groups=class_groups,
+        class_links_map=class_links_map,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
     )

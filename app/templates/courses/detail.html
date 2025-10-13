@@ -49,22 +49,56 @@
           </div>
           <div>
             <label class="form-label">Enseignants</label>
-            {% for teacher in teachers %}
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="teachers" value="{{ teacher.id }}" id="teacher-{{ teacher.id }}" {% if teacher in course.teachers %}checked{% endif %}>
-              <label class="form-check-label" for="teacher-{{ teacher.id }}">{{ teacher.name }}</label>
+            <input
+              type="search"
+              class="form-control form-control-sm mb-2"
+              placeholder="Rechercher un enseignant..."
+              data-filter-target="#course-teachers-list"
+            >
+            <div id="course-teachers-list" class="vstack gap-1">
+              {% for teacher in teachers %}
+              <div class="form-check" data-filter-item data-filter-text="{{ teacher.name|lower|e }}">
+                <input class="form-check-input" type="checkbox" name="teachers" value="{{ teacher.id }}" id="teacher-{{ teacher.id }}" {% if teacher in course.teachers %}checked{% endif %}>
+                <label class="form-check-label" for="teacher-{{ teacher.id }}">{{ teacher.name }}</label>
+              </div>
+              {% endfor %}
             </div>
-            {% endfor %}
           </div>
           <div>
             <label class="form-label">Classes associées</label>
-            {% for class_group in class_groups %}
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="classes" value="{{ class_group.id }}" id="class-{{ class_group.id }}" {% if class_group in course.classes %}checked{% endif %}>
-              <label class="form-check-label" for="class-{{ class_group.id }}">{{ class_group.name }}</label>
+            <input
+              type="search"
+              class="form-control form-control-sm mb-2"
+              placeholder="Rechercher une classe..."
+              data-filter-target="#course-classes-list"
+            >
+            <div id="course-classes-list" class="vstack">
+              {% for class_group in class_groups %}
+              {% set link = class_links_map.get(class_group.id) %}
+              <div class="border rounded p-2 mb-2" data-filter-item data-filter-text="{{ class_group.name|lower|e }}">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="classes" value="{{ class_group.id }}" id="class-{{ class_group.id }}" {% if link %}checked{% endif %}>
+                  <label class="form-check-label" for="class-{{ class_group.id }}">
+                    {{ class_group.name }} — {{ class_group.size }} étudiants
+                  </label>
+                </div>
+                <div class="mt-2 ms-4 vstack gap-2">
+                  <div>
+                    <label class="form-label text-muted mb-1 small">Répartition</label>
+                    <select class="form-select form-select-sm w-auto" name="class_group_groups_{{ class_group.id }}">
+                      <option value="1" {% if not link or link.group_count == 1 %}selected{% endif %}>Classe entière</option>
+                      <option value="2" {% if link and link.group_count == 2 %}selected{% endif %}>Demi-groupes (x2)</option>
+                    </select>
+                    <div class="form-text">Sélectionnez demi-groupes pour créer deux séances avec moitié d'effectif.</div>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
             </div>
-            {% endfor %}
           </div>
+          {% if course.class_links %}
+          <div class="form-text">Les enseignants sont définis depuis la section dédiée ci-dessous.</div>
+          {% endif %}
           <div>
             <label class="form-label">Équipements requis</label>
             {% for equipment in equipments %}
@@ -85,8 +119,42 @@
           </div>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </form>
+    </div>
+  </div>
+    {% if course.class_links %}
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Enseignants par classe</div>
+      <div class="card-body">
+        {% if teachers %}
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="update-class-teachers">
+          {% for link in course.class_links %}
+          {% set assigned_teacher = link.teacher_a or link.teacher_b %}
+          <div class="border rounded p-2">
+            <div class="fw-semibold">{{ link.class_group.name }}</div>
+            <div class="text-muted small mb-2">
+              {% if link.group_count == 2 %}
+              Demi-groupes A/B
+              {% else %}
+              Classe entière
+              {% endif %}
+            </div>
+            <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}">
+              <option value="" {% if not assigned_teacher %}selected{% endif %}>— Aucun enseignant —</option>
+              {% for teacher in teachers %}
+              <option value="{{ teacher.id }}" {% if assigned_teacher and teacher.id == assigned_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endfor %}
+          <button type="submit" class="btn btn-outline-secondary">Mettre à jour</button>
+        </form>
+        {% else %}
+        <p class="text-muted mb-0 small">Ajoutez des enseignants dans la liste ci-dessus pour les associer aux classes.</p>
+        {% endif %}
       </div>
     </div>
+    {% endif %}
     <div class="d-grid gap-2 mt-4">
       <form method="post">
         <input type="hidden" name="form" value="auto-schedule">
@@ -98,7 +166,7 @@
     <div class="card shadow-sm mb-4">
       <div class="card-header bg-info text-white">Ajouter une séance manuelle</div>
       <div class="card-body">
-        {% if teachers and rooms and course.classes %}
+        {% if teachers and rooms and course.class_links %}
         <form method="post" class="row g-3">
           <input type="hidden" name="form" value="manual-session">
           <div class="col-md-4">
@@ -119,9 +187,16 @@
           </div>
           <div class="col-md-4">
             <label class="form-label">Classe</label>
-            <select class="form-select" name="class_group_id">
-              {% for class_group in course.classes %}
-              <option value="{{ class_group.id }}">{{ class_group.name }}</option>
+            <select class="form-select" name="class_group_choice">
+              {% for link in course.class_links %}
+                {% for subgroup_label in link.group_labels() %}
+                {% set value = link.class_group.id ~ ':' ~ (subgroup_label if subgroup_label else '') %}
+                {% set assigned_teacher = link.teacher_for_label(subgroup_label) %}
+                <option value="{{ value }}">
+                  {{ link.class_group.name }} — {% if subgroup_label %}groupe {{ subgroup_label|upper }}{% else %}classe entière{% endif %}
+                  {% if assigned_teacher %}( {{ assigned_teacher.name }} ){% else %}( Aucun enseignant ){% endif %}
+                </option>
+                {% endfor %}
               {% endfor %}
             </select>
           </div>
@@ -163,8 +238,42 @@
 {% endblock %}
 
 {% block scripts %}
+{{ super() }}
 <script>
+  function chronosBindFilterInputs() {
+    document.querySelectorAll('[data-filter-target]').forEach(function(input) {
+      const targetSelector = input.getAttribute('data-filter-target');
+      if (!targetSelector) {
+        return;
+      }
+      const target = document.querySelector(targetSelector);
+      if (!target) {
+        return;
+      }
+      const updateVisibility = function() {
+        const query = (input.value || '').trim().toLowerCase();
+        const hasQuery = query.length > 0;
+        const items = target.querySelectorAll('[data-filter-item]');
+        items.forEach(function(item) {
+          const filterText = (item.getAttribute('data-filter-text') || item.textContent || '').toLowerCase();
+          const checkbox = item.querySelector('input[type="checkbox"]');
+          const isSelected = checkbox ? checkbox.checked : false;
+          const matchesQuery = hasQuery && filterText.indexOf(query) !== -1;
+          if (isSelected || matchesQuery) {
+            item.classList.remove('d-none');
+          } else {
+            item.classList.add('d-none');
+          }
+        });
+      };
+      input.addEventListener('input', updateVisibility);
+      target.addEventListener('change', updateVisibility, true);
+      updateVisibility();
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function() {
+    chronosBindFilterInputs();
     const calendarEl = document.getElementById('course-calendar');
     const events = {{ events_json|safe }};
     const calendar = window.createChronosCalendar(calendarEl, events);

@@ -45,6 +45,25 @@
             <div class="form-text">Tous les cours disponibles sont déjà associés.</div>
             {% endif %}
           </div>
+          <div>
+            <label class="form-label">Répartition</label>
+            <select class="form-select" name="group_count" {% if not assignable_courses %}disabled{% endif %}>
+              <option value="1" selected>Classe entière</option>
+              <option value="2">Demi-groupes (x2)</option>
+            </select>
+          </div>
+          {% if teachers %}
+          <div>
+            <label class="form-label text-muted mb-1 small">Enseignant</label>
+            <select class="form-select" name="teacher" {% if not assignable_courses %}disabled{% endif %}>
+              <option value="">— Non défini —</option>
+              {% for teacher in teachers %}
+              <option value="{{ teacher.id }}">{{ teacher.name }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Le même enseignant couvrira les groupes A et B.</div>
+          </div>
+          {% endif %}
           <button type="submit" class="btn btn-outline-primary" {% if not assignable_courses %}disabled{% endif %}>Associer</button>
         </form>
       </div>
@@ -54,12 +73,31 @@
       <div class="card-header bg-secondary text-white">Cours associés</div>
       <div class="card-body">
         <div class="vstack gap-2">
-          {% for course in class_group.courses %}
+          {% for link in class_group.course_links %}
           <form method="post" class="d-flex justify-content-between align-items-center">
-            <span>{{ course.name }}</span>
+            <div>
+              <span class="fw-semibold">{{ link.course.name }}</span>
+              {% if link.group_count == 2 %}
+              <span class="badge bg-info text-dark ms-1">Demi-groupes</span>
+              {% else %}
+              <span class="badge bg-secondary ms-1">Classe entière</span>
+              {% endif %}
+              <ul class="list-unstyled ms-3 mb-0 small text-muted">
+                {% for label, teacher in link.teacher_labels() %}
+                <li>
+                  {% if label %}Groupe {{ label|upper }}{% else %}Classe entière{% endif %}
+                  {% if teacher %}
+                  — {{ teacher.name }}
+                  {% else %}
+                  — Aucun enseignant
+                  {% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
             <div>
               <input type="hidden" name="form" value="remove-course">
-              <input type="hidden" name="course_id" value="{{ course.id }}">
+              <input type="hidden" name="course_id" value="{{ link.course.id }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Retirer</button>
             </div>
           </form>
