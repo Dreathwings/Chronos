@@ -135,7 +135,167 @@
         ].join('');
       }
 
+      const CHRONOS_COURSE_TYPE_LABELS = {
+        CM: 'Cours magistral',
+        TD: 'Travaux dirigés',
+        TP: 'Travaux pratiques',
+      };
+
+      const CHRONOS_EVENT_DATE_FORMATTER = new Intl.DateTimeFormat('fr-FR', {
+        weekday: 'long',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+
+      const CHRONOS_EVENT_TIME_FORMATTER = new Intl.DateTimeFormat('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      function chronosCapitalize(text) {
+        if (typeof text !== 'string' || text.length === 0) {
+          return text;
+        }
+        return text.charAt(0).toUpperCase() + text.slice(1);
+      }
+
+      function chronosBuildEventSchedule(start, end) {
+        if (!(start instanceof Date)) {
+          return '';
+        }
+        const startDateText = chronosCapitalize(CHRONOS_EVENT_DATE_FORMATTER.format(start));
+        const startTimeText = CHRONOS_EVENT_TIME_FORMATTER.format(start);
+        if (!(end instanceof Date)) {
+          return `${startDateText} à ${startTimeText}`;
+        }
+        const endDateText = chronosCapitalize(CHRONOS_EVENT_DATE_FORMATTER.format(end));
+        const endTimeText = CHRONOS_EVENT_TIME_FORMATTER.format(end);
+        if (start.toDateString() === end.toDateString()) {
+          return `${startDateText} de ${startTimeText} à ${endTimeText}`;
+        }
+        return `${startDateText} ${startTimeText} → ${endDateText} ${endTimeText}`;
+      }
+
+      function chronosSetField(modal, fieldName, value) {
+        const target = modal.querySelector(`[data-chronos-field="${fieldName}"]`);
+        if (!target) {
+          return;
+        }
+        const wrappers = modal.querySelectorAll(`[data-chronos-wrapper="${fieldName}"]`);
+        const hasValue = value !== null && value !== undefined && String(value).trim().length > 0;
+        if (!hasValue) {
+          target.textContent = '';
+          wrappers.forEach(function(wrapper) {
+            wrapper.classList.add('d-none');
+          });
+          return;
+        }
+        target.textContent = String(value);
+        wrappers.forEach(function(wrapper) {
+          wrapper.classList.remove('d-none');
+        });
+      }
+
+      function chronosDisplayEventSummary(event) {
+        const modal = document.getElementById('chronos-event-modal');
+        if (!modal) {
+          return;
+        }
+        const props = event.extendedProps || {};
+        const title = modal.querySelector('[data-chronos-field="title"]');
+        if (title) {
+          title.textContent = event.title || props.course || 'Séance planifiée';
+        }
+        const scheduleField = modal.querySelector('[data-chronos-field="schedule"]');
+        if (scheduleField) {
+          scheduleField.style.whiteSpace = '';
+        }
+        let scheduleText = '';
+        const segments = Array.isArray(props.segments) ? props.segments : null;
+        if (segments && segments.length > 1) {
+          const firstSegment = segments[0];
+          const firstDateCandidate = firstSegment && firstSegment.start ? new Date(firstSegment.start) : event.start;
+          const firstDateIsValid = firstDateCandidate instanceof Date && !Number.isNaN(firstDateCandidate.valueOf());
+          const dayText = firstDateIsValid
+            ? chronosCapitalize(CHRONOS_EVENT_DATE_FORMATTER.format(firstDateCandidate))
+            : '';
+          const lines = segments.map(function(segment) {
+            const segStart = segment.start ? new Date(segment.start) : null;
+            const segEnd = segment.end ? new Date(segment.end) : null;
+            if (!segStart || !segEnd) {
+              return '';
+            }
+            if (Number.isNaN(segStart.valueOf()) || Number.isNaN(segEnd.valueOf())) {
+              return '';
+            }
+            const rangeText = `${CHRONOS_EVENT_TIME_FORMATTER.format(segStart)} → ${CHRONOS_EVENT_TIME_FORMATTER.format(segEnd)}`;
+            if (segment.room) {
+              return `${rangeText} • ${segment.room}`;
+            }
+            return rangeText;
+          }).filter(function(line) { return line.length > 0; });
+          if (lines.length > 0) {
+            scheduleText = dayText ? `${dayText}\n${lines.join('\n')}` : lines.join('\n');
+            if (scheduleField) {
+              scheduleField.style.whiteSpace = 'pre-line';
+            }
+          }
+        }
+        if (!scheduleText) {
+          const schedule = chronosBuildEventSchedule(event.start, event.end);
+          scheduleText = schedule;
+        }
+        chronosSetField(modal, 'schedule', scheduleText);
+        chronosSetField(modal, 'course', props.course || '');
+        const typeLabel = props.course_type_label || CHRONOS_COURSE_TYPE_LABELS[props.course_type] || '';
+        chronosSetField(modal, 'course_type', typeLabel);
+        const teacherContact = [props.teacher_email, props.teacher_phone].filter(Boolean).join(' • ');
+        let teacherText = props.teacher || '';
+        if (teacherContact) {
+          teacherText = teacherText ? `${teacherText} (${teacherContact})` : teacherContact;
+        }
+        chronosSetField(modal, 'teacher', teacherText);
+        chronosSetField(modal, 'class_group', props.class_group || '');
+        const subgroupText = props.subgroup ? `Groupe ${props.subgroup}` : '';
+        chronosSetField(modal, 'subgroup', subgroupText);
+        chronosSetField(modal, 'room', props.room || '');
+        let computersText = '';
+        if (typeof props.requires_computers === 'boolean') {
+          computersText = props.requires_computers ? 'Oui' : 'Non';
+        }
+        chronosSetField(modal, 'computers', computersText);
+        const requiredSoftwares = Array.isArray(props.course_softwares) ? props.course_softwares : [];
+        const missingSoftwares = Array.isArray(props.missing_softwares) ? props.missing_softwares : [];
+        const requiredText = requiredSoftwares.length ? requiredSoftwares.join(', ') : 'Aucun';
+        chronosSetField(modal, 'softwares_required', requiredText);
+        const missingText = missingSoftwares.length ? missingSoftwares.join(', ') : 'Aucun';
+        chronosSetField(modal, 'softwares_missing', missingText);
+        const missingWrappers = modal.querySelectorAll('[data-chronos-wrapper="softwares_missing"]');
+        missingWrappers.forEach(function(wrapper) {
+          if (!wrapper.hasAttribute('data-chronos-field')) {
+            wrapper.classList.remove('text-danger');
+            return;
+          }
+          if (missingSoftwares.length) {
+            wrapper.classList.add('text-danger');
+          } else {
+            wrapper.classList.remove('text-danger');
+          }
+        });
+        chronosSetField(modal, 'description', props.course_description || '');
+        const bootstrapModal = bootstrap.Modal.getOrCreateInstance(modal);
+        bootstrapModal.show();
+      }
+
       async function chronosUpdateSession(event) {
+        const props = event.extendedProps || {};
+        const segmentIds = Array.isArray(props.segment_ids) && props.segment_ids.length
+          ? props.segment_ids
+          : [event.id];
+        if (segmentIds.length !== 1) {
+          throw new Error('Impossible de déplacer un bloc contenant plusieurs séances.');
+        }
         if (!event.end) {
           throw new Error('La séance doit avoir une heure de fin définie');
         }
@@ -144,7 +304,7 @@
         if (!startIso || !endIso) {
           throw new Error('Impossible de déterminer les horaires du déplacement');
         }
-        const response = await fetch(`/sessions/${event.id}/move`, {
+        const response = await fetch(`/sessions/${segmentIds[0]}/move`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -173,11 +333,17 @@
       }
 
       async function chronosDeleteSession(event) {
-        const response = await fetch(`/sessions/${event.id}`, { method: 'DELETE' });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          const message = payload.error || 'Impossible de supprimer la séance';
-          throw new Error(message);
+        const props = event.extendedProps || {};
+        const segmentIds = Array.isArray(props.segment_ids) && props.segment_ids.length
+          ? props.segment_ids
+          : [event.id];
+        for (const segmentId of segmentIds) {
+          const response = await fetch(`/sessions/${segmentId}`, { method: 'DELETE' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message = payload.error || 'Impossible de supprimer la séance';
+            throw new Error(message);
+          }
         }
       }
 
@@ -203,6 +369,13 @@
           },
           events: events || [],
           eventDrop: function(info) {
+            const props = info.event.extendedProps || {};
+            const segmentIds = Array.isArray(props.segment_ids) ? props.segment_ids : [];
+            if (segmentIds.length > 1) {
+              info.revert();
+              window.alert('Impossible de déplacer un bloc contenant plusieurs séances.');
+              return;
+            }
             chronosSnapEventToSlots(info.event);
             chronosUpdateSession(info.event).catch(function(error) {
               info.revert();
@@ -213,6 +386,7 @@
             if (info.jsEvent) {
               info.jsEvent.preventDefault();
             }
+            chronosDisplayEventSummary(info.event);
           },
           eventDidMount: function(info) {
             if (!info.el || info.el.dataset.chronosContextMenuBound === '1') {
@@ -221,7 +395,12 @@
             info.el.dataset.chronosContextMenuBound = '1';
             info.el.addEventListener('contextmenu', function(event) {
               event.preventDefault();
-              if (!window.confirm('Supprimer cette séance ?')) {
+              const props = info.event.extendedProps || {};
+              const segmentIds = Array.isArray(props.segment_ids) ? props.segment_ids : [];
+              const confirmationMessage = segmentIds.length > 1
+                ? 'Supprimer toutes les séances de ce bloc ?'
+                : 'Supprimer cette séance ?';
+              if (!window.confirm(confirmationMessage)) {
                 return;
               }
               chronosDeleteSession(info.event)
@@ -291,6 +470,45 @@
       {% endwith %}
       {% block content %}{% endblock %}
     </main>
+    <div class="modal fade" id="chronos-event-modal" tabindex="-1" aria-labelledby="chronos-event-modal-label" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="chronos-event-modal-label" data-chronos-field="title">Séance planifiée</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+          </div>
+          <div class="modal-body">
+            <p class="text-muted mb-3" data-chronos-wrapper="schedule">
+              <span data-chronos-field="schedule"></span>
+            </p>
+            <dl class="row mb-0">
+              <dt class="col-sm-4" data-chronos-wrapper="course">Cours</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="course" data-chronos-field="course"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="course_type">Type</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="course_type" data-chronos-field="course_type"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="teacher">Enseignant</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="teacher" data-chronos-field="teacher"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="class_group">Classe</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="class_group" data-chronos-field="class_group"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="subgroup">Sous-groupe</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="subgroup" data-chronos-field="subgroup"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="room">Salle</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="room" data-chronos-field="room"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="softwares_required">Logiciels requis</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="softwares_required" data-chronos-field="softwares_required"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="softwares_missing">Logiciels manquants</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="softwares_missing" data-chronos-field="softwares_missing"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="computers">Ordinateurs</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="computers" data-chronos-field="computers"></dd>
+            </dl>
+            <div class="mt-3 d-none" data-chronos-wrapper="description">
+              <h6 class="fw-semibold">Description</h6>
+              <p class="mb-0" data-chronos-field="description"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
     {% block scripts %}{% endblock %}

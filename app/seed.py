@@ -23,19 +23,18 @@ def seed_data() -> None:
     python = Course(
         name="Python Avancé",
         description="Programmation avancée en Python",
-        expected_students=18,
         session_length_hours=2,
         sessions_required=4,
         start_date=today,
         end_date=today + timedelta(days=10),
         priority=1,
+        course_type="TD",
         requires_computers=True,
     )
 
     teacher = Teacher(
         name="Alice Martin",
         email="alice@example.com",
-        max_hours_per_week=12,
         unavailable_dates="",
     )
 

@@ -57,12 +57,12 @@ CREATE TABLE `course` (
   `id` int(11) NOT NULL,
   `name` varchar(200) NOT NULL,
   `description` text DEFAULT NULL,
-  `expected_students` int(11) NOT NULL,
   `session_length_hours` int(11) NOT NULL,
   `sessions_required` int(11) NOT NULL,
   `start_date` date DEFAULT NULL,
   `end_date` date DEFAULT NULL,
   `priority` int(11) NOT NULL,
+  `course_type` varchar(2) NOT NULL,
   `requires_computers` tinyint(1) NOT NULL,
   `created_at` datetime NOT NULL,
   `updated_at` datetime NOT NULL
@@ -72,8 +72,8 @@ CREATE TABLE `course` (
 -- Déchargement des données de la table `course`
 --
 
-INSERT INTO `course` (`id`, `name`, `description`, `expected_students`, `session_length_hours`, `sessions_required`, `start_date`, `end_date`, `priority`, `requires_computers`, `created_at`, `updated_at`) VALUES
-(1, 'Python Avancé', 'Programmation avancée en Python', 24, 2, 4, '2025-10-11', '2025-11-21', 1, 1, '2025-10-11 11:14:23', '2025-10-12 19:48:23');
+INSERT INTO `course` (`id`, `name`, `description`, `session_length_hours`, `sessions_required`, `start_date`, `end_date`, `priority`, `course_type`, `requires_computers`, `created_at`, `updated_at`) VALUES
+(1, 'Python Avancé', 'Programmation avancée en Python', 2, 4, '2025-10-11', '2025-11-21', 1, 'TD', 1, '2025-10-11 11:14:23', '2025-10-12 19:48:23');
 
 -- --------------------------------------------------------
 
@@ -324,7 +324,6 @@ CREATE TABLE `teacher` (
   `phone` varchar(50) DEFAULT NULL,
   `available_from` time NOT NULL,
   `available_until` time NOT NULL,
-  `max_hours_per_week` int(11) NOT NULL,
   `unavailable_dates` text DEFAULT NULL,
   `notes` text DEFAULT NULL,
   `created_at` datetime NOT NULL,
@@ -335,10 +334,10 @@ CREATE TABLE `teacher` (
 -- Déchargement des données de la table `teacher`
 --
 
-INSERT INTO `teacher` (`id`, `name`, `email`, `phone`, `available_from`, `available_until`, `max_hours_per_week`, `unavailable_dates`, `notes`, `created_at`, `updated_at`) VALUES
-(1, 'Alice Martin', 'zdzd@dzdzd.dzdz', 'Nonez', '08:00:00', '18:00:00', 35, '[{\"start\": \"2025-10-13\", \"end\": \"2025-10-13\"}, {\"start\": \"2025-10-20\", \"end\": \"2025-10-21\"}]', 'None', '2025-10-11 11:14:23', '2025-10-12 13:35:01'),
-(2, 'Loic Theolier', 'aasa@efz.ca', '', '00:00:00', '00:00:00', 35, NULL, '', '2025-10-12 22:01:43', '2025-10-12 22:01:43'),
-(3, 'Simon Hemour', 'qzdq@qzd.dqzd', '', '00:00:00', '00:00:00', 20, NULL, '', '2025-10-12 22:02:04', '2025-10-12 22:02:04');
+INSERT INTO `teacher` (`id`, `name`, `email`, `phone`, `available_from`, `available_until`, `unavailable_dates`, `notes`, `created_at`, `updated_at`) VALUES
+(1, 'Alice Martin', 'zdzd@dzdzd.dzdz', 'Nonez', '08:00:00', '18:00:00',  '[{\"start\": \"2025-10-13\", \"end\": \"2025-10-13\"}, {\"start\": \"2025-10-20\", \"end\": \"2025-10-21\"}]', 'None', '2025-10-11 11:14:23', '2025-10-12 13:35:01'),
+(2, 'Loic Theolier', 'aasa@efz.ca', '', '00:00:00', '00:00:00', NULL, '', '2025-10-12 22:01:43', '2025-10-12 22:01:43'),
+(3, 'Simon Hemour', 'qzdq@qzd.dqzd', '', '00:00:00', '00:00:00', NULL, '', '2025-10-12 22:02:04', '2025-10-12 22:02:04');
 
 -- --------------------------------------------------------
 

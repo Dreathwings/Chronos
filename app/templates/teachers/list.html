@@ -22,10 +22,6 @@
             <label class="form-label">Téléphone</label>
             <input type="text" name="phone" class="form-control">
           </div>
-          <div>
-            <label class="form-label">Heures max / semaine</label>
-            <input type="number" name="max_hours_per_week" class="form-control" min="1" value="20">
-          </div>
           {{
             teacher_macros.unavailability_ranges_widget(
               'unavailability_ranges',
@@ -52,7 +48,6 @@
             <tr>
               <th>Nom</th>
               <th>Créneaux déclarés</th>
-              <th>Max h/semaine</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -65,14 +60,6 @@
                 </a>
               </td>
               <td>{{ teacher.availabilities|length }}</td>
-              <td>
-                <form method="post" class="d-flex align-items-center gap-2">
-                  <input type="hidden" name="form" value="update">
-                  <input type="hidden" name="teacher_id" value="{{ teacher.id }}">
-                  <input type="number" class="form-control form-control-sm" name="max_hours_per_week" value="{{ teacher.max_hours_per_week }}" min="1">
-                  <button class="btn btn-sm btn-outline-primary" type="submit">Mettre à jour</button>
-                </form>
-              </td>
               <td>
                 <small>{{ teacher.email or '—' }}<br>{{ teacher.phone or '' }}</small>
               </td>

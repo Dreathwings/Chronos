@@ -18,10 +18,6 @@
             <label class="form-label">Téléphone</label>
             <input type="text" name="phone" class="form-control" value="{{ teacher.phone }}">
           </div>
-          <div>
-            <label class="form-label">Heures max / semaine</label>
-            <input type="number" name="max_hours_per_week" class="form-control" value="{{ teacher.max_hours_per_week }}" min="1">
-          </div>
           {{
             teacher_macros.unavailability_ranges_widget(
               'unavailability_ranges',
