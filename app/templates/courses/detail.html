@@ -252,10 +252,14 @@
       }
       const updateVisibility = function() {
         const query = (input.value || '').trim().toLowerCase();
+        const hasQuery = query.length > 0;
         const items = target.querySelectorAll('[data-filter-item]');
         items.forEach(function(item) {
           const filterText = (item.getAttribute('data-filter-text') || item.textContent || '').toLowerCase();
-          if (!query || filterText.indexOf(query) !== -1) {
+          const checkbox = item.querySelector('input[type="checkbox"]');
+          const isSelected = checkbox ? checkbox.checked : false;
+          const matchesQuery = hasQuery && filterText.indexOf(query) !== -1;
+          if (isSelected || matchesQuery) {
             item.classList.remove('d-none');
           } else {
             item.classList.add('d-none');
@@ -263,6 +267,7 @@
         });
       };
       input.addEventListener('input', updateVisibility);
+      target.addEventListener('change', updateVisibility, true);
       updateVisibility();
     });
   }
