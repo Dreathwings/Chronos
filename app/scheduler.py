@@ -27,6 +27,8 @@ SCHEDULE_SLOTS: List[tuple[time, time]] = [
     (time(16, 45), time(17, 45)),
 ]
 
+MAX_SLOT_GAP = timedelta(minutes=15)
+
 START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
 
 
@@ -146,8 +148,12 @@ def _collect_contiguous_slots(start_index: int, length: int) -> list[tuple[time,
         if index >= len(SCHEDULE_SLOTS):
             return None
         slot_start, slot_end = SCHEDULE_SLOTS[index]
-        if previous_end and slot_start != previous_end:
-            return None
+        if previous_end:
+            gap = datetime.combine(date.min, slot_start) - datetime.combine(
+                date.min, previous_end
+            )
+            if gap < timedelta(0) or gap > MAX_SLOT_GAP:
+                return None
         slots.append((slot_start, slot_end))
         previous_end = slot_end
     return slots
