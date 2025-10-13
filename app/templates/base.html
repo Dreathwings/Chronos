@@ -135,6 +135,103 @@
         ].join('');
       }
 
+      const CHRONOS_COURSE_TYPE_LABELS = {
+        CM: 'Cours magistral',
+        TD: 'Travaux dirigés',
+        TP: 'Travaux pratiques',
+      };
+
+      const CHRONOS_EVENT_DATE_FORMATTER = new Intl.DateTimeFormat('fr-FR', {
+        weekday: 'long',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+
+      const CHRONOS_EVENT_TIME_FORMATTER = new Intl.DateTimeFormat('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      function chronosCapitalize(text) {
+        if (typeof text !== 'string' || text.length === 0) {
+          return text;
+        }
+        return text.charAt(0).toUpperCase() + text.slice(1);
+      }
+
+      function chronosBuildEventSchedule(start, end) {
+        if (!(start instanceof Date)) {
+          return '';
+        }
+        const startDateText = chronosCapitalize(CHRONOS_EVENT_DATE_FORMATTER.format(start));
+        const startTimeText = CHRONOS_EVENT_TIME_FORMATTER.format(start);
+        if (!(end instanceof Date)) {
+          return `${startDateText} à ${startTimeText}`;
+        }
+        const endDateText = chronosCapitalize(CHRONOS_EVENT_DATE_FORMATTER.format(end));
+        const endTimeText = CHRONOS_EVENT_TIME_FORMATTER.format(end);
+        if (start.toDateString() === end.toDateString()) {
+          return `${startDateText} de ${startTimeText} à ${endTimeText}`;
+        }
+        return `${startDateText} ${startTimeText} → ${endDateText} ${endTimeText}`;
+      }
+
+      function chronosSetField(modal, fieldName, value) {
+        const target = modal.querySelector(`[data-chronos-field="${fieldName}"]`);
+        if (!target) {
+          return;
+        }
+        const wrappers = modal.querySelectorAll(`[data-chronos-wrapper="${fieldName}"]`);
+        const hasValue = value !== null && value !== undefined && String(value).trim().length > 0;
+        if (!hasValue) {
+          target.textContent = '';
+          wrappers.forEach(function(wrapper) {
+            wrapper.classList.add('d-none');
+          });
+          return;
+        }
+        target.textContent = String(value);
+        wrappers.forEach(function(wrapper) {
+          wrapper.classList.remove('d-none');
+        });
+      }
+
+      function chronosDisplayEventSummary(event) {
+        const modal = document.getElementById('chronos-event-modal');
+        if (!modal) {
+          return;
+        }
+        const props = event.extendedProps || {};
+        const title = modal.querySelector('[data-chronos-field="title"]');
+        if (title) {
+          title.textContent = event.title || props.course || 'Séance planifiée';
+        }
+        const schedule = chronosBuildEventSchedule(event.start, event.end);
+        chronosSetField(modal, 'schedule', schedule);
+        chronosSetField(modal, 'course', props.course || '');
+        const typeLabel = props.course_type_label || CHRONOS_COURSE_TYPE_LABELS[props.course_type] || '';
+        chronosSetField(modal, 'course_type', typeLabel);
+        const teacherContact = [props.teacher_email, props.teacher_phone].filter(Boolean).join(' • ');
+        let teacherText = props.teacher || '';
+        if (teacherContact) {
+          teacherText = teacherText ? `${teacherText} (${teacherContact})` : teacherContact;
+        }
+        chronosSetField(modal, 'teacher', teacherText);
+        chronosSetField(modal, 'class_group', props.class_group || '');
+        const subgroupText = props.subgroup ? `Groupe ${props.subgroup}` : '';
+        chronosSetField(modal, 'subgroup', subgroupText);
+        chronosSetField(modal, 'room', props.room || '');
+        let computersText = '';
+        if (typeof props.requires_computers === 'boolean') {
+          computersText = props.requires_computers ? 'Oui' : 'Non';
+        }
+        chronosSetField(modal, 'computers', computersText);
+        chronosSetField(modal, 'description', props.course_description || '');
+        const bootstrapModal = bootstrap.Modal.getOrCreateInstance(modal);
+        bootstrapModal.show();
+      }
+
       async function chronosUpdateSession(event) {
         if (!event.end) {
           throw new Error('La séance doit avoir une heure de fin définie');
@@ -213,6 +310,7 @@
             if (info.jsEvent) {
               info.jsEvent.preventDefault();
             }
+            chronosDisplayEventSummary(info.event);
           },
           eventDidMount: function(info) {
             if (!info.el || info.el.dataset.chronosContextMenuBound === '1') {
@@ -291,6 +389,41 @@
       {% endwith %}
       {% block content %}{% endblock %}
     </main>
+    <div class="modal fade" id="chronos-event-modal" tabindex="-1" aria-labelledby="chronos-event-modal-label" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="chronos-event-modal-label" data-chronos-field="title">Séance planifiée</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+          </div>
+          <div class="modal-body">
+            <p class="text-muted mb-3" data-chronos-wrapper="schedule">
+              <span data-chronos-field="schedule"></span>
+            </p>
+            <dl class="row mb-0">
+              <dt class="col-sm-4" data-chronos-wrapper="course">Cours</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="course" data-chronos-field="course"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="course_type">Type</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="course_type" data-chronos-field="course_type"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="teacher">Enseignant</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="teacher" data-chronos-field="teacher"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="class_group">Classe</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="class_group" data-chronos-field="class_group"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="subgroup">Sous-groupe</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="subgroup" data-chronos-field="subgroup"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="room">Salle</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="room" data-chronos-field="room"></dd>
+              <dt class="col-sm-4" data-chronos-wrapper="computers">Ordinateurs</dt>
+              <dd class="col-sm-8" data-chronos-wrapper="computers" data-chronos-field="computers"></dd>
+            </dl>
+            <div class="mt-3 d-none" data-chronos-wrapper="description">
+              <h6 class="fw-semibold">Description</h6>
+              <p class="mb-0" data-chronos-field="description"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
     {% block scripts %}{% endblock %}

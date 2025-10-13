@@ -144,6 +144,11 @@ class Room(db.Model, TimeStampedModel):
 
 
 COURSE_TYPE_CHOICES = ("CM", "TD", "TP")
+COURSE_TYPE_LABELS = {
+    "CM": "Cours magistral",
+    "TD": "Travaux dirigés",
+    "TP": "Travaux pratiques",
+}
 
 
 class Course(db.Model, TimeStampedModel):
@@ -252,7 +257,15 @@ class Session(db.Model, TimeStampedModel):
             "end": self.end_time.isoformat(),
             "extendedProps": {
                 "teacher": self.teacher.name,
+                "teacher_email": self.teacher.email,
+                "teacher_phone": self.teacher.phone,
                 "course": self.course.name,
+                "course_type": self.course.course_type,
+                "course_type_label": COURSE_TYPE_LABELS.get(
+                    self.course.course_type, self.course.course_type
+                ),
+                "course_description": self.course.description,
+                "requires_computers": self.course.requires_computers,
                 "room": self.room.name,
                 "class_group": self.class_group.name,
                 "subgroup": self.subgroup_label,
