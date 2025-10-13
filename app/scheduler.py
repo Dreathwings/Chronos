@@ -115,6 +115,22 @@ def _class_sessions_needed(course: Course, class_group: ClassGroup) -> int:
     return max(course.sessions_required - existing, 0)
 
 
+def _day_search_order(available_days: list[date], anchor_index: int) -> list[date]:
+    order: list[date] = []
+    if not available_days:
+        return order
+    anchor_index = max(0, min(anchor_index, len(available_days) - 1))
+    order.append(available_days[anchor_index])
+    step = 1
+    while len(order) < len(available_days):
+        if anchor_index + step < len(available_days):
+            order.append(available_days[anchor_index + step])
+        if anchor_index - step >= 0:
+            order.append(available_days[anchor_index - step])
+        step += 1
+    return order
+
+
 def generate_schedule(course: Course) -> list[Session]:
     if not course.start_date or not course.end_date:
         raise ValueError("Course must have start and end dates to schedule automatically.")
@@ -126,25 +142,37 @@ def generate_schedule(course: Course) -> list[Session]:
     slot_length_hours = course.session_length_hours
     slot_length = timedelta(hours=slot_length_hours)
 
-    priority_days = _spread_sequence(sorted(daterange(course.start_date, course.end_date)))
-    priority_start_times = _spread_sequence(START_TIMES)
-
     for class_group in sorted(course.classes, key=lambda c: c.name.lower()):
         sessions_to_create = _class_sessions_needed(course, class_group)
         if sessions_to_create == 0:
             continue
-        round_index = 0
-        while sessions_to_create > 0:
-            progress_made = False
-            for day in priority_days:
-                if sessions_to_create == 0:
-                    break
-                if day.weekday() >= 5:
-                    continue
-                if not class_group.is_available_on(day):
-                    continue
-                for offset in range(len(priority_start_times)):
-                    slot_start_time = priority_start_times[(round_index + offset) % len(priority_start_times)]
+        available_days = [
+            day
+            for day in sorted(daterange(course.start_date, course.end_date))
+            if day.weekday() < 5 and class_group.is_available_on(day)
+        ]
+        if not available_days:
+            current_app.logger.warning(
+                "Aucune journée disponible pour %s (%s) entre %s et %s",
+                course.name,
+                class_group.name,
+                course.start_date,
+                course.end_date,
+            )
+            continue
+
+        start_time_order = _spread_sequence(START_TIMES)
+        scheduled_count = 0
+        while scheduled_count < sessions_to_create:
+            anchor_ratio = (scheduled_count + 0.5) / sessions_to_create
+            anchor_index = int(anchor_ratio * len(available_days))
+            if anchor_index >= len(available_days):
+                anchor_index = len(available_days) - 1
+
+            placed = False
+            for day in _day_search_order(available_days, anchor_index):
+                for offset in range(len(start_time_order)):
+                    slot_start_time = start_time_order[(scheduled_count + offset) % len(start_time_order)]
                     start_dt = datetime.combine(day, slot_start_time)
                     end_dt = start_dt + slot_length
                     if not fits_in_windows(start_dt.time(), end_dt.time()):
@@ -167,16 +195,19 @@ def generate_schedule(course: Course) -> list[Session]:
                     )
                     db.session.add(session)
                     created_sessions.append(session)
-                    sessions_to_create -= 1
-                    progress_made = True
+                    scheduled_count += 1
+                    placed = True
                     break
-            if not progress_made:
+                if placed:
+                    break
+            if not placed:
                 break
-            round_index += 1
-        if sessions_to_create > 0:
+
+        remaining = sessions_to_create - scheduled_count
+        if remaining > 0:
             current_app.logger.warning(
                 "Unable to schedule %s sessions for %s (%s)",
-                sessions_to_create,
+                remaining,
                 course.name,
                 class_group.name,
             )
