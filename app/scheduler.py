@@ -65,16 +65,6 @@ def fits_in_windows(start: time, end: time) -> bool:
     return False
 
 
-def teacher_hours_in_week(teacher: Teacher, week_start: date) -> float:
-    week_end = week_start + timedelta(days=7)
-    total = 0.0
-    for session in teacher.sessions:
-        if week_start <= session.start_time.date() < week_end:
-            delta = session.end_time - session.start_time
-            total += delta.total_seconds() / 3600
-    return total
-
-
 def find_available_room(
     course: Course,
     start: datetime,
@@ -83,7 +73,7 @@ def find_available_room(
     required_capacity: int | None = None,
 ) -> Optional[Room]:
     rooms = Room.query.order_by(Room.capacity.asc()).all()
-    required_students = required_capacity or course.expected_students
+    required_students = required_capacity or 1
     for room in rooms:
         if room.capacity < required_students:
             continue
@@ -123,13 +113,10 @@ def find_available_teacher(
         fallback_pool = Teacher.query.all()
 
     candidates = preferred + [teacher for teacher in fallback_pool if teacher not in preferred]
-    for teacher in sorted(candidates, key=lambda t: t.max_hours_per_week):
+    for teacher in sorted(candidates, key=lambda t: t.name.lower()):
         if not teacher.is_available_during(start, end):
             continue
         if any(overlaps(s.start_time, s.end_time, start, end) for s in teacher.sessions):
-            continue
-        week_start = start.date() - timedelta(days=start.weekday())
-        if teacher_hours_in_week(teacher, week_start) + course.session_length_hours > teacher.max_hours_per_week:
             continue
         return teacher
     return None
@@ -169,9 +156,31 @@ def _day_search_order(available_days: list[date], anchor_index: int) -> list[dat
     return order
 
 
-def generate_schedule(course: Course) -> list[Session]:
-    if not course.start_date or not course.end_date:
-        raise ValueError("Course must have start and end dates to schedule automatically.")
+def _resolve_schedule_window(
+    course: Course, window_start: date | None, window_end: date | None
+) -> tuple[date, date]:
+    start_candidates = [value for value in (course.start_date, window_start) if value]
+    end_candidates = [value for value in (course.end_date, window_end) if value]
+    if not start_candidates or not end_candidates:
+        raise ValueError(
+            "Définissez des dates de début et de fin pour le cours ou indiquez une période de planification."
+        )
+    start = max(start_candidates)
+    end = min(end_candidates)
+    if start > end:
+        raise ValueError(
+            "La période choisie n'intersecte pas la fenêtre du cours."
+        )
+    return start, end
+
+
+def generate_schedule(
+    course: Course,
+    *,
+    window_start: date | None = None,
+    window_end: date | None = None,
+) -> list[Session]:
+    schedule_start, schedule_end = _resolve_schedule_window(course, window_start, window_end)
     if not course.classes:
         raise ValueError("Associez au moins une classe au cours avant de planifier.")
 
@@ -180,13 +189,16 @@ def generate_schedule(course: Course) -> list[Session]:
     slot_length_hours = course.session_length_hours
     slot_length = timedelta(hours=slot_length_hours)
 
-    for class_group in sorted(course.classes, key=lambda c: c.name.lower()):
-        sessions_to_create = _class_sessions_needed(course, class_group)
-        if sessions_to_create == 0:
-            continue
+    links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
+    for link in links:
+        class_group = link.class_group
+        for subgroup_label in link.group_labels():
+            sessions_to_create = _class_sessions_needed(course, class_group, subgroup_label)
+            if sessions_to_create == 0:
+                continue
         available_days = [
             day
-            for day in sorted(daterange(course.start_date, course.end_date))
+            for day in sorted(daterange(schedule_start, schedule_end))
             if day.weekday() < 5 and class_group.is_available_on(day)
         ]
         if not available_days:
@@ -194,8 +206,8 @@ def generate_schedule(course: Course) -> list[Session]:
                 "Aucune journée disponible pour %s (%s) entre %s et %s",
                 course.name,
                 class_group.name,
-                course.start_date,
-                course.end_date,
+                schedule_start,
+                schedule_end,
             )
             continue
 
@@ -217,10 +229,22 @@ def generate_schedule(course: Course) -> list[Session]:
                         continue
                     if not class_group.is_available_during(start_dt, end_dt):
                         continue
-                    teacher = find_available_teacher(course, start_dt, end_dt)
+                    teacher = find_available_teacher(
+                        course,
+                        start_dt,
+                        end_dt,
+                        link=link,
+                        subgroup_label=subgroup_label,
+                    )
                     if not teacher:
                         continue
-                    room = find_available_room(course, start_dt, end_dt)
+                    required_capacity = course.capacity_needed_for(class_group)
+                    room = find_available_room(
+                        course,
+                        start_dt,
+                        end_dt,
+                        required_capacity=required_capacity,
+                    )
                     if not room:
                         continue
                     session = Session(
@@ -228,6 +252,7 @@ def generate_schedule(course: Course) -> list[Session]:
                         teacher=teacher,
                         room=room,
                         class_group=class_group,
+                        subgroup_label=subgroup_label,
                         start_time=start_dt,
                         end_time=end_dt,
                     )

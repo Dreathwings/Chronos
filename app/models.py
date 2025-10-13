@@ -78,7 +78,6 @@ class Teacher(db.Model, TimeStampedModel):
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     email: Mapped[Optional[str]] = mapped_column(String(255))
     phone: Mapped[Optional[str]] = mapped_column(String(50))
-    max_hours_per_week: Mapped[int] = mapped_column(Integer, default=20)
     unavailable_dates: Mapped[Optional[str]] = mapped_column(Text)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
@@ -144,16 +143,19 @@ class Room(db.Model, TimeStampedModel):
         return f"Room<{self.id} {self.name}>"
 
 
+COURSE_TYPE_CHOICES = ("CM", "TD", "TP")
+
+
 class Course(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
-    expected_students: Mapped[int] = mapped_column(Integer, default=10)
     session_length_hours: Mapped[int] = mapped_column(Integer, default=2)
     sessions_required: Mapped[int] = mapped_column(Integer, default=1)
     start_date: Mapped[Optional[date]] = mapped_column(Date)
     end_date: Mapped[Optional[date]] = mapped_column(Date)
     priority: Mapped[int] = mapped_column(Integer, default=1)
+    course_type: Mapped[str] = mapped_column(String(2), default="CM")
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
 
@@ -175,10 +177,18 @@ class Course(db.Model, TimeStampedModel):
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
+        CheckConstraint(
+            "course_type IN ('CM','TD','TP')",
+            name="chk_course_type_valid",
+        ),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Course<{self.id} {self.name}>"
+
+    @property
+    def is_tp(self) -> bool:
+        return self.course_type == "TP"
 
     def class_link_for(self, class_group: "ClassGroup" | int) -> "CourseClassLink" | None:
         class_id = class_group if isinstance(class_group, int) else class_group.id
@@ -204,8 +214,8 @@ class Course(db.Model, TimeStampedModel):
         else:
             target = class_group
         if target is None:
-            return max(self.expected_students, 1)
-        baseline = max(self.expected_students, target.size)
+            return 1
+        baseline = max(target.size, 1)
         if link and link.group_count > 1:
             return max(1, ceil(baseline / link.group_count))
         return max(1, baseline)

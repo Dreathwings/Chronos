@@ -15,8 +15,12 @@
           </div>
           <div class="row g-2">
             <div class="col">
-              <label class="form-label">Étudiants attendus</label>
-              <input type="number" class="form-control" name="expected_students" value="{{ course.expected_students }}" min="1">
+              <label class="form-label">Type de cours</label>
+              <select class="form-select" name="course_type">
+                <option value="CM" {% if course.course_type == 'CM' %}selected{% endif %}>Cours magistral</option>
+                <option value="TD" {% if course.course_type == 'TD' %}selected{% endif %}>Travaux dirigés</option>
+                <option value="TP" {% if course.course_type == 'TP' %}selected{% endif %}>Travaux pratiques</option>
+              </select>
             </div>
             <div class="col">
               <label class="form-label">Durée séance (h)</label>
@@ -82,15 +86,12 @@
                     {{ class_group.name }} — {{ class_group.size }} étudiants
                   </label>
                 </div>
-                <div class="mt-2 ms-4 vstack gap-2">
-                  <div>
-                    <label class="form-label text-muted mb-1 small">Répartition</label>
-                    <select class="form-select form-select-sm w-auto" name="class_group_groups_{{ class_group.id }}">
-                      <option value="1" {% if not link or link.group_count == 1 %}selected{% endif %}>Classe entière</option>
-                      <option value="2" {% if link and link.group_count == 2 %}selected{% endif %}>Demi-groupes (x2)</option>
-                    </select>
-                    <div class="form-text">Sélectionnez demi-groupes pour créer deux séances avec moitié d'effectif.</div>
-                  </div>
+                <div class="mt-2 ms-4 text-muted small">
+                  {% if course.course_type == 'TP' %}
+                  Ce cours sera planifié en deux demi-groupes A et B.
+                  {% else %}
+                  Ce cours est planifié pour la classe entière.
+                  {% endif %}
                 </div>
               </div>
               {% endfor %}
@@ -134,7 +135,7 @@
             <div class="fw-semibold">{{ link.class_group.name }}</div>
             <div class="text-muted small mb-2">
               {% if link.group_count == 2 %}
-              Demi-groupes A/B
+              Travaux pratiques — groupes A/B
               {% else %}
               Classe entière
               {% endif %}
