@@ -6,7 +6,7 @@ from typing import Iterable, List, Optional
 from flask import current_app
 
 from . import db
-from .models import ClassGroup, Course, Room, Session, Teacher
+from .models import ClassGroup, Course, CourseClassLink, Room, Session, Teacher
 
 # Working windows respecting pauses
 WORKING_WINDOWS: List[tuple[time, time]] = [
@@ -58,10 +58,17 @@ def teacher_hours_in_week(teacher: Teacher, week_start: date) -> float:
     return total
 
 
-def find_available_room(course: Course, start: datetime, end: datetime) -> Optional[Room]:
+def find_available_room(
+    course: Course,
+    start: datetime,
+    end: datetime,
+    *,
+    required_capacity: int | None = None,
+) -> Optional[Room]:
     rooms = Room.query.order_by(Room.capacity.asc()).all()
+    required_students = required_capacity or course.expected_students
     for room in rooms:
-        if room.capacity < course.expected_students:
+        if room.capacity < required_students:
             continue
         if course.requires_computers and room.computers <= 0:
             continue
@@ -79,9 +86,27 @@ def find_available_room(course: Course, start: datetime, end: datetime) -> Optio
     return None
 
 
-def find_available_teacher(course: Course, start: datetime, end: datetime) -> Optional[Teacher]:
-    candidate_teachers = course.teachers if course.teachers else Teacher.query.all()
-    for teacher in sorted(candidate_teachers, key=lambda t: t.max_hours_per_week):
+def find_available_teacher(
+    course: Course,
+    start: datetime,
+    end: datetime,
+    *,
+    link: CourseClassLink | None = None,
+    subgroup_label: str | None = None,
+) -> Optional[Teacher]:
+    preferred: list[Teacher] = []
+    if link is not None:
+        assigned = link.teacher_for_label(subgroup_label)
+        if assigned is not None:
+            preferred.append(assigned)
+
+    if course.teachers:
+        fallback_pool = list(course.teachers)
+    else:
+        fallback_pool = Teacher.query.all()
+
+    candidates = preferred + [teacher for teacher in fallback_pool if teacher not in preferred]
+    for teacher in sorted(candidates, key=lambda t: t.max_hours_per_week):
         if not teacher.is_available_during(start, end):
             continue
         if any(overlaps(s.start_time, s.end_time, start, end) for s in teacher.sessions):
@@ -93,9 +118,22 @@ def find_available_teacher(course: Course, start: datetime, end: datetime) -> Op
     return None
 
 
-def _class_sessions_needed(course: Course, class_group: ClassGroup) -> int:
-    existing = sum(1 for session in course.sessions if session.class_group_id == class_group.id)
-    return max(course.sessions_required - existing, 0)
+def _normalise_label(label: str | None) -> str:
+    return (label or "").upper()
+
+
+def _class_sessions_needed(
+    course: Course, class_group: ClassGroup, subgroup_label: str | None
+) -> int:
+    target_label = _normalise_label(subgroup_label)
+    existing = sum(
+        1
+        for session in course.sessions
+        if session.class_group_id == class_group.id
+        and _normalise_label(session.subgroup_label) == target_label
+    )
+    required_total = course.sessions_required
+    return max(required_total - existing, 0)
 
 
 def generate_schedule(course: Course) -> list[Session]:
@@ -112,47 +150,65 @@ def generate_schedule(course: Course) -> list[Session]:
     priority_days = sorted(daterange(course.start_date, course.end_date))
 
     for class_group in sorted(course.classes, key=lambda c: c.name.lower()):
-        sessions_to_create = _class_sessions_needed(course, class_group)
-        if sessions_to_create == 0:
-            continue
-        for day in priority_days:
+        link = course.class_link_for(class_group)
+        labels = link.group_labels() if link is not None else [None]
+        for subgroup_label in labels:
+            sessions_to_create = _class_sessions_needed(course, class_group, subgroup_label)
             if sessions_to_create == 0:
-                break
-            if day.weekday() >= 5:
                 continue
-            if not class_group.is_available_on(day):
-                continue
-            for slot_start_time in START_TIMES:
-                start_dt = datetime.combine(day, slot_start_time)
-                end_dt = start_dt + slot_length
-                if not fits_in_windows(start_dt.time(), end_dt.time()):
-                    continue
-                if not class_group.is_available_during(start_dt, end_dt):
-                    continue
-                teacher = find_available_teacher(course, start_dt, end_dt)
-                if not teacher:
-                    continue
-                room = find_available_room(course, start_dt, end_dt)
-                if not room:
-                    continue
-                session = Session(
-                    course=course,
-                    teacher=teacher,
-                    room=room,
-                    class_group=class_group,
-                    start_time=start_dt,
-                    end_time=end_dt,
-                )
-                db.session.add(session)
-                created_sessions.append(session)
-                sessions_to_create -= 1
+            for day in priority_days:
                 if sessions_to_create == 0:
                     break
-        if sessions_to_create > 0:
-            current_app.logger.warning(
-                "Unable to schedule %s sessions for %s (%s)",
-                sessions_to_create,
-                course.name,
-                class_group.name,
-            )
+                if day.weekday() >= 5:
+                    continue
+                if not class_group.is_available_on(day):
+                    continue
+                for slot_start_time in START_TIMES:
+                    start_dt = datetime.combine(day, slot_start_time)
+                    end_dt = start_dt + slot_length
+                    if not fits_in_windows(start_dt.time(), end_dt.time()):
+                        continue
+                    if not class_group.is_available_during(start_dt, end_dt):
+                        continue
+                    teacher = find_available_teacher(
+                        course,
+                        start_dt,
+                        end_dt,
+                        link=link,
+                        subgroup_label=subgroup_label,
+                    )
+                    if not teacher:
+                        continue
+                    required_capacity = course.capacity_needed_for(class_group)
+                    room = find_available_room(
+                        course,
+                        start_dt,
+                        end_dt,
+                        required_capacity=required_capacity,
+                    )
+                    if not room:
+                        continue
+                    session = Session(
+                        course=course,
+                        teacher=teacher,
+                        room=room,
+                        class_group=class_group,
+                        subgroup_label=subgroup_label,
+                        start_time=start_dt,
+                        end_time=end_dt,
+                    )
+                    db.session.add(session)
+                    created_sessions.append(session)
+                    sessions_to_create -= 1
+                    if sessions_to_create == 0:
+                        break
+            if sessions_to_create > 0:
+                label_desc = f" groupe {subgroup_label}" if subgroup_label else ""
+                current_app.logger.warning(
+                    "Unable to schedule %s sessions for %s (%s%s)",
+                    sessions_to_create,
+                    course.name,
+                    class_group.name,
+                    label_desc,
+                )
     return created_sessions
