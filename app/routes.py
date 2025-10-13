@@ -7,7 +7,9 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 
 from . import db
+from .events import sessions_to_grouped_events
 from .models import (
+    COURSE_TYPE_CHOICES,
     ClassGroup,
     Course,
     CourseClassLink,
@@ -43,6 +45,21 @@ SCHEDULE_SLOT_CHOICES = [
     {"start": start.strftime("%H:%M"), "end": end.strftime("%H:%M")}
     for start, end in SCHEDULE_SLOTS
 ]
+
+COURSE_TYPE_LABELS = {
+    "CM": "Cours magistral",
+    "TD": "Travaux dirigés",
+    "TP": "Travaux pratiques",
+}
+
+
+def _normalise_course_type(raw_value: str | None) -> str:
+    if not raw_value:
+        return "CM"
+    raw_value = raw_value.strip().upper()
+    if raw_value in COURSE_TYPE_CHOICES:
+        return raw_value
+    return "CM"
 
 
 def _build_default_backgrounds() -> list[dict[str, object]]:
@@ -199,14 +216,6 @@ def _class_unavailability_backgrounds(class_group: ClassGroup) -> list[dict[str,
     return backgrounds
 
 
-def _parse_group_count(raw_value: str | None) -> int:
-    try:
-        parsed = int(raw_value) if raw_value is not None else 1
-    except ValueError:
-        parsed = 1
-    return 2 if parsed >= 2 else 1
-
-
 def _parse_teacher_selection(raw_value: str | None) -> Teacher | None:
     if not raw_value:
         return None
@@ -289,9 +298,11 @@ def dashboard():
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
 
     course_class_options: dict[int, list[dict[str, str]]] = {}
+    course_subgroup_hints: dict[int, bool] = {}
     for course in courses:
         options: list[dict[str, str]] = []
         links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
+        has_subgroups = False
         for link in links:
             for subgroup_label in link.group_labels():
                 value_suffix = subgroup_label or ""
@@ -307,7 +318,10 @@ def dashboard():
                 else:
                     option_label = f"{base_label} (Aucun enseignant)"
                 options.append({"value": option_value, "label": option_label})
+                if subgroup_label:
+                    has_subgroups = True
         course_class_options[course.id] = options
+        course_subgroup_hints[course.id] = has_subgroups
 
     if request.method == "POST":
         if request.form.get("form") == "quick-session":
@@ -360,8 +374,84 @@ def dashboard():
             db.session.commit()
             flash("Séance créée", "success")
             return redirect(url_for("main.dashboard"))
+        elif request.form.get("form") == "bulk-auto-schedule":
+            window_start = _parse_date(request.form.get("period_start"))
+            window_end = _parse_date(request.form.get("period_end"))
+            if not window_start or not window_end:
+                flash("Indiquez une période valide pour la génération automatique.", "danger")
+                return redirect(url_for("main.dashboard"))
+            if window_start > window_end:
+                flash("La date de début doit précéder la date de fin.", "danger")
+                return redirect(url_for("main.dashboard"))
 
-    events = [session.as_event() for session in Session.query.all()]
+            total_created = 0
+            error_messages: list[str] = []
+            for course in courses:
+                try:
+                    created = generate_schedule(
+                        course,
+                        window_start=window_start,
+                        window_end=window_end,
+                    )
+                except ValueError as exc:
+                    error_messages.append(f"{course.name} : {exc}")
+                    continue
+                total_created += len(created)
+
+            if total_created:
+                db.session.commit()
+                flash(f"{total_created} séance(s) générée(s).", "success")
+            else:
+                db.session.rollback()
+                flash("Aucune séance n'a pu être générée sur la période indiquée.", "info")
+
+            if error_messages:
+                flash("\n".join(error_messages), "warning")
+
+            return redirect(url_for("main.dashboard"))
+        elif request.form.get("form") == "clear-course-sessions":
+            try:
+                course_id = int(request.form.get("course_id", "0"))
+            except ValueError:
+                flash("Cours invalide", "danger")
+                return redirect(url_for("main.dashboard"))
+
+            course = Course.query.get(course_id)
+            if course is None:
+                flash("Cours introuvable", "danger")
+                return redirect(url_for("main.dashboard"))
+
+            removed = len(course.sessions)
+            for session in list(course.sessions):
+                db.session.delete(session)
+
+            db.session.commit()
+            if removed:
+                flash(
+                    f"{removed} séance(s) supprimée(s) pour {course.name}.",
+                    "success",
+                )
+            else:
+                flash("Aucune séance n'était planifiée pour ce cours.", "info")
+            return redirect(url_for("main.dashboard"))
+
+    events = sessions_to_grouped_events(Session.query.all())
+    course_summaries: list[dict[str, object]] = []
+    for course in courses:
+        required_total = course.total_required_hours
+        scheduled_total = course.scheduled_hours
+        remaining = max(required_total - scheduled_total, 0)
+        course_summaries.append(
+            {
+                "course": course,
+                "type_label": COURSE_TYPE_LABELS.get(course.course_type, course.course_type),
+                "required": required_total,
+                "scheduled": scheduled_total,
+                "remaining": remaining,
+                "priority": course.priority,
+            }
+        )
+
     return render_template(
         "dashboard.html",
         courses=courses,
@@ -370,8 +460,12 @@ def dashboard():
         class_groups=class_groups,
         course_class_options=course_class_options,
         course_class_options_json=json.dumps(course_class_options, ensure_ascii=False),
+        course_subgroup_hints=course_subgroup_hints,
+        course_subgroup_hints_json=json.dumps(course_subgroup_hints, ensure_ascii=False),
+        course_summaries=course_summaries,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
+        course_type_labels=COURSE_TYPE_LABELS,
     )
 
 
@@ -390,7 +484,6 @@ def teachers_list():
                 name=request.form["name"],
                 email=request.form.get("email"),
                 phone=request.form.get("phone"),
-                max_hours_per_week=int(request.form.get("max_hours_per_week", 20)),
                 unavailable_dates=unavailability_value,
                 notes=request.form.get("notes"),
             )
@@ -401,13 +494,6 @@ def teachers_list():
             except IntegrityError:
                 db.session.rollback()
                 flash("Nom d'enseignant déjà utilisé", "danger")
-        elif action == "update":
-            teacher = Teacher.query.get_or_404(int(request.form["teacher_id"]))
-            teacher.max_hours_per_week = int(
-                request.form.get("max_hours_per_week", teacher.max_hours_per_week)
-            )
-            db.session.commit()
-            flash("Enseignant mis à jour", "success")
         return redirect(url_for("main.teachers_list"))
 
     teachers = Teacher.query.order_by(Teacher.name).all()
@@ -425,7 +511,6 @@ def teacher_detail(teacher_id: int):
         if form_name == "update":
             teacher.email = request.form.get("email")
             teacher.phone = request.form.get("phone")
-            teacher.max_hours_per_week = int(request.form.get("max_hours_per_week", teacher.max_hours_per_week))
             teacher.unavailable_dates = serialise_unavailability_ranges(
                 parse_unavailability_ranges(
                     request.form.get("unavailability_ranges")
@@ -496,7 +581,7 @@ def teacher_detail(teacher_id: int):
             flash("Disponibilités mises à jour", "success")
         return redirect(url_for("main.teacher_detail", teacher_id=teacher_id))
 
-    events = [session.as_event() for session in teacher.sessions]
+    events = sessions_to_grouped_events(teacher.sessions)
     selected_slots: set[str] = set()
     for availability in teacher.availabilities:
         if availability.weekday >= 5:
@@ -566,7 +651,7 @@ def class_detail(class_id: int):
             course_id = int(request.form["course_id"])
             course = Course.query.get_or_404(course_id)
             if class_group not in course.classes:
-                group_count = _parse_group_count(request.form.get("group_count"))
+                group_count = 2 if course.is_tp else 1
                 teacher = _parse_teacher_selection(request.form.get("teacher"))
                 course.class_links.append(
                     CourseClassLink(
@@ -588,7 +673,7 @@ def class_detail(class_id: int):
                 flash("Cours retiré de la classe", "success")
         return redirect(url_for("main.class_detail", class_id=class_id))
 
-    events = [session.as_event() for session in class_group.sessions]
+    events = sessions_to_grouped_events(class_group.sessions)
     unavailability_backgrounds = _class_unavailability_backgrounds(class_group)
     return render_template(
         "classes/detail.html",
@@ -662,7 +747,7 @@ def room_detail(room_id: int):
             flash("Salle mise à jour", "success")
         return redirect(url_for("main.room_detail", room_id=room_id))
 
-    events = [session.as_event() for session in room.sessions]
+    events = sessions_to_grouped_events(room.sessions)
     return render_template(
         "rooms/detail.html",
         room=room,
@@ -683,15 +768,16 @@ def courses_list():
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "create":
+            course_type = _normalise_course_type(request.form.get("course_type"))
             course = Course(
                 name=request.form["name"],
                 description=request.form.get("description"),
-                expected_students=int(request.form.get("expected_students", 10)),
                 session_length_hours=int(request.form.get("session_length_hours", 2)),
                 sessions_required=int(request.form.get("sessions_required", 1)),
                 start_date=_parse_date(request.form.get("start_date")),
                 end_date=_parse_date(request.form.get("end_date")),
                 priority=int(request.form.get("priority", 1)),
+                course_type=course_type,
                 requires_computers=bool(request.form.get("requires_computers")),
             )
             course.equipments = [
@@ -710,9 +796,7 @@ def courses_list():
                 class_group = ClassGroup.query.get(class_id)
                 if class_group is None:
                     continue
-                group_count = _parse_group_count(
-                    request.form.get(f"class_group_groups_{class_group.id}")
-                )
+                group_count = 2 if course_type == "TP" else 1
                 links.append(
                     CourseClassLink(
                         class_group=class_group,
@@ -737,6 +821,7 @@ def courses_list():
         softwares=softwares,
         class_groups=class_groups,
         teachers=teachers,
+        course_type_labels=COURSE_TYPE_LABELS,
     )
 
 
@@ -754,12 +839,12 @@ def course_detail(course_id: int):
         form_name = request.form.get("form")
         if form_name == "update":
             course.description = request.form.get("description")
-            course.expected_students = int(request.form.get("expected_students", course.expected_students))
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.sessions_required = int(request.form.get("sessions_required", course.sessions_required))
             course.start_date = _parse_date(request.form.get("start_date"))
             course.end_date = _parse_date(request.form.get("end_date"))
             course.priority = int(request.form.get("priority", course.priority))
+            course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.requires_computers = bool(request.form.get("requires_computers"))
             course.equipments = [
                 equipment
@@ -777,9 +862,7 @@ def course_detail(course_id: int):
                 class_group = ClassGroup.query.get(class_id)
                 if class_group is None:
                     continue
-                group_count = _parse_group_count(
-                    request.form.get(f"class_group_groups_{class_group.id}")
-                )
+                group_count = 2 if course.is_tp else 1
                 existing_link = class_links_map.get(class_id)
                 existing_teacher = None
                 if existing_link is not None:
@@ -869,9 +952,18 @@ def course_detail(course_id: int):
             db.session.add(session)
             db.session.commit()
             flash("Séance ajoutée", "success")
+        elif form_name == "clear-sessions":
+            removed = len(course.sessions)
+            for session in list(course.sessions):
+                db.session.delete(session)
+            db.session.commit()
+            if removed:
+                flash("Toutes les séances de ce cours ont été supprimées.", "success")
+            else:
+                flash("Aucune séance n'était planifiée pour ce cours.", "info")
         return redirect(url_for("main.course_detail", course_id=course_id))
 
-    events = [session.as_event() for session in course.sessions]
+    events = sessions_to_grouped_events(course.sessions)
     return render_template(
         "courses/detail.html",
         course=course,

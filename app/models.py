@@ -78,7 +78,6 @@ class Teacher(db.Model, TimeStampedModel):
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     email: Mapped[Optional[str]] = mapped_column(String(255))
     phone: Mapped[Optional[str]] = mapped_column(String(50))
-    max_hours_per_week: Mapped[int] = mapped_column(Integer, default=20)
     unavailable_dates: Mapped[Optional[str]] = mapped_column(Text)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
@@ -144,16 +143,24 @@ class Room(db.Model, TimeStampedModel):
         return f"Room<{self.id} {self.name}>"
 
 
+COURSE_TYPE_CHOICES = ("CM", "TD", "TP")
+COURSE_TYPE_LABELS = {
+    "CM": "Cours magistral",
+    "TD": "Travaux dirigés",
+    "TP": "Travaux pratiques",
+}
+
+
 class Course(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
-    expected_students: Mapped[int] = mapped_column(Integer, default=10)
     session_length_hours: Mapped[int] = mapped_column(Integer, default=2)
     sessions_required: Mapped[int] = mapped_column(Integer, default=1)
     start_date: Mapped[Optional[date]] = mapped_column(Date)
     end_date: Mapped[Optional[date]] = mapped_column(Date)
     priority: Mapped[int] = mapped_column(Integer, default=1)
+    course_type: Mapped[str] = mapped_column(String(2), default="CM")
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
 
@@ -175,10 +182,18 @@ class Course(db.Model, TimeStampedModel):
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
+        CheckConstraint(
+            "course_type IN ('CM','TD','TP')",
+            name="chk_course_type_valid",
+        ),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Course<{self.id} {self.name}>"
+
+    @property
+    def is_tp(self) -> bool:
+        return self.course_type == "TP"
 
     def class_link_for(self, class_group: "ClassGroup" | int) -> "CourseClassLink" | None:
         class_id = class_group if isinstance(class_group, int) else class_group.id
@@ -204,11 +219,21 @@ class Course(db.Model, TimeStampedModel):
         else:
             target = class_group
         if target is None:
-            return max(self.expected_students, 1)
-        baseline = max(self.expected_students, target.size)
+            return 1
+        baseline = max(target.size, 1)
         if link and link.group_count > 1:
             return max(1, ceil(baseline / link.group_count))
         return max(1, baseline)
+
+    @property
+    def scheduled_hours(self) -> int:
+        return sum(session.duration_hours for session in self.sessions)
+
+    @property
+    def total_required_hours(self) -> int:
+        group_total = sum(link.group_count for link in self.class_links)
+        multiplier = group_total or 1
+        return self.sessions_required * self.session_length_hours * multiplier
 
 
 class Session(db.Model, TimeStampedModel):
@@ -232,9 +257,13 @@ class Session(db.Model, TimeStampedModel):
         UniqueConstraint("class_group_id", "start_time", name="uq_class_start_time"),
     )
 
-    def as_event(self) -> dict[str, str]:
+    def title_with_room(self, room_label: str | None = None) -> str:
+        room_name = room_label or self.room.name
         group_suffix = f" — groupe {self.subgroup_label}" if self.subgroup_label else ""
-        title = f"{self.course.name} — {self.class_group.name}{group_suffix} ({self.room.name})"
+        return f"{self.course.name} — {self.class_group.name}{group_suffix} ({room_name})"
+
+    def as_event(self) -> dict[str, str]:
+        title = self.title_with_room()
         return {
             "id": str(self.id),
             "title": title,
@@ -242,12 +271,36 @@ class Session(db.Model, TimeStampedModel):
             "end": self.end_time.isoformat(),
             "extendedProps": {
                 "teacher": self.teacher.name,
+                "teacher_email": self.teacher.email,
+                "teacher_phone": self.teacher.phone,
                 "course": self.course.name,
+                "course_type": self.course.course_type,
+                "course_type_label": COURSE_TYPE_LABELS.get(
+                    self.course.course_type, self.course.course_type
+                ),
+                "course_description": self.course.description,
+                "requires_computers": self.course.requires_computers,
                 "room": self.room.name,
+                "rooms": [self.room.name],
                 "class_group": self.class_group.name,
                 "subgroup": self.subgroup_label,
+                "segments": [
+                    {
+                        "id": str(self.id),
+                        "start": self.start_time.isoformat(),
+                        "end": self.end_time.isoformat(),
+                        "room": self.room.name,
+                    }
+                ],
+                "segment_ids": [str(self.id)],
+                "is_grouped": False,
             },
         }
+
+    @property
+    def duration_hours(self) -> int:
+        delta = self.end_time - self.start_time
+        return max(int(delta.total_seconds() // 3600), 0)
 
 
 class Equipment(db.Model):
