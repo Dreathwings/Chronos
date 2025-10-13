@@ -140,7 +140,7 @@ def _normalise_label(label: str | None) -> str:
 
 
 def _class_sessions_needed(
-    course: Course, class_group: ClassGroup, subgroup_label: str | None
+    course: Course, class_group: ClassGroup, subgroup_label: str | None = None
 ) -> int:
     target_label = _normalise_label(subgroup_label)
     existing = sum(
