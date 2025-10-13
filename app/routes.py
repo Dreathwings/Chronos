@@ -437,10 +437,8 @@ def dashboard():
     events = [session.as_event() for session in Session.query.all()]
     course_summaries: list[dict[str, object]] = []
     for course in courses:
-        required_total = sum(
-            link.group_count * course.sessions_required for link in course.class_links
-        )
-        scheduled_total = len(course.sessions)
+        required_total = course.total_required_hours
+        scheduled_total = course.scheduled_hours
         remaining = max(required_total - scheduled_total, 0)
         course_summaries.append(
             {

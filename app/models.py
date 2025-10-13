@@ -225,6 +225,16 @@ class Course(db.Model, TimeStampedModel):
             return max(1, ceil(baseline / link.group_count))
         return max(1, baseline)
 
+    @property
+    def scheduled_hours(self) -> int:
+        return sum(session.duration_hours for session in self.sessions)
+
+    @property
+    def total_required_hours(self) -> int:
+        group_total = sum(link.group_count for link in self.class_links)
+        multiplier = group_total or 1
+        return self.sessions_required * self.session_length_hours * multiplier
+
 
 class Session(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -271,6 +281,11 @@ class Session(db.Model, TimeStampedModel):
                 "subgroup": self.subgroup_label,
             },
         }
+
+    @property
+    def duration_hours(self) -> int:
+        delta = self.end_time - self.start_time
+        return max(int(delta.total_seconds() // 3600), 0)
 
 
 class Equipment(db.Model):

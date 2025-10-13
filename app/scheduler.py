@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
-from typing import Iterable, List, Optional, TypeVar
+from typing import Iterable, List, Optional
 
 from flask import current_app
 
@@ -28,23 +28,6 @@ SCHEDULE_SLOTS: List[tuple[time, time]] = [
 ]
 
 START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
-
-
-T = TypeVar("T")
-
-
-def _spread_sequence(items: Iterable[T]) -> list[T]:
-    ordered = list(items)
-    spread: list[T] = []
-    left = 0
-    right = len(ordered) - 1
-    while left <= right:
-        spread.append(ordered[left])
-        left += 1
-        if left <= right:
-            spread.append(ordered[right])
-            right -= 1
-    return spread
 
 
 def daterange(start: date, end: date) -> Iterable[date]:
@@ -126,18 +109,215 @@ def _normalise_label(label: str | None) -> str:
     return (label or "").upper()
 
 
-def _class_sessions_needed(
+def _class_hours_needed(
     course: Course, class_group: ClassGroup, subgroup_label: str | None = None
 ) -> int:
     target_label = _normalise_label(subgroup_label)
     existing = sum(
-        1
+        session.duration_hours
         for session in course.sessions
         if session.class_group_id == class_group.id
         and _normalise_label(session.subgroup_label) == target_label
     )
-    required_total = course.sessions_required
+    required_total = course.sessions_required * course.session_length_hours
     return max(required_total - existing, 0)
+
+
+def _existing_hours_by_day(
+    course: Course, class_group: ClassGroup, subgroup_label: str | None = None
+) -> dict[date, int]:
+    target_label = _normalise_label(subgroup_label)
+    per_day: dict[date, int] = {}
+    for session in course.sessions:
+        if session.class_group_id != class_group.id:
+            continue
+        if _normalise_label(session.subgroup_label) != target_label:
+            continue
+        session_day = session.start_time.date()
+        per_day[session_day] = per_day.get(session_day, 0) + session.duration_hours
+    return per_day
+
+
+def _collect_contiguous_slots(start_index: int, length: int) -> list[tuple[time, time]] | None:
+    slots: list[tuple[time, time]] = []
+    previous_end: time | None = None
+    for offset in range(length):
+        index = start_index + offset
+        if index >= len(SCHEDULE_SLOTS):
+            return None
+        slot_start, slot_end = SCHEDULE_SLOTS[index]
+        if previous_end and slot_start != previous_end:
+            return None
+        slots.append((slot_start, slot_end))
+        previous_end = slot_end
+    return slots
+
+
+def _schedule_block_for_day(
+    *,
+    course: Course,
+    class_group: ClassGroup,
+    link: CourseClassLink,
+    subgroup_label: str | None,
+    day: date,
+    desired_hours: int,
+    base_offset: int,
+) -> list[Session] | None:
+    placement = _try_full_block(
+        course=course,
+        class_group=class_group,
+        link=link,
+        subgroup_label=subgroup_label,
+        day=day,
+        desired_hours=desired_hours,
+        base_offset=base_offset,
+    )
+    if placement:
+        return placement
+    if desired_hours <= 1:
+        return None
+    return _try_split_block(
+        course=course,
+        class_group=class_group,
+        link=link,
+        subgroup_label=subgroup_label,
+        day=day,
+        desired_hours=desired_hours,
+        base_offset=base_offset,
+    )
+
+
+def _try_full_block(
+    *,
+    course: Course,
+    class_group: ClassGroup,
+    link: CourseClassLink,
+    subgroup_label: str | None,
+    day: date,
+    desired_hours: int,
+    base_offset: int,
+) -> list[Session] | None:
+    required_capacity = course.capacity_needed_for(class_group)
+    for offset in range(len(START_TIMES)):
+        slot_index = (base_offset + offset) % len(START_TIMES)
+        slot_start_time = START_TIMES[slot_index]
+        start_dt = datetime.combine(day, slot_start_time)
+        end_dt = start_dt + timedelta(hours=desired_hours)
+        if not fits_in_windows(start_dt.time(), end_dt.time()):
+            continue
+        if not class_group.is_available_during(start_dt, end_dt):
+            continue
+        teacher = find_available_teacher(
+            course,
+            start_dt,
+            end_dt,
+            link=link,
+            subgroup_label=subgroup_label,
+        )
+        if not teacher:
+            continue
+        room = find_available_room(
+            course,
+            start_dt,
+            end_dt,
+            required_capacity=required_capacity,
+        )
+        if not room:
+            continue
+        session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            subgroup_label=subgroup_label,
+            start_time=start_dt,
+            end_time=end_dt,
+        )
+        db.session.add(session)
+        return [session]
+    return None
+
+
+def _try_split_block(
+    *,
+    course: Course,
+    class_group: ClassGroup,
+    link: CourseClassLink,
+    subgroup_label: str | None,
+    day: date,
+    desired_hours: int,
+    base_offset: int,
+) -> list[Session] | None:
+    segment_count = desired_hours
+    required_capacity = course.capacity_needed_for(class_group)
+    slot_count = len(SCHEDULE_SLOTS)
+    for offset in range(slot_count):
+        start_index = (base_offset + offset) % slot_count
+        contiguous = _collect_contiguous_slots(start_index, segment_count)
+        if not contiguous:
+            continue
+        if not all(fits_in_windows(start, end) for start, end in contiguous):
+            continue
+        first_start, _ = contiguous[0]
+        _, last_end = contiguous[-1]
+        start_dt = datetime.combine(day, first_start)
+        end_dt = datetime.combine(day, last_end)
+        if not all(
+            class_group.is_available_during(
+                datetime.combine(day, slot_start), datetime.combine(day, slot_end)
+            )
+            for slot_start, slot_end in contiguous
+        ):
+            continue
+        teacher = find_available_teacher(
+            course,
+            start_dt,
+            end_dt,
+            link=link,
+            subgroup_label=subgroup_label,
+        )
+        if not teacher:
+            continue
+        rooms: list[Room] = []
+        valid = True
+        for slot_start, slot_end in contiguous:
+            seg_start = datetime.combine(day, slot_start)
+            seg_end = datetime.combine(day, slot_end)
+            if any(
+                overlaps(existing.start_time, existing.end_time, seg_start, seg_end)
+                for existing in teacher.sessions
+            ):
+                valid = False
+                break
+            room = find_available_room(
+                course,
+                seg_start,
+                seg_end,
+                required_capacity=required_capacity,
+            )
+            if not room:
+                valid = False
+                break
+            rooms.append(room)
+        if not valid:
+            continue
+        sessions: list[Session] = []
+        for idx, (slot_start, slot_end) in enumerate(contiguous):
+            seg_start = datetime.combine(day, slot_start)
+            seg_end = datetime.combine(day, slot_end)
+            session = Session(
+                course=course,
+                teacher=teacher,
+                room=rooms[idx],
+                class_group=class_group,
+                subgroup_label=subgroup_label,
+                start_time=seg_start,
+                end_time=seg_end,
+            )
+            db.session.add(session)
+            sessions.append(session)
+        return sessions
+    return None
 def _resolve_schedule_window(
     course: Course, window_start: date | None, window_end: date | None
 ) -> tuple[date, date]:
@@ -168,15 +348,14 @@ def generate_schedule(
 
     created_sessions: list[Session] = []
 
-    slot_length_hours = course.session_length_hours
-    slot_length = timedelta(hours=slot_length_hours)
+    slot_length_hours = max(int(course.session_length_hours), 1)
 
     links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
     for link in links:
         class_group = link.class_group
         for subgroup_label in link.group_labels():
-            sessions_to_create = _class_sessions_needed(course, class_group, subgroup_label)
-            if sessions_to_create == 0:
+            hours_needed = _class_hours_needed(course, class_group, subgroup_label)
+            if hours_needed == 0:
                 continue
             available_days = [
                 day
@@ -193,86 +372,71 @@ def generate_schedule(
                 )
                 continue
 
-            start_time_order = _spread_sequence(START_TIMES)
+            existing_day_hours = _existing_hours_by_day(course, class_group, subgroup_label)
             day_indices = {day: index for index, day in enumerate(available_days)}
-            per_day_counts = {day: 0 for day in available_days}
-            scheduled_count = 0
-            while scheduled_count < sessions_to_create:
+            per_day_hours = {
+                day: existing_day_hours.get(day, 0) for day in available_days
+            }
+            blocks_total = max(
+                (hours_needed + slot_length_hours - 1) // slot_length_hours,
+                1,
+            )
+            block_index = 0
+            hours_remaining = hours_needed
+
+            while hours_remaining > 0:
+                desired_hours = min(slot_length_hours, hours_remaining)
                 if len(available_days) == 1:
                     anchor_index = 0
-                elif sessions_to_create == 1:
+                elif blocks_total == 1:
                     anchor_index = len(available_days) // 2
                 else:
                     anchor_position = (
-                        scheduled_count / (sessions_to_create - 1)
+                        block_index / (blocks_total - 1)
                     ) * (len(available_days) - 1)
                     anchor_index = round(anchor_position)
                 anchor_index = max(0, min(anchor_index, len(available_days) - 1))
 
-                placed = False
                 ordered_days = sorted(
                     available_days,
                     key=lambda d: (
-                        per_day_counts[d],
+                        per_day_hours[d],
                         abs(day_indices[d] - anchor_index),
                         day_indices[d],
                     ),
                 )
+
+                placed = False
                 for day in ordered_days:
-                    time_offset_base = per_day_counts[day]
-                    for offset in range(len(start_time_order)):
-                        slot_start_time = start_time_order[
-                            (time_offset_base + offset) % len(start_time_order)
-                        ]
-                        start_dt = datetime.combine(day, slot_start_time)
-                        end_dt = start_dt + slot_length
-                        if not fits_in_windows(start_dt.time(), end_dt.time()):
-                            continue
-                        if not class_group.is_available_during(start_dt, end_dt):
-                            continue
-                        teacher = find_available_teacher(
-                            course,
-                            start_dt,
-                            end_dt,
-                            link=link,
-                            subgroup_label=subgroup_label,
-                        )
-                        if not teacher:
-                            continue
-                        required_capacity = course.capacity_needed_for(class_group)
-                        room = find_available_room(
-                            course,
-                            start_dt,
-                            end_dt,
-                            required_capacity=required_capacity,
-                        )
-                        if not room:
-                            continue
-                        session = Session(
-                            course=course,
-                            teacher=teacher,
-                            room=room,
-                            class_group=class_group,
-                            subgroup_label=subgroup_label,
-                            start_time=start_dt,
-                            end_time=end_dt,
-                        )
-                        db.session.add(session)
-                        created_sessions.append(session)
-                        scheduled_count += 1
-                        per_day_counts[day] += 1
-                        placed = True
-                        break
-                    if placed:
-                        break
+                    base_offset = int(per_day_hours[day])
+                    block_sessions = _schedule_block_for_day(
+                        course=course,
+                        class_group=class_group,
+                        link=link,
+                        subgroup_label=subgroup_label,
+                        day=day,
+                        desired_hours=desired_hours,
+                        base_offset=base_offset,
+                    )
+                    if not block_sessions:
+                        continue
+                    created_sessions.extend(block_sessions)
+                    block_hours = sum(
+                        session.duration_hours for session in block_sessions
+                    )
+                    per_day_hours[day] += block_hours
+                    hours_remaining = max(hours_remaining - block_hours, 0)
+                    block_index += 1
+                    placed = True
+                    break
+
                 if not placed:
                     break
 
-            remaining = sessions_to_create - scheduled_count
-            if remaining > 0:
+            if hours_remaining > 0:
                 current_app.logger.warning(
-                    "Unable to schedule %s sessions for %s (%s)",
-                    remaining,
+                    "Impossible de planifier %s heure(s) pour %s (%s)",
+                    hours_remaining,
                     course.name,
                     class_group.name,
                 )
