@@ -62,7 +62,7 @@ CREATE TABLE `course` (
   `start_date` date DEFAULT NULL,
   `end_date` date DEFAULT NULL,
   `priority` int(11) NOT NULL,
-  `course_type` varchar(2) NOT NULL,
+  `course_type` varchar(3) NOT NULL,
   `requires_computers` tinyint(1) NOT NULL,
   `created_at` datetime NOT NULL,
   `updated_at` datetime NOT NULL

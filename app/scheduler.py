@@ -123,9 +123,9 @@ def find_available_teacher(
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
     if link is not None:
-        assigned = link.teacher_for_label(subgroup_label)
-        if assigned is not None:
-            preferred.append(assigned)
+        for assigned in link.preferred_teachers(subgroup_label):
+            if assigned is not None and assigned not in preferred:
+                preferred.append(assigned)
 
     if course.teachers:
         fallback_pool = list(course.teachers)

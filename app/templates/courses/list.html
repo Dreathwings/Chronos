@@ -24,6 +24,7 @@
                 <option value="CM">Cours magistral</option>
                 <option value="TD">Travaux dirigés</option>
                 <option value="TP">Travaux pratiques</option>
+                <option value="SAE">Situation d'apprentissage et d'évaluation</option>
               </select>
             </div>
             <div class="col">
@@ -127,17 +128,42 @@
               <td>{{ course.priority }}</td>
               <td>
                 {% if course.class_links %}
+                {% if course.course_type == 'CM' %}
+                <div class="text-muted small mb-2">Cours magistral — classes regroupées</div>
+                {% endif %}
                 <div class="vstack gap-2">
                   {% for link in course.class_links %}
                   <div>
                     <span class="fw-semibold">{{ link.class_group.name }}</span>
-                    {% if link.group_count == 2 %}
+                    {% if course.course_type == 'TP' %}
                     <span class="badge bg-info text-dark ms-1">Demi-groupes</span>
                     {% endif %}
                     <ul class="list-unstyled ms-3 mb-0 small text-muted">
+                      {% if course.course_type == 'SAE' %}
+                      <li>
+                        Enseignant 1
+                        {% if link.teacher_a %}
+                        — {{ link.teacher_a.name }}
+                        {% else %}
+                        — Aucun enseignant
+                        {% endif %}
+                      </li>
+                      <li>
+                        Enseignant 2
+                        {% if link.teacher_b %}
+                        — {{ link.teacher_b.name }}
+                        {% else %}
+                        — Aucun enseignant
+                        {% endif %}
+                      </li>
+                      {% else %}
                       {% for label, teacher in link.teacher_labels() %}
                       <li>
-                        {% if label %}Groupe {{ label|upper }}{% else %}Classe entière{% endif %}
+                        {% if label %}
+                          {% if label == 'A/B' %}Groupes A et B{% else %}{{ label }}{% endif %}
+                        {% else %}
+                        Classe entière
+                        {% endif %}
                         {% if teacher %}
                         — {{ teacher.name }}
                         {% else %}
@@ -145,6 +171,7 @@
                         {% endif %}
                       </li>
                       {% endfor %}
+                      {% endif %}
                     </ul>
                   </div>
                   {% endfor %}

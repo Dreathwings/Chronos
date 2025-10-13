@@ -143,11 +143,12 @@ class Room(db.Model, TimeStampedModel):
         return f"Room<{self.id} {self.name}>"
 
 
-COURSE_TYPE_CHOICES = ("CM", "TD", "TP")
+COURSE_TYPE_CHOICES = ("CM", "TD", "TP", "SAE")
 COURSE_TYPE_LABELS = {
     "CM": "Cours magistral",
     "TD": "Travaux dirigés",
     "TP": "Travaux pratiques",
+    "SAE": "Situation d'apprentissage et d'évaluation",
 }
 
 
@@ -160,7 +161,7 @@ class Course(db.Model, TimeStampedModel):
     start_date: Mapped[Optional[date]] = mapped_column(Date)
     end_date: Mapped[Optional[date]] = mapped_column(Date)
     priority: Mapped[int] = mapped_column(Integer, default=1)
-    course_type: Mapped[str] = mapped_column(String(2), default="CM")
+    course_type: Mapped[str] = mapped_column(String(3), default="CM")
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
 
@@ -183,7 +184,7 @@ class Course(db.Model, TimeStampedModel):
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
         CheckConstraint(
-            "course_type IN ('CM','TD','TP')",
+            "course_type IN ('CM','TD','TP','SAE')",
             name="chk_course_type_valid",
         ),
     )
@@ -194,6 +195,14 @@ class Course(db.Model, TimeStampedModel):
     @property
     def is_tp(self) -> bool:
         return self.course_type == "TP"
+
+    @property
+    def is_cm(self) -> bool:
+        return self.course_type == "CM"
+
+    @property
+    def is_sae(self) -> bool:
+        return self.course_type == "SAE"
 
     def class_link_for(self, class_group: "ClassGroup" | int) -> "CourseClassLink" | None:
         class_id = class_group if isinstance(class_group, int) else class_group.id
@@ -445,14 +454,47 @@ class CourseClassLink(db.Model):
             return ["A", "B"]
         return [None]
 
-    def teacher_for_label(self, subgroup_label: str | None) -> Optional[Teacher]:
-        """Return the configured teacher irrespective of subgroup."""
+    def assigned_teachers(self) -> list[Teacher]:
+        teachers: list[Teacher] = []
+        for teacher in (self.teacher_a, self.teacher_b):
+            if teacher is None:
+                continue
+            if teacher not in teachers:
+                teachers.append(teacher)
+        return teachers
 
-        if self.group_count == 1:
-            return self.teacher_a or self.teacher_b
-        return self.teacher_a or self.teacher_b
+    def preferred_teachers(self, subgroup_label: str | None = None) -> list[Teacher]:
+        teachers = self.assigned_teachers()
+        course = getattr(self, "course", None)
+        course_type = getattr(course, "course_type", None)
+        if course_type == "SAE":
+            return teachers
+        if self.group_count == 2:
+            label = (subgroup_label or "").strip().upper()
+            ordered: list[Teacher] = []
+            if label == "B" and self.teacher_b:
+                ordered.append(self.teacher_b)
+            if self.teacher_a and self.teacher_a not in ordered:
+                ordered.append(self.teacher_a)
+            if self.teacher_b and self.teacher_b not in ordered:
+                ordered.append(self.teacher_b)
+            return ordered
+        if teachers:
+            return teachers[:1]
+        return []
+
+    def teacher_for_label(self, subgroup_label: str | None) -> Optional[Teacher]:
+        teachers = self.preferred_teachers(subgroup_label)
+        return teachers[0] if teachers else None
 
     def teacher_labels(self) -> list[tuple[str, Optional[Teacher]]]:
+        course = getattr(self, "course", None)
+        course_type = getattr(course, "course_type", None)
+        if course_type == "SAE":
+            return [
+                ("Enseignant 1", self.teacher_a),
+                ("Enseignant 2", self.teacher_b),
+            ]
         teacher = self.teacher_a or self.teacher_b
         if self.group_count == 2:
             return [("A/B", teacher)]

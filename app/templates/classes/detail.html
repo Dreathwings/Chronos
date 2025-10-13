@@ -54,7 +54,7 @@
               <option value="{{ teacher.id }}">{{ teacher.name }}</option>
               {% endfor %}
             </select>
-            <div class="form-text">Le même enseignant couvrira les groupes A et B.</div>
+            <div class="form-text">L'affectation détaillée se fait depuis la fiche du cours (groupes, double enseignants...).</div>
           </div>
           {% endif %}
           <button type="submit" class="btn btn-outline-primary" {% if not assignable_courses %}disabled{% endif %}>Associer</button>
@@ -70,15 +70,41 @@
           <form method="post" class="d-flex justify-content-between align-items-center">
             <div>
               <span class="fw-semibold">{{ link.course.name }}</span>
-              {% if link.group_count == 2 %}
+              {% if link.course.course_type == 'TP' %}
               <span class="badge bg-info text-dark ms-1">Travaux pratiques</span>
+              {% elif link.course.course_type == 'SAE' %}
+              <span class="badge bg-warning text-dark ms-1">SAE</span>
+              {% elif link.course.course_type == 'CM' %}
+              <span class="badge bg-secondary ms-1">Cours magistral</span>
               {% else %}
               <span class="badge bg-secondary ms-1">Classe entière</span>
               {% endif %}
               <ul class="list-unstyled ms-3 mb-0 small text-muted">
+                {% if link.course.course_type == 'SAE' %}
+                <li>
+                  Enseignant 1
+                  {% if link.teacher_a %}
+                  — {{ link.teacher_a.name }}
+                  {% else %}
+                  — Aucun enseignant
+                  {% endif %}
+                </li>
+                <li>
+                  Enseignant 2
+                  {% if link.teacher_b %}
+                  — {{ link.teacher_b.name }}
+                  {% else %}
+                  — Aucun enseignant
+                  {% endif %}
+                </li>
+                {% else %}
                 {% for label, teacher in link.teacher_labels() %}
                 <li>
-                  {% if label %}Groupe {{ label|upper }}{% else %}Classe entière{% endif %}
+                  {% if label %}
+                    {% if label == 'A/B' %}Groupes A et B{% else %}{{ label }}{% endif %}
+                  {% else %}
+                  Classe entière
+                  {% endif %}
                   {% if teacher %}
                   — {{ teacher.name }}
                   {% else %}
@@ -86,6 +112,7 @@
                   {% endif %}
                 </li>
                 {% endfor %}
+                {% endif %}
               </ul>
             </div>
             <div>

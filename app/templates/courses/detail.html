@@ -20,6 +20,7 @@
                 <option value="CM" {% if course.course_type == 'CM' %}selected{% endif %}>Cours magistral</option>
                 <option value="TD" {% if course.course_type == 'TD' %}selected{% endif %}>Travaux dirigés</option>
                 <option value="TP" {% if course.course_type == 'TP' %}selected{% endif %}>Travaux pratiques</option>
+                <option value="SAE" {% if course.course_type == 'SAE' %}selected{% endif %}>Situation d'apprentissage et d'évaluation</option>
               </select>
             </div>
             <div class="col">
@@ -89,6 +90,10 @@
                 <div class="mt-2 ms-4 text-muted small">
                   {% if course.course_type == 'TP' %}
                   Ce cours sera planifié en deux demi-groupes A et B.
+                  {% elif course.course_type == 'SAE' %}
+                  Deux enseignants peuvent être assignés simultanément pour cette classe.
+                  {% elif course.course_type == 'CM' %}
+                  Toutes les classes inscrites suivent le cours ensemble.
                   {% else %}
                   Ce cours est planifié pour la classe entière.
                   {% endif %}
@@ -129,12 +134,60 @@
         {% if teachers %}
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="update-class-teachers">
+          {% if course.course_type == 'CM' %}
+          {% set class_names = course.class_links | map(attribute='class_group.name') | list %}
+          {% set ns = namespace(shared_teacher=None) %}
+          {% for link in course.class_links %}
+          {% if ns.shared_teacher is none and (link.teacher_a or link.teacher_b) %}
+          {% set ns.shared_teacher = link.teacher_a or link.teacher_b %}
+          {% endif %}
+          {% endfor %}
+          <div class="border rounded p-2">
+            <div class="fw-semibold">Cours magistral</div>
+            <div class="text-muted small mb-2">
+              Enseignant appliqué à l'ensemble des classes : {{ class_names | join(', ') }}.
+            </div>
+            <select class="form-select form-select-sm" name="course_teacher_all">
+              <option value="" {% if not ns.shared_teacher %}selected{% endif %}>— Aucun enseignant —</option>
+              {% for teacher in teachers %}
+              <option value="{{ teacher.id }}" {% if ns.shared_teacher and teacher.id == ns.shared_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% elif course.course_type == 'SAE' %}
+          {% for link in course.class_links %}
+          <div class="border rounded p-2">
+            <div class="fw-semibold">{{ link.class_group.name }}</div>
+            <div class="text-muted small mb-2">Deux enseignants peuvent encadrer cette classe.</div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Enseignant 1</label>
+                <select class="form-select form-select-sm" name="class_link_teacher_a_{{ link.class_group_id }}">
+                  <option value="" {% if not link.teacher_a %}selected{% endif %}>— Aucun enseignant —</option>
+                  {% for teacher in teachers %}
+                  <option value="{{ teacher.id }}" {% if link.teacher_a and teacher.id == link.teacher_a.id %}selected{% endif %}>{{ teacher.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Enseignant 2</label>
+                <select class="form-select form-select-sm" name="class_link_teacher_b_{{ link.class_group_id }}">
+                  <option value="" {% if not link.teacher_b %}selected{% endif %}>— Aucun enseignant —</option>
+                  {% for teacher in teachers %}
+                  <option value="{{ teacher.id }}" {% if link.teacher_b and teacher.id == link.teacher_b.id %}selected{% endif %}>{{ teacher.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+          {% else %}
           {% for link in course.class_links %}
           {% set assigned_teacher = link.teacher_a or link.teacher_b %}
           <div class="border rounded p-2">
             <div class="fw-semibold">{{ link.class_group.name }}</div>
             <div class="text-muted small mb-2">
-              {% if link.group_count == 2 %}
+              {% if course.course_type == 'TP' %}
               Travaux pratiques — groupes A/B
               {% else %}
               Classe entière
@@ -148,6 +201,7 @@
             </select>
           </div>
           {% endfor %}
+          {% endif %}
           <button type="submit" class="btn btn-outline-secondary">Mettre à jour</button>
         </form>
         {% else %}

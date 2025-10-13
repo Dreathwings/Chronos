@@ -123,8 +123,12 @@
             </select>
             <div class="form-text" id="class-help">
               {% if default_options %}
-                {% if course_subgroup_hints.get(default_course.id) %}
+                {% if default_course.course_type == 'TP' %}
                 Les travaux pratiques sont divisés en groupes A et B.
+                {% elif default_course.course_type == 'SAE' %}
+                Ce cours peut mobiliser deux enseignants pour chaque classe.
+                {% elif default_course.course_type == 'CM' %}
+                Ce cours regroupe toutes les classes sélectionnées dans le même créneau.
                 {% else %}
                 Sélectionnez la classe associée au cours.
                 {% endif %}
@@ -176,7 +180,7 @@
     calendar.render();
 
     const courseClasses = {{ course_class_options_json|safe }};
-    const courseHints = {{ course_subgroup_hints_json|safe }};
+    const courseTypes = {{ course_types_json|safe }};
     const courseSelect = document.querySelector('select[name="course_id"]');
     const classSelect = document.getElementById('quick-class-select');
     const submitButton = document.getElementById('quick-session-submit');
@@ -223,8 +227,13 @@
       });
 
       if (helpText) {
-        if (courseHints && courseHints[courseId]) {
+        const courseType = courseTypes ? courseTypes[courseId] : null;
+        if (courseType === 'TP') {
           helpText.textContent = 'Les travaux pratiques sont divisés en groupes A et B.';
+        } else if (courseType === 'SAE') {
+          helpText.textContent = 'Ce cours peut mobiliser deux enseignants pour chaque classe.';
+        } else if (courseType === 'CM') {
+          helpText.textContent = 'Ce cours regroupe toutes les classes sélectionnées dans le même créneau.';
         } else {
           helpText.textContent = 'Sélectionnez la classe associée au cours.';
         }

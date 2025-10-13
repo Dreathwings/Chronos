@@ -51,6 +51,7 @@ COURSE_TYPE_LABELS = {
     "CM": "Cours magistral",
     "TD": "Travaux dirigés",
     "TP": "Travaux pratiques",
+    "SAE": "Situation d'apprentissage et d'évaluation",
 }
 
 
@@ -170,16 +171,22 @@ def _sync_course_class_links(
         link = current_links.get(class_id)
         if link is None:
             preserved = existing_links.get(class_id)
-            preserved_teacher = None
-            if preserved is not None:
-                preserved_teacher = preserved.teacher_a or preserved.teacher_b
+            preserved_teacher_a = preserved.teacher_a if preserved else None
+            preserved_teacher_b = preserved.teacher_b if preserved else None
+            if course.is_tp:
+                base_teacher = preserved_teacher_a or preserved_teacher_b
+                teacher_b = base_teacher if base_teacher else None
+            elif course.is_sae:
+                base_teacher = preserved_teacher_a
+                teacher_b = preserved_teacher_b
+            else:
+                base_teacher = preserved_teacher_a or preserved_teacher_b
+                teacher_b = None
             link = CourseClassLink(
                 class_group=class_group,
                 group_count=group_count,
-                teacher_a=preserved_teacher,
-                teacher_b=(
-                    preserved_teacher if group_count == 2 and preserved_teacher else None
-                ),
+                teacher_a=base_teacher,
+                teacher_b=teacher_b,
             )
             course.class_links.append(link)
             db.session.flush([link])
@@ -187,11 +194,15 @@ def _sync_course_class_links(
             continue
 
         link.group_count = group_count
-        teacher = link.teacher_a or link.teacher_b
-        if group_count == 1:
+        if course.is_tp:
+            base_teacher = link.teacher_a or link.teacher_b
+            if base_teacher and link.teacher_b is None:
+                link.teacher_b = base_teacher
+        elif course.is_sae:
+            # Deux enseignants peuvent être définis, aucune action supplémentaire.
+            pass
+        else:
             link.teacher_b = None
-        elif teacher and link.teacher_b is None:
-            link.teacher_b = teacher
         db.session.flush([link])
 
 
@@ -399,10 +410,12 @@ def dashboard():
 
     course_class_options: dict[int, list[dict[str, str]]] = {}
     course_subgroup_hints: dict[int, bool] = {}
+    course_types: dict[int, str] = {}
     for course in courses:
         options: list[dict[str, str]] = []
         links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
         has_subgroups = False
+        course_types[course.id] = course.course_type
         for link in links:
             for subgroup_label in link.group_labels():
                 value_suffix = subgroup_label or ""
@@ -412,11 +425,19 @@ def dashboard():
                     if subgroup_label
                     else f"{link.class_group.name} — classe entière"
                 )
-                teacher = link.teacher_for_label(subgroup_label)
-                if teacher:
-                    option_label = f"{base_label} ({teacher.name})"
+                if course.is_sae:
+                    assigned = link.assigned_teachers()
+                    if assigned:
+                        teacher_names = " & ".join(teacher.name for teacher in assigned)
+                        option_label = f"{base_label} ({teacher_names})"
+                    else:
+                        option_label = f"{base_label} (Aucun enseignant)"
                 else:
-                    option_label = f"{base_label} (Aucun enseignant)"
+                    teacher = link.teacher_for_label(subgroup_label)
+                    if teacher:
+                        option_label = f"{base_label} ({teacher.name})"
+                    else:
+                        option_label = f"{base_label} (Aucun enseignant)"
                 options.append({"value": option_value, "label": option_label})
                 if subgroup_label:
                     has_subgroups = True
@@ -561,7 +582,7 @@ def dashboard():
         course_class_options=course_class_options,
         course_class_options_json=json.dumps(course_class_options, ensure_ascii=False),
         course_subgroup_hints=course_subgroup_hints,
-        course_subgroup_hints_json=json.dumps(course_subgroup_hints, ensure_ascii=False),
+        course_types_json=json.dumps(course_types, ensure_ascii=False),
         course_summaries=course_summaries,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
@@ -981,12 +1002,34 @@ def course_detail(course_id: int):
             except ValueError as exc:
                 flash(str(exc), "danger")
         elif form_name == "update-class-teachers":
-            for link in course.class_links:
+            if course.is_cm:
                 teacher = _parse_teacher_selection(
-                    request.form.get(f"class_link_teacher_{link.class_group_id}")
+                    request.form.get("course_teacher_all")
                 )
-                link.teacher_a = teacher
-                link.teacher_b = teacher if link.group_count == 2 and teacher else None
+                for link in course.class_links:
+                    link.teacher_a = teacher
+                    link.teacher_b = None
+            elif course.is_sae:
+                for link in course.class_links:
+                    teacher_a = _parse_teacher_selection(
+                        request.form.get(
+                            f"class_link_teacher_a_{link.class_group_id}"
+                        )
+                    )
+                    teacher_b = _parse_teacher_selection(
+                        request.form.get(
+                            f"class_link_teacher_b_{link.class_group_id}"
+                        )
+                    )
+                    link.teacher_a = teacher_a
+                    link.teacher_b = teacher_b
+            else:
+                for link in course.class_links:
+                    teacher = _parse_teacher_selection(
+                        request.form.get(f"class_link_teacher_{link.class_group_id}")
+                    )
+                    link.teacher_a = teacher
+                    link.teacher_b = teacher if link.group_count == 2 and teacher else None
             db.session.commit()
             flash("Enseignants par classe mis à jour", "success")
         elif form_name == "manual-session":

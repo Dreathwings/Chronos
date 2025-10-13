@@ -191,7 +191,7 @@ def _ensure_course_type_column() -> None:
         with engine.begin() as connection:
             connection.execute(
                 text(
-                    "ALTER TABLE course ADD COLUMN course_type VARCHAR(2) NOT NULL DEFAULT 'CM'"
+                    "ALTER TABLE course ADD COLUMN course_type VARCHAR(3) NOT NULL DEFAULT 'CM'"
                 )
             )
             connection.execute(
@@ -206,7 +206,7 @@ def _ensure_course_type_column() -> None:
             with engine.begin() as connection:
                 connection.execute(
                     text(
-                        "ALTER TABLE course MODIFY course_type VARCHAR(2) NOT NULL DEFAULT 'CM'"
+                        "ALTER TABLE course MODIFY course_type VARCHAR(3) NOT NULL DEFAULT 'CM'"
                     )
                 )
         except SQLAlchemyError:
