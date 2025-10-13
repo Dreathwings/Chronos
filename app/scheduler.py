@@ -196,82 +196,82 @@ def generate_schedule(
             sessions_to_create = _class_sessions_needed(course, class_group, subgroup_label)
             if sessions_to_create == 0:
                 continue
-        available_days = [
-            day
-            for day in sorted(daterange(schedule_start, schedule_end))
-            if day.weekday() < 5 and class_group.is_available_on(day)
-        ]
-        if not available_days:
-            current_app.logger.warning(
-                "Aucune journée disponible pour %s (%s) entre %s et %s",
-                course.name,
-                class_group.name,
-                schedule_start,
-                schedule_end,
-            )
-            continue
+            available_days = [
+                day
+                for day in sorted(daterange(schedule_start, schedule_end))
+                if day.weekday() < 5 and class_group.is_available_on(day)
+            ]
+            if not available_days:
+                current_app.logger.warning(
+                    "Aucune journée disponible pour %s (%s) entre %s et %s",
+                    course.name,
+                    class_group.name,
+                    schedule_start,
+                    schedule_end,
+                )
+                continue
 
-        start_time_order = _spread_sequence(START_TIMES)
-        scheduled_count = 0
-        while scheduled_count < sessions_to_create:
-            anchor_ratio = (scheduled_count + 0.5) / sessions_to_create
-            anchor_index = int(anchor_ratio * len(available_days))
-            if anchor_index >= len(available_days):
-                anchor_index = len(available_days) - 1
+            start_time_order = _spread_sequence(START_TIMES)
+            scheduled_count = 0
+            while scheduled_count < sessions_to_create:
+                anchor_ratio = (scheduled_count + 0.5) / sessions_to_create
+                anchor_index = int(anchor_ratio * len(available_days))
+                if anchor_index >= len(available_days):
+                    anchor_index = len(available_days) - 1
 
-            placed = False
-            for day in _day_search_order(available_days, anchor_index):
-                for offset in range(len(start_time_order)):
-                    slot_start_time = start_time_order[(scheduled_count + offset) % len(start_time_order)]
-                    start_dt = datetime.combine(day, slot_start_time)
-                    end_dt = start_dt + slot_length
-                    if not fits_in_windows(start_dt.time(), end_dt.time()):
-                        continue
-                    if not class_group.is_available_during(start_dt, end_dt):
-                        continue
-                    teacher = find_available_teacher(
-                        course,
-                        start_dt,
-                        end_dt,
-                        link=link,
-                        subgroup_label=subgroup_label,
-                    )
-                    if not teacher:
-                        continue
-                    required_capacity = course.capacity_needed_for(class_group)
-                    room = find_available_room(
-                        course,
-                        start_dt,
-                        end_dt,
-                        required_capacity=required_capacity,
-                    )
-                    if not room:
-                        continue
-                    session = Session(
-                        course=course,
-                        teacher=teacher,
-                        room=room,
-                        class_group=class_group,
-                        subgroup_label=subgroup_label,
-                        start_time=start_dt,
-                        end_time=end_dt,
-                    )
-                    db.session.add(session)
-                    created_sessions.append(session)
-                    scheduled_count += 1
-                    placed = True
+                placed = False
+                for day in _day_search_order(available_days, anchor_index):
+                    for offset in range(len(start_time_order)):
+                        slot_start_time = start_time_order[(scheduled_count + offset) % len(start_time_order)]
+                        start_dt = datetime.combine(day, slot_start_time)
+                        end_dt = start_dt + slot_length
+                        if not fits_in_windows(start_dt.time(), end_dt.time()):
+                            continue
+                        if not class_group.is_available_during(start_dt, end_dt):
+                            continue
+                        teacher = find_available_teacher(
+                            course,
+                            start_dt,
+                            end_dt,
+                            link=link,
+                            subgroup_label=subgroup_label,
+                        )
+                        if not teacher:
+                            continue
+                        required_capacity = course.capacity_needed_for(class_group)
+                        room = find_available_room(
+                            course,
+                            start_dt,
+                            end_dt,
+                            required_capacity=required_capacity,
+                        )
+                        if not room:
+                            continue
+                        session = Session(
+                            course=course,
+                            teacher=teacher,
+                            room=room,
+                            class_group=class_group,
+                            subgroup_label=subgroup_label,
+                            start_time=start_dt,
+                            end_time=end_dt,
+                        )
+                        db.session.add(session)
+                        created_sessions.append(session)
+                        scheduled_count += 1
+                        placed = True
+                        break
+                    if placed:
+                        break
+                if not placed:
                     break
-                if placed:
-                    break
-            if not placed:
-                break
 
-        remaining = sessions_to_create - scheduled_count
-        if remaining > 0:
-            current_app.logger.warning(
-                "Unable to schedule %s sessions for %s (%s)",
-                remaining,
-                course.name,
-                class_group.name,
-            )
+            remaining = sessions_to_create - scheduled_count
+            if remaining > 0:
+                current_app.logger.warning(
+                    "Unable to schedule %s sessions for %s (%s)",
+                    remaining,
+                    course.name,
+                    class_group.name,
+                )
     return created_sessions
