@@ -267,6 +267,11 @@ def _try_full_block(
             end_time=end_dt,
         )
         db.session.add(session)
+        # Certains connecteurs MariaDB présentent un bug avec les insertions en
+        # lot exécutées via ``executemany`` et lèvent une ``SystemError`` sans
+        # message.  En vidant la session SQLAlchemy dès la création, chaque
+        # séance est insérée individuellement et on évite le chemin fautif.
+        db.session.flush()
         return [session]
     return None
 
@@ -345,6 +350,7 @@ def _try_split_block(
                 end_time=seg_end,
             )
             db.session.add(session)
+            db.session.flush()
             sessions.append(session)
         return sessions
     return None
