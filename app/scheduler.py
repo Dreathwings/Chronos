@@ -133,39 +133,46 @@ def generate_schedule(course: Course) -> list[Session]:
         sessions_to_create = _class_sessions_needed(course, class_group)
         if sessions_to_create == 0:
             continue
-        for day in priority_days:
-            if sessions_to_create == 0:
-                break
-            if day.weekday() >= 5:
-                continue
-            if not class_group.is_available_on(day):
-                continue
-            for slot_start_time in priority_start_times:
-                start_dt = datetime.combine(day, slot_start_time)
-                end_dt = start_dt + slot_length
-                if not fits_in_windows(start_dt.time(), end_dt.time()):
-                    continue
-                if not class_group.is_available_during(start_dt, end_dt):
-                    continue
-                teacher = find_available_teacher(course, start_dt, end_dt)
-                if not teacher:
-                    continue
-                room = find_available_room(course, start_dt, end_dt)
-                if not room:
-                    continue
-                session = Session(
-                    course=course,
-                    teacher=teacher,
-                    room=room,
-                    class_group=class_group,
-                    start_time=start_dt,
-                    end_time=end_dt,
-                )
-                db.session.add(session)
-                created_sessions.append(session)
-                sessions_to_create -= 1
+        round_index = 0
+        while sessions_to_create > 0:
+            progress_made = False
+            for day in priority_days:
                 if sessions_to_create == 0:
                     break
+                if day.weekday() >= 5:
+                    continue
+                if not class_group.is_available_on(day):
+                    continue
+                for offset in range(len(priority_start_times)):
+                    slot_start_time = priority_start_times[(round_index + offset) % len(priority_start_times)]
+                    start_dt = datetime.combine(day, slot_start_time)
+                    end_dt = start_dt + slot_length
+                    if not fits_in_windows(start_dt.time(), end_dt.time()):
+                        continue
+                    if not class_group.is_available_during(start_dt, end_dt):
+                        continue
+                    teacher = find_available_teacher(course, start_dt, end_dt)
+                    if not teacher:
+                        continue
+                    room = find_available_room(course, start_dt, end_dt)
+                    if not room:
+                        continue
+                    session = Session(
+                        course=course,
+                        teacher=teacher,
+                        room=room,
+                        class_group=class_group,
+                        start_time=start_dt,
+                        end_time=end_dt,
+                    )
+                    db.session.add(session)
+                    created_sessions.append(session)
+                    sessions_to_create -= 1
+                    progress_made = True
+                    break
+            if not progress_made:
+                break
+            round_index += 1
         if sessions_to_create > 0:
             current_app.logger.warning(
                 "Unable to schedule %s sessions for %s (%s)",
