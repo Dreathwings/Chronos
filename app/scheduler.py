@@ -590,7 +590,6 @@ def generate_schedule(
     if not course.classes:
         raise ValueError("Associez au moins une classe au cours avant de planifier.")
 
-    created_sessions: list[Session] = []
 
     slot_length_hours = max(int(course.session_length_hours), 1)
 
