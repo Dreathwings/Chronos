@@ -29,6 +29,22 @@ SCHEDULE_SLOTS: List[tuple[time, time]] = [
 
 MAX_SLOT_GAP = timedelta(minutes=15)
 
+
+def _build_extended_breaks() -> set[tuple[time, time]]:
+    extended: set[tuple[time, time]] = set()
+    for idx in range(len(WORKING_WINDOWS) - 1):
+        _, current_end = WORKING_WINDOWS[idx]
+        next_start, _ = WORKING_WINDOWS[idx + 1]
+        gap = datetime.combine(date.min, next_start) - datetime.combine(
+            date.min, current_end
+        )
+        if gap > MAX_SLOT_GAP:
+            extended.add((current_end, next_start))
+    return extended
+
+
+EXTENDED_BREAKS = _build_extended_breaks()
+
 START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
 
 
@@ -85,6 +101,7 @@ def find_available_teacher(
     *,
     link: CourseClassLink | None = None,
     subgroup_label: str | None = None,
+    segments: Optional[list[tuple[datetime, datetime]]] = None,
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
     if link is not None:
@@ -99,9 +116,17 @@ def find_available_teacher(
 
     candidates = preferred + [teacher for teacher in fallback_pool if teacher not in preferred]
     for teacher in sorted(candidates, key=lambda t: t.name.lower()):
-        if not teacher.is_available_during(start, end):
+        segments_to_check = segments or [(start, end)]
+        if not all(
+            teacher.is_available_during(segment_start, segment_end)
+            for segment_start, segment_end in segments_to_check
+        ):
             continue
-        if any(overlaps(s.start_time, s.end_time, start, end) for s in teacher.sessions):
+        if any(
+            overlaps(s.start_time, s.end_time, segment_start, segment_end)
+            for s in teacher.sessions
+            for segment_start, segment_end in segments_to_check
+        ):
             continue
         return teacher
     return None
@@ -152,7 +177,9 @@ def _collect_contiguous_slots(start_index: int, length: int) -> list[tuple[time,
             gap = datetime.combine(date.min, slot_start) - datetime.combine(
                 date.min, previous_end
             )
-            if gap < timedelta(0) or gap > MAX_SLOT_GAP:
+            if gap < timedelta(0):
+                return None
+            if gap > MAX_SLOT_GAP and (previous_end, slot_start) not in EXTENDED_BREAKS:
                 return None
         slots.append((slot_start, slot_end))
         previous_end = slot_end
@@ -264,15 +291,15 @@ def _try_split_block(
             continue
         if not all(fits_in_windows(start, end) for start, end in contiguous):
             continue
-        first_start, _ = contiguous[0]
-        _, last_end = contiguous[-1]
-        start_dt = datetime.combine(day, first_start)
-        end_dt = datetime.combine(day, last_end)
-        if not all(
-            class_group.is_available_during(
-                datetime.combine(day, slot_start), datetime.combine(day, slot_end)
-            )
+        segment_datetimes = [
+            (datetime.combine(day, slot_start), datetime.combine(day, slot_end))
             for slot_start, slot_end in contiguous
+        ]
+        start_dt = segment_datetimes[0][0]
+        end_dt = segment_datetimes[-1][1]
+        if not all(
+            class_group.is_available_during(segment_start, segment_end)
+            for segment_start, segment_end in segment_datetimes
         ):
             continue
         teacher = find_available_teacher(
@@ -281,14 +308,13 @@ def _try_split_block(
             end_dt,
             link=link,
             subgroup_label=subgroup_label,
+            segments=segment_datetimes,
         )
         if not teacher:
             continue
         rooms: list[Room] = []
         valid = True
-        for slot_start, slot_end in contiguous:
-            seg_start = datetime.combine(day, slot_start)
-            seg_end = datetime.combine(day, slot_end)
+        for seg_start, seg_end in segment_datetimes:
             if any(
                 overlaps(existing.start_time, existing.end_time, seg_start, seg_end)
                 for existing in teacher.sessions
@@ -308,9 +334,7 @@ def _try_split_block(
         if not valid:
             continue
         sessions: list[Session] = []
-        for idx, (slot_start, slot_end) in enumerate(contiguous):
-            seg_start = datetime.combine(day, slot_start)
-            seg_end = datetime.combine(day, slot_end)
+        for idx, (seg_start, seg_end) in enumerate(segment_datetimes):
             session = Session(
                 course=course,
                 teacher=teacher,
