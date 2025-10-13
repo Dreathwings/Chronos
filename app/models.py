@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from math import ceil
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from sqlalchemy import (
     CheckConstraint,
@@ -57,6 +57,14 @@ course_teacher = Table(
     db.Model.metadata,
     Column("course_id", ForeignKey("course.id"), primary_key=True),
     Column("teacher_id", ForeignKey("teacher.id"), primary_key=True),
+)
+
+
+session_attendance = Table(
+    "session_attendance",
+    db.Model.metadata,
+    Column("session_id", ForeignKey("session.id"), primary_key=True),
+    Column("class_group_id", ForeignKey("class_group.id"), primary_key=True),
 )
 
 
@@ -241,7 +249,10 @@ class Course(db.Model, TimeStampedModel):
     @property
     def total_required_hours(self) -> int:
         group_total = sum(link.group_count for link in self.class_links)
-        multiplier = group_total or 1
+        if self.is_cm:
+            multiplier = 1
+        else:
+            multiplier = group_total or 1
         return self.sessions_required * self.session_length_hours * multiplier
 
 
@@ -259,6 +270,12 @@ class Session(db.Model, TimeStampedModel):
     teacher: Mapped[Teacher] = relationship(back_populates="sessions")
     room: Mapped[Room] = relationship(back_populates="sessions")
     class_group: Mapped["ClassGroup"] = relationship(back_populates="sessions")
+    attendees: Mapped[List["ClassGroup"]] = relationship(
+        "ClassGroup",
+        secondary=session_attendance,
+        back_populates="attending_sessions",
+        order_by="ClassGroup.name",
+    )
 
     __table_args__ = (
         CheckConstraint("end_time > start_time", name="chk_session_time_order"),
@@ -266,10 +283,22 @@ class Session(db.Model, TimeStampedModel):
         UniqueConstraint("class_group_id", "start_time", name="uq_class_start_time"),
     )
 
+    def attendee_ids(self) -> Set[int]:
+        if self.attendees:
+            return {class_group.id for class_group in self.attendees}
+        if self.class_group_id:
+            return {self.class_group_id}
+        return set()
+
+    def attendee_names(self) -> List[str]:
+        attendees = self.attendees or ([self.class_group] if self.class_group else [])
+        return [class_group.name for class_group in sorted(attendees, key=lambda cg: cg.name.lower())]
+
     def title_with_room(self, room_label: str | None = None) -> str:
         room_name = room_label or self.room.name
+        class_label = " + ".join(self.attendee_names()) or self.class_group.name
         group_suffix = f" — groupe {self.subgroup_label}" if self.subgroup_label else ""
-        return f"{self.course.name} — {self.class_group.name}{group_suffix} ({room_name})"
+        return f"{self.course.name} — {class_label}{group_suffix} ({room_name})"
 
     def as_event(self) -> dict[str, str]:
         title = self.title_with_room()
@@ -281,6 +310,7 @@ class Session(db.Model, TimeStampedModel):
             for software in self.course.softwares
             if software.id not in room_software_ids
         )
+        class_names = self.attendee_names()
         return {
             "id": str(self.id),
             "title": title,
@@ -302,7 +332,8 @@ class Session(db.Model, TimeStampedModel):
                 "missing_softwares": missing_softwares,
                 "room": self.room.name,
                 "rooms": [self.room.name],
-                "class_group": self.class_group.name,
+                "class_group": ", ".join(class_names),
+                "class_groups": class_names,
                 "subgroup": self.subgroup_label,
                 "segments": [
                     {
@@ -389,6 +420,11 @@ class ClassGroup(db.Model, TimeStampedModel):
     sessions: Mapped[List[Session]] = relationship(
         back_populates="class_group", cascade="all, delete-orphan"
     )
+    attending_sessions: Mapped[List[Session]] = relationship(
+        "Session",
+        secondary=session_attendance,
+        back_populates="attendees",
+    )
 
     @staticmethod
     def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime) -> bool:
@@ -413,12 +449,31 @@ class ClassGroup(db.Model, TimeStampedModel):
     ) -> bool:
         if not self.is_available_on(start):
             return False
-        for session in self.sessions:
+        seen: set[int] = set()
+        for session in self.sessions + self.attending_sessions:
+            if session.id in seen:
+                continue
             if ignore_session_id and session.id == ignore_session_id:
+                seen.add(session.id)
                 continue
             if self._overlaps(session.start_time, session.end_time, start, end):
                 return False
+            seen.add(session.id)
         return True
+
+    @property
+    def all_sessions(self) -> List[Session]:
+        combined: list[Session] = []
+        seen: set[int] = set()
+        for session in self.sessions + self.attending_sessions:
+            if session.id in seen:
+                continue
+            combined.append(session)
+            seen.add(session.id)
+        return sorted(
+            combined,
+            key=lambda session: (session.start_time, session.id or 0),
+        )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"ClassGroup<{self.id} {self.name}>"

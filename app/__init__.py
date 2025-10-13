@@ -28,6 +28,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_class_group_count_column()
         _ensure_course_class_teacher_columns()
         _ensure_course_type_column()
+        _ensure_session_attendance_backfill()
 
     from .routes import bp as main_bp
 
@@ -213,3 +214,37 @@ def _ensure_course_type_column() -> None:
             current_app.logger.warning(
                 "Unable to tighten constraints on course.course_type; continuing with relaxed column."
             )
+
+def _ensure_session_attendance_backfill() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "session_attendance" not in inspector.get_table_names():
+        return
+
+    try:
+        with engine.begin() as connection:
+            count = connection.execute(
+                text("SELECT COUNT(*) FROM session_attendance")
+            ).scalar()
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        current_app.logger.warning(
+            "Unable to inspect session_attendance table: %s", exc
+        )
+        return
+
+    if count and int(count) > 0:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO session_attendance (session_id, class_group_id) "
+                    "SELECT id, class_group_id FROM session WHERE class_group_id IS NOT NULL"
+                )
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        current_app.logger.warning(
+            "Unable to backfill session_attendance table: %s", exc
+        )
+

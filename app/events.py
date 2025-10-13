@@ -19,6 +19,8 @@ def _sessions_can_chain(previous: Session, current: Session) -> bool:
         return False
     if previous.class_group_id != current.class_group_id:
         return False
+    if previous.attendee_ids() != current.attendee_ids():
+        return False
     if previous.teacher_id != current.teacher_id:
         return False
     if _normalise_label(previous.subgroup_label) != _normalise_label(current.subgroup_label):
@@ -46,6 +48,7 @@ def _build_event_from_group(group: List[Session]) -> dict[str, object]:
     required_softwares = set(extended.get("course_softwares") or [])
     available_softwares = set(extended.get("room_softwares") or [])
     missing_softwares = set(extended.get("missing_softwares") or [])
+    class_names: set[str] = set()
     for session in group:
         room_name = session.room.name
         if room_name not in ordered_rooms:
@@ -66,6 +69,7 @@ def _build_event_from_group(group: List[Session]) -> dict[str, object]:
             for software in session.course.softwares
             if software.id not in room_software_ids
         )
+        class_names.update(session.attendee_names())
     event["start"] = group[0].start_time.isoformat()
     event["end"] = group[-1].end_time.isoformat()
     room_label = ", ".join(ordered_rooms) or first.room.name
@@ -78,6 +82,10 @@ def _build_event_from_group(group: List[Session]) -> dict[str, object]:
     extended["course_softwares"] = sorted(required_softwares)
     extended["room_softwares"] = sorted(available_softwares)
     extended["missing_softwares"] = sorted(missing_softwares)
+    if class_names:
+        class_list = sorted(class_names, key=str.lower)
+        extended["class_group"] = ", ".join(class_list)
+        extended["class_groups"] = class_list
     if len(group) > 1:
         event["id"] = "group-" + "-".join(extended["segment_ids"])
     return event

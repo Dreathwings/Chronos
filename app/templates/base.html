@@ -258,6 +258,13 @@
         }
         chronosSetField(modal, 'teacher', teacherText);
         chronosSetField(modal, 'class_group', props.class_group || '');
+        const classGroupLabels = modal.querySelectorAll('[data-chronos-wrapper="class_group"]');
+        const classCount = Array.isArray(props.class_groups) ? props.class_groups.length : (props.class_group ? 1 : 0);
+        classGroupLabels.forEach(function(node) {
+          if (node.tagName === 'DT') {
+            node.textContent = classCount > 1 ? 'Classes' : 'Classe';
+          }
+        });
         const subgroupText = props.subgroup ? `Groupe ${props.subgroup}` : '';
         chronosSetField(modal, 'subgroup', subgroupText);
         chronosSetField(modal, 'room', props.room || '');

@@ -78,5 +78,6 @@ def seed_data() -> None:
         start_time=sample_start,
         end_time=sample_end,
     )
+    sample_session.attendees = [class_a]
     db.session.add(sample_session)
     db.session.commit()

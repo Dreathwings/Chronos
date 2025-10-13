@@ -296,6 +296,32 @@ INSERT INTO `session` (`id`, `course_id`, `teacher_id`, `room_id`, `start_time`,
 -- --------------------------------------------------------
 
 --
+-- Structure de la table `session_attendance`
+--
+
+CREATE TABLE `session_attendance` (
+  `session_id` int(11) NOT NULL,
+  `class_group_id` int(11) NOT NULL,
+  PRIMARY KEY (`session_id`, `class_group_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Déchargement des données de la table `session_attendance`
+--
+
+INSERT INTO `session_attendance` (`session_id`, `class_group_id`) VALUES
+(123, 3),
+(124, 3),
+(125, 3),
+(126, 3),
+(127, 5),
+(128, 5),
+(129, 5),
+(130, 5);
+
+-- --------------------------------------------------------
+
+--
 -- Structure de la table `software`
 --
 

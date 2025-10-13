@@ -370,7 +370,7 @@ def _validate_session_constraints(
     course: Course,
     teacher: Teacher,
     room: Room,
-    class_group: ClassGroup,
+    class_groups: list[ClassGroup],
     start_dt: datetime,
     end_dt: datetime,
     *,
@@ -386,12 +386,15 @@ def _validate_session_constraints(
         return "L'enseignant a déjà une séance sur ce créneau."
     if _has_conflict(room.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "La salle est déjà réservée sur ce créneau."
-    if not class_group.is_available_during(start_dt, end_dt, ignore_session_id=ignore_session_id):
-        return "La classe est indisponible sur ce créneau."
-    required_capacity = course.capacity_needed_for(class_group)
+    for class_group in class_groups:
+        if not class_group.is_available_during(
+            start_dt, end_dt, ignore_session_id=ignore_session_id
+        ):
+            return "La classe est indisponible sur ce créneau."
+    required_capacity = sum(course.capacity_needed_for(group) for group in class_groups)
     if room.capacity < required_capacity:
         return (
-            "La salle ne peut pas accueillir la taille du groupe demandée "
+            "La salle ne peut pas accueillir la taille cumulée des classes "
             f"({required_capacity} étudiants)."
         )
     if course.requires_computers and room.computers <= 0:
@@ -416,31 +419,44 @@ def dashboard():
         links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
         has_subgroups = False
         course_types[course.id] = course.course_type
-        for link in links:
-            for subgroup_label in link.group_labels():
-                value_suffix = subgroup_label or ""
-                option_value = f"{link.class_group_id}:{value_suffix}"
-                base_label = (
-                    f"{link.class_group.name} — groupe {subgroup_label.upper()}"
-                    if subgroup_label
-                    else f"{link.class_group.name} — classe entière"
-                )
-                if course.is_sae:
-                    assigned = link.assigned_teachers()
-                    if assigned:
-                        teacher_names = " & ".join(teacher.name for teacher in assigned)
-                        option_label = f"{base_label} ({teacher_names})"
+        if course.is_cm:
+            class_names = ", ".join(link.class_group.name for link in links)
+            teacher = next((link.teacher_a or link.teacher_b for link in links if link.teacher_a or link.teacher_b), None)
+            if teacher is None and course.teachers:
+                teacher = course.teachers[0]
+            if teacher:
+                option_label = f"Toutes les classes ({teacher.name})"
+            else:
+                option_label = "Toutes les classes (Aucun enseignant)"
+            if class_names:
+                option_label = f"{option_label} — {class_names}"
+            options.append({"value": "ALL", "label": option_label})
+        else:
+            for link in links:
+                for subgroup_label in link.group_labels():
+                    value_suffix = subgroup_label or ""
+                    option_value = f"{link.class_group_id}:{value_suffix}"
+                    base_label = (
+                        f"{link.class_group.name} — groupe {subgroup_label.upper()}"
+                        if subgroup_label
+                        else f"{link.class_group.name} — classe entière"
+                    )
+                    if course.is_sae:
+                        assigned = link.assigned_teachers()
+                        if assigned:
+                            teacher_names = " & ".join(teacher.name for teacher in assigned)
+                            option_label = f"{base_label} ({teacher_names})"
+                        else:
+                            option_label = f"{base_label} (Aucun enseignant)"
                     else:
-                        option_label = f"{base_label} (Aucun enseignant)"
-                else:
-                    teacher = link.teacher_for_label(subgroup_label)
-                    if teacher:
-                        option_label = f"{base_label} ({teacher.name})"
-                    else:
-                        option_label = f"{base_label} (Aucun enseignant)"
-                options.append({"value": option_value, "label": option_label})
-                if subgroup_label:
-                    has_subgroups = True
+                        teacher = link.teacher_for_label(subgroup_label)
+                        if teacher:
+                            option_label = f"{base_label} ({teacher.name})"
+                        else:
+                            option_label = f"{base_label} (Aucun enseignant)"
+                    options.append({"value": option_value, "label": option_label})
+                    if subgroup_label:
+                        has_subgroups = True
         course_class_options[course.id] = options
         course_subgroup_hints[course.id] = has_subgroups
 
@@ -449,34 +465,50 @@ def dashboard():
             course_id = int(request.form["course_id"])
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
-            class_choice = _parse_class_group_choice(request.form.get("class_group_choice"))
-            if class_choice is None:
-                flash("Sélectionnez une classe pour la séance", "danger")
-                return redirect(url_for("main.dashboard"))
-            class_group_id, subgroup_label = class_choice
-            date_str = request.form["date"]
-            start_time_str = request.form["start_time"]
             course = Course.query.get_or_404(course_id)
             teacher = Teacher.query.get_or_404(teacher_id)
+            room = Room.query.get_or_404(room_id)
+            date_str = request.form["date"]
+            start_time_str = request.form["start_time"]
             duration_raw = request.form.get("duration")
             duration = int(duration_raw) if duration_raw else course.session_length_hours
             start_dt = _parse_datetime(date_str, start_time_str)
             end_dt = start_dt + timedelta(hours=duration)
-            class_group = ClassGroup.query.get_or_404(class_group_id)
-            if class_group not in course.classes:
-                flash("Associez la classe au cours avant de planifier", "danger")
-                return redirect(url_for("main.dashboard"))
-            link = course.class_link_for(class_group)
-            if link is None:
-                flash("Associez la classe au cours avant de planifier", "danger")
-                return redirect(url_for("main.dashboard"))
-            valid_labels = {label or None for label in link.group_labels()}
-            if subgroup_label not in valid_labels:
-                flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
-                return redirect(url_for("main.dashboard"))
-            room = Room.query.get_or_404(room_id)
+            class_choice_raw = request.form.get("class_group_choice")
+
+            if course.is_cm:
+                if not class_choice_raw:
+                    flash("Sélectionnez les classes pour la séance", "danger")
+                    return redirect(url_for("main.dashboard"))
+                class_groups = [link.class_group for link in course.class_links]
+                if not class_groups:
+                    flash("Associez des classes au cours avant de planifier", "danger")
+                    return redirect(url_for("main.dashboard"))
+                primary_class = class_groups[0]
+                subgroup_label: str | None = None
+            else:
+                class_choice = _parse_class_group_choice(class_choice_raw)
+                if class_choice is None:
+                    flash("Sélectionnez une classe pour la séance", "danger")
+                    return redirect(url_for("main.dashboard"))
+                class_group_id, subgroup_label = class_choice
+                class_group = ClassGroup.query.get_or_404(class_group_id)
+                if class_group not in course.classes:
+                    flash("Associez la classe au cours avant de planifier", "danger")
+                    return redirect(url_for("main.dashboard"))
+                link = course.class_link_for(class_group)
+                if link is None:
+                    flash("Associez la classe au cours avant de planifier", "danger")
+                    return redirect(url_for("main.dashboard"))
+                valid_labels = {label or None for label in link.group_labels()}
+                if subgroup_label not in valid_labels:
+                    flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
+                    return redirect(url_for("main.dashboard"))
+                class_groups = [class_group]
+                primary_class = class_group
+
             error_message = _validate_session_constraints(
-                course, teacher, room, class_group, start_dt, end_dt
+                course, teacher, room, class_groups, start_dt, end_dt
             )
             if error_message:
                 flash(error_message, "danger")
@@ -486,11 +518,12 @@ def dashboard():
                 course_id=course_id,
                 teacher_id=teacher_id,
                 room_id=room_id,
-                class_group_id=class_group_id,
+                class_group_id=primary_class.id,
                 subgroup_label=subgroup_label,
                 start_time=start_dt,
                 end_time=end_dt,
             )
+            session.attendees = list(class_groups)
             db.session.add(session)
             db.session.commit()
             flash("Séance créée", "success")
@@ -794,7 +827,7 @@ def class_detail(class_id: int):
                 flash("Cours retiré de la classe", "success")
         return redirect(url_for("main.class_detail", class_id=class_id))
 
-    events = sessions_to_grouped_events(class_group.sessions)
+    events = sessions_to_grouped_events(class_group.all_sessions)
     unavailability_backgrounds = _class_unavailability_backgrounds(class_group)
     return render_template(
         "classes/detail.html",
@@ -1035,34 +1068,48 @@ def course_detail(course_id: int):
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
-            class_choice = _parse_class_group_choice(request.form.get("class_group_choice"))
-            if class_choice is None:
-                flash("Sélectionnez un groupe valide pour la classe", "danger")
-                return redirect(url_for("main.course_detail", course_id=course_id))
-            class_group_id, subgroup_label = class_choice
+            class_choice_raw = request.form.get("class_group_choice")
             start_dt = _parse_datetime(request.form["date"], request.form["start_time"])
             duration_raw = request.form.get("duration")
             duration = int(duration_raw) if duration_raw else course.session_length_hours
             end_dt = start_dt + timedelta(hours=duration)
-            class_group = ClassGroup.query.get_or_404(class_group_id)
-            if class_group not in course.classes:
-                flash("Associez d'abord la classe au cours", "danger")
-                return redirect(url_for("main.course_detail", course_id=course_id))
-            link = course.class_link_for(class_group)
-            if link is None:
-                flash("Associez d'abord la classe au cours", "danger")
-                return redirect(url_for("main.course_detail", course_id=course_id))
-            valid_labels = {label or None for label in link.group_labels()}
-            if subgroup_label not in valid_labels:
-                flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
-                return redirect(url_for("main.course_detail", course_id=course_id))
             teacher = Teacher.query.get_or_404(teacher_id)
             room = Room.query.get_or_404(room_id)
+            if course.is_cm:
+                if not class_choice_raw:
+                    flash("Sélectionnez les classes pour la séance", "danger")
+                    return redirect(url_for("main.course_detail", course_id=course_id))
+                class_groups = [link.class_group for link in course.class_links]
+                if not class_groups:
+                    flash("Associez d'abord des classes au cours", "danger")
+                    return redirect(url_for("main.course_detail", course_id=course_id))
+                primary_class = class_groups[0]
+                subgroup_label: str | None = None
+            else:
+                class_choice = _parse_class_group_choice(class_choice_raw)
+                if class_choice is None:
+                    flash("Sélectionnez un groupe valide pour la classe", "danger")
+                    return redirect(url_for("main.course_detail", course_id=course_id))
+                class_group_id, subgroup_label = class_choice
+                class_group = ClassGroup.query.get_or_404(class_group_id)
+                if class_group not in course.classes:
+                    flash("Associez d'abord la classe au cours", "danger")
+                    return redirect(url_for("main.course_detail", course_id=course_id))
+                link = course.class_link_for(class_group)
+                if link is None:
+                    flash("Associez d'abord la classe au cours", "danger")
+                    return redirect(url_for("main.course_detail", course_id=course_id))
+                valid_labels = {label or None for label in link.group_labels()}
+                if subgroup_label not in valid_labels:
+                    flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
+                    return redirect(url_for("main.course_detail", course_id=course_id))
+                class_groups = [class_group]
+                primary_class = class_group
             error_message = _validate_session_constraints(
                 course,
                 teacher,
                 room,
-                class_group,
+                class_groups,
                 start_dt,
                 end_dt,
             )
@@ -1073,11 +1120,12 @@ def course_detail(course_id: int):
                 course_id=course.id,
                 teacher_id=teacher_id,
                 room_id=room_id,
-                class_group_id=class_group_id,
+                class_group_id=primary_class.id,
                 subgroup_label=subgroup_label,
                 start_time=start_dt,
                 end_time=end_dt,
             )
+            session.attendees = list(class_groups)
             db.session.add(session)
             db.session.commit()
             flash("Séance ajoutée", "success")
@@ -1166,11 +1214,12 @@ def move_session(session_id: int):
     if end_dt <= start_dt:
         return {"error": "L'heure de fin doit être postérieure à l'heure de début"}, 400
 
+    attendee_classes = list(session.attendees) or [session.class_group]
     error_message = _validate_session_constraints(
         session.course,
         session.teacher,
         session.room,
-        session.class_group,
+        attendee_classes,
         start_dt,
         end_dt,
         ignore_session_id=session.id,

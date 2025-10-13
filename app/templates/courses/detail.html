@@ -249,16 +249,34 @@
           <div class="col-md-4">
             <label class="form-label">Classe</label>
             <select class="form-select" name="class_group_choice">
-              {% for link in course.class_links %}
-                {% for subgroup_label in link.group_labels() %}
-                {% set value = link.class_group.id ~ ':' ~ (subgroup_label if subgroup_label else '') %}
-                {% set assigned_teacher = link.teacher_for_label(subgroup_label) %}
-                <option value="{{ value }}">
-                  {{ link.class_group.name }} — {% if subgroup_label %}groupe {{ subgroup_label|upper }}{% else %}classe entière{% endif %}
-                  {% if assigned_teacher %}( {{ assigned_teacher.name }} ){% else %}( Aucun enseignant ){% endif %}
-                </option>
+              {% if course.is_cm %}
+                {% set class_names = course.class_links | map(attribute='class_group.name') | join(', ') %}
+                {% set cm_teacher = None %}
+                {% for link in course.class_links %}
+                  {% if cm_teacher is none and (link.teacher_a or link.teacher_b) %}
+                    {% set cm_teacher = link.teacher_a or link.teacher_b %}
+                  {% endif %}
                 {% endfor %}
-              {% endfor %}
+                {% if cm_teacher is none and course.teachers %}
+                  {% set cm_teacher = course.teachers[0] %}
+                {% endif %}
+                <option value="ALL">
+                  Toutes les classes
+                  {% if class_names %}— {{ class_names }}{% endif %}
+                  {% if cm_teacher %}( {{ cm_teacher.name }} ){% else %}( Aucun enseignant ){% endif %}
+                </option>
+              {% else %}
+                {% for link in course.class_links %}
+                  {% for subgroup_label in link.group_labels() %}
+                  {% set value = link.class_group.id ~ ':' ~ (subgroup_label if subgroup_label else '') %}
+                  {% set assigned_teacher = link.teacher_for_label(subgroup_label) %}
+                  <option value="{{ value }}">
+                    {{ link.class_group.name }} — {% if subgroup_label %}groupe {{ subgroup_label|upper }}{% else %}classe entière{% endif %}
+                    {% if assigned_teacher %}( {{ assigned_teacher.name }} ){% else %}( Aucun enseignant ){% endif %}
+                  </option>
+                  {% endfor %}
+                {% endfor %}
+              {% endif %}
             </select>
           </div>
           <div class="col-md-4">
