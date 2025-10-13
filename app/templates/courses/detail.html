@@ -161,6 +161,12 @@
         <input type="hidden" name="form" value="auto-schedule">
         <button class="btn btn-success" type="submit">Générer automatiquement</button>
       </form>
+      <form method="post">
+        <input type="hidden" name="form" value="clear-sessions">
+        <button class="btn btn-outline-danger" type="submit" {% if not course.sessions %}disabled{% endif %}>
+          Supprimer toutes les séances planifiées
+        </button>
+      </form>
     </div>
   </div>
   <div class="col-xl-8">

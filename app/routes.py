@@ -408,6 +408,31 @@ def dashboard():
                 flash("\n".join(error_messages), "warning")
 
             return redirect(url_for("main.dashboard"))
+        elif request.form.get("form") == "clear-course-sessions":
+            try:
+                course_id = int(request.form.get("course_id", "0"))
+            except ValueError:
+                flash("Cours invalide", "danger")
+                return redirect(url_for("main.dashboard"))
+
+            course = Course.query.get(course_id)
+            if course is None:
+                flash("Cours introuvable", "danger")
+                return redirect(url_for("main.dashboard"))
+
+            removed = len(course.sessions)
+            for session in list(course.sessions):
+                db.session.delete(session)
+
+            db.session.commit()
+            if removed:
+                flash(
+                    f"{removed} séance(s) supprimée(s) pour {course.name}.",
+                    "success",
+                )
+            else:
+                flash("Aucune séance n'était planifiée pour ce cours.", "info")
+            return redirect(url_for("main.dashboard"))
 
     events = [session.as_event() for session in Session.query.all()]
     course_summaries: list[dict[str, object]] = []
@@ -928,6 +953,15 @@ def course_detail(course_id: int):
             db.session.add(session)
             db.session.commit()
             flash("Séance ajoutée", "success")
+        elif form_name == "clear-sessions":
+            removed = len(course.sessions)
+            for session in list(course.sessions):
+                db.session.delete(session)
+            db.session.commit()
+            if removed:
+                flash("Toutes les séances de ce cours ont été supprimées.", "success")
+            else:
+                flash("Aucune séance n'était planifiée pour ce cours.", "info")
         return redirect(url_for("main.course_detail", course_id=course_id))
 
     events = [session.as_event() for session in course.sessions]

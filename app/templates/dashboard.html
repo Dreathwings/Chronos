@@ -41,6 +41,18 @@
                 <div class="progress-bar{% if item.remaining == 0 and required > 0 %} bg-success{% endif %}" role="progressbar" style="width: {{ progress|round(0, 'floor') }}%"></div>
               </div>
             </div>
+            <div class="d-flex align-items-center gap-2 mt-3">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.course_detail', course_id=item.course.id) }}">
+                Ouvrir
+              </a>
+              <form method="post" class="ms-auto">
+                <input type="hidden" name="form" value="clear-course-sessions">
+                <input type="hidden" name="course_id" value="{{ item.course.id }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger" {% if scheduled == 0 %}disabled{% endif %}>
+                  Supprimer la planification
+                </button>
+              </form>
+            </div>
           </div>
           {% endfor %}
         </div>

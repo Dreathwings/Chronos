@@ -138,24 +138,6 @@ def _class_sessions_needed(
     )
     required_total = course.sessions_required
     return max(required_total - existing, 0)
-
-
-def _day_search_order(available_days: list[date], anchor_index: int) -> list[date]:
-    order: list[date] = []
-    if not available_days:
-        return order
-    anchor_index = max(0, min(anchor_index, len(available_days) - 1))
-    order.append(available_days[anchor_index])
-    step = 1
-    while len(order) < len(available_days):
-        if anchor_index + step < len(available_days):
-            order.append(available_days[anchor_index + step])
-        if anchor_index - step >= 0:
-            order.append(available_days[anchor_index - step])
-        step += 1
-    return order
-
-
 def _resolve_schedule_window(
     course: Course, window_start: date | None, window_end: date | None
 ) -> tuple[date, date]:
@@ -212,17 +194,36 @@ def generate_schedule(
                 continue
 
             start_time_order = _spread_sequence(START_TIMES)
+            day_indices = {day: index for index, day in enumerate(available_days)}
+            per_day_counts = {day: 0 for day in available_days}
             scheduled_count = 0
             while scheduled_count < sessions_to_create:
-                anchor_ratio = (scheduled_count + 0.5) / sessions_to_create
-                anchor_index = int(anchor_ratio * len(available_days))
-                if anchor_index >= len(available_days):
-                    anchor_index = len(available_days) - 1
+                if len(available_days) == 1:
+                    anchor_index = 0
+                elif sessions_to_create == 1:
+                    anchor_index = len(available_days) // 2
+                else:
+                    anchor_position = (
+                        scheduled_count / (sessions_to_create - 1)
+                    ) * (len(available_days) - 1)
+                    anchor_index = round(anchor_position)
+                anchor_index = max(0, min(anchor_index, len(available_days) - 1))
 
                 placed = False
-                for day in _day_search_order(available_days, anchor_index):
+                ordered_days = sorted(
+                    available_days,
+                    key=lambda d: (
+                        per_day_counts[d],
+                        abs(day_indices[d] - anchor_index),
+                        day_indices[d],
+                    ),
+                )
+                for day in ordered_days:
+                    time_offset_base = per_day_counts[day]
                     for offset in range(len(start_time_order)):
-                        slot_start_time = start_time_order[(scheduled_count + offset) % len(start_time_order)]
+                        slot_start_time = start_time_order[
+                            (time_offset_base + offset) % len(start_time_order)
+                        ]
                         start_dt = datetime.combine(day, slot_start_time)
                         end_dt = start_dt + slot_length
                         if not fits_in_windows(start_dt.time(), end_dt.time()):
@@ -259,6 +260,7 @@ def generate_schedule(
                         db.session.add(session)
                         created_sessions.append(session)
                         scheduled_count += 1
+                        per_day_counts[day] += 1
                         placed = True
                         break
                     if placed:
