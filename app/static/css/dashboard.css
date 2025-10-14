@@ -13,6 +13,17 @@
 
 .dashboard-layout #global-calendar {
   min-height: 560px;
+  height: 768px;
+  overflow-y: auto;
+}
+.col-lg-7 {
+    width: 30%;
+}
+.col-lg-5 {
+  width: 70%;
+}
+.fc-view-harness{
+  height: 700px;
 }
 
 @media (max-width: 991.98px) {
@@ -24,3 +35,4 @@
     min-height: 420px;
   }
 }
+
