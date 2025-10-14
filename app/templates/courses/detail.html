@@ -295,13 +295,37 @@
   <div class="col-xl-8">
     <div class="accordion" id="courseSummaryAccordion">
       <div class="accordion-item shadow-sm">
+        <h2 class="accordion-header" id="headingCourseCalendar">
+          <button
+            class="accordion-button bg-secondary text-white"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#collapseCourseCalendar"
+            aria-expanded="true"
+            aria-controls="collapseCourseCalendar"
+          >
+            Calendrier des séances
+          </button>
+        </h2>
+        <div
+          id="collapseCourseCalendar"
+          class="accordion-collapse collapse show"
+          aria-labelledby="headingCourseCalendar"
+          data-bs-parent="#courseSummaryAccordion"
+        >
+          <div class="accordion-body">
+        <div id="course-calendar"></div>
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item shadow-sm">
         <h2 class="accordion-header" id="headingGenerationLog">
           <button
-            class="accordion-button bg-dark text-white"
+            class="accordion-button collapsed bg-dark text-white"
             type="button"
             data-bs-toggle="collapse"
             data-bs-target="#collapseGenerationLog"
-            aria-expanded="true"
+            aria-expanded="false"
             aria-controls="collapseGenerationLog"
           >
             Journal de génération
@@ -309,7 +333,7 @@
         </h2>
         <div
           id="collapseGenerationLog"
-          class="accordion-collapse collapse show"
+          class="accordion-collapse collapse"
           aria-labelledby="headingGenerationLog"
           data-bs-parent="#courseSummaryAccordion"
         >
@@ -443,30 +467,6 @@
         {% else %}
         <p class="text-muted mb-0">Ajoutez au moins un enseignant, une salle et associez une classe pour planifier manuellement une séance.</p>
         {% endif %}
-          </div>
-        </div>
-      </div>
-      <div class="accordion-item shadow-sm">
-        <h2 class="accordion-header" id="headingCourseCalendar">
-          <button
-            class="accordion-button collapsed bg-secondary text-white"
-            type="button"
-            data-bs-toggle="collapse"
-            data-bs-target="#collapseCourseCalendar"
-            aria-expanded="false"
-            aria-controls="collapseCourseCalendar"
-          >
-            Calendrier des séances
-          </button>
-        </h2>
-        <div
-          id="collapseCourseCalendar"
-          class="accordion-collapse collapse"
-          aria-labelledby="headingCourseCalendar"
-          data-bs-parent="#courseSummaryAccordion"
-        >
-          <div class="accordion-body">
-        <div id="course-calendar"></div>
           </div>
         </div>
       </div>
