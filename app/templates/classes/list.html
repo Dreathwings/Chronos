@@ -2,11 +2,15 @@
 {% block title %}Classes — Chronos{% endblock %}
 
 {% block content %}
-<div class="row g-4">
-  <div class="col-lg-4">
-    <div class="card shadow-sm">
-      <div class="card-header bg-primary text-white">Nouvelle classe</div>
-      <div class="card-body">
+<div class="accordion" id="classesAccordion">
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="classesCreateHeading">
+      <button class="accordion-button bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#classesCreate" aria-expanded="true" aria-controls="classesCreate">
+        Nouvelle classe
+      </button>
+    </h2>
+    <div id="classesCreate" class="accordion-collapse collapse show" aria-labelledby="classesCreateHeading" data-bs-parent="#classesAccordion">
+      <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="create">
           <div>
@@ -30,32 +34,38 @@
       </div>
     </div>
   </div>
-  <div class="col-lg-8">
-    <div class="card shadow-sm">
-      <div class="card-header bg-secondary text-white">Classes existantes</div>
-      <div class="table-responsive">
-        <table class="table table-striped align-middle mb-0">
-          <thead>
-            <tr>
-              <th>Nom</th>
-              <th>Effectif</th>
-              <th>Cours associés</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for class_group in class_groups %}
-            <tr>
-              <td>
-                <a href="{{ url_for('main.class_detail', class_id=class_group.id) }}">
-                  {{ class_group.name }}
-                </a>
-              </td>
-              <td>{{ class_group.size }}</td>
-              <td>{{ class_group.courses|length }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="classesListHeading">
+      <button class="accordion-button collapsed bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#classesList" aria-expanded="false" aria-controls="classesList">
+        Classes existantes
+      </button>
+    </h2>
+    <div id="classesList" class="accordion-collapse collapse" aria-labelledby="classesListHeading" data-bs-parent="#classesAccordion">
+      <div class="accordion-body">
+        <div class="table-responsive">
+          <table class="table table-striped align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Effectif</th>
+                <th>Cours associés</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for class_group in class_groups %}
+              <tr>
+                <td>
+                  <a href="{{ url_for('main.class_detail', class_id=class_group.id) }}">
+                    {{ class_group.name }}
+                  </a>
+                </td>
+                <td>{{ class_group.size }}</td>
+                <td>{{ class_group.courses|length }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>

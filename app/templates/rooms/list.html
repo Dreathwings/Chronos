@@ -2,11 +2,15 @@
 {% block title %}Salles — Chronos{% endblock %}
 
 {% block content %}
-<div class="row g-4">
-  <div class="col-lg-4">
-    <div class="card shadow-sm">
-      <div class="card-header bg-primary text-white">Nouvelle salle</div>
-      <div class="card-body">
+<div class="accordion" id="roomsAccordion">
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="roomsCreateHeading">
+      <button class="accordion-button bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#roomsCreate" aria-expanded="true" aria-controls="roomsCreate">
+        Nouvelle salle
+      </button>
+    </h2>
+    <div id="roomsCreate" class="accordion-collapse collapse show" aria-labelledby="roomsCreateHeading" data-bs-parent="#roomsAccordion">
+      <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="create">
           <div>
@@ -32,30 +36,36 @@
       </div>
     </div>
   </div>
-  <div class="col-lg-8">
-    <div class="card shadow-sm">
-      <div class="card-header bg-secondary text-white">Salles</div>
-      <div class="table-responsive">
-        <table class="table table-striped align-middle mb-0">
-          <thead>
-            <tr>
-              <th>Nom</th>
-              <th>Capacité</th>
-              <th>PC</th>
-              <th>Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for room in rooms %}
-            <tr>
-              <td><a href="{{ url_for('main.room_detail', room_id=room.id) }}">{{ room.name }}</a></td>
-              <td>{{ room.capacity }}</td>
-              <td>{{ room.computers }}</td>
-              <td>{{ room.notes or '—' }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="roomsListHeading">
+      <button class="accordion-button collapsed bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#roomsList" aria-expanded="false" aria-controls="roomsList">
+        Salles
+      </button>
+    </h2>
+    <div id="roomsList" class="accordion-collapse collapse" aria-labelledby="roomsListHeading" data-bs-parent="#roomsAccordion">
+      <div class="accordion-body">
+        <div class="table-responsive">
+          <table class="table table-striped align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Capacité</th>
+                <th>PC</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for room in rooms %}
+              <tr>
+                <td><a href="{{ url_for('main.room_detail', room_id=room.id) }}">{{ room.name }}</a></td>
+                <td>{{ room.capacity }}</td>
+                <td>{{ room.computers }}</td>
+                <td>{{ room.notes or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>

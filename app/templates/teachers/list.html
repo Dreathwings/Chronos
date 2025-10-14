@@ -3,11 +3,15 @@
 {% block title %}Enseignants — Chronos{% endblock %}
 
 {% block content %}
-<div class="row g-4">
-  <div class="col-lg-4">
-    <div class="card shadow-sm">
-      <div class="card-header bg-primary text-white">Nouvel enseignant</div>
-      <div class="card-body">
+<div class="accordion" id="teachersAccordion">
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="teachersCreateHeading">
+      <button class="accordion-button bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#teachersCreate" aria-expanded="true" aria-controls="teachersCreate">
+        Nouvel enseignant
+      </button>
+    </h2>
+    <div id="teachersCreate" class="accordion-collapse collapse show" aria-labelledby="teachersCreateHeading" data-bs-parent="#teachersAccordion">
+      <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="create">
           <div>
@@ -39,34 +43,40 @@
       </div>
     </div>
   </div>
-  <div class="col-lg-8">
-    <div class="card shadow-sm">
-      <div class="card-header bg-secondary text-white">Enseignants existants</div>
-      <div class="table-responsive">
-        <table class="table table-striped align-middle mb-0">
-          <thead>
-            <tr>
-              <th>Nom</th>
-              <th>Créneaux déclarés</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for teacher in teachers %}
-            <tr>
-              <td>
-                <a href="{{ url_for('main.teacher_detail', teacher_id=teacher.id) }}">
-                  {{ teacher.name }}
-                </a>
-              </td>
-              <td>{{ teacher.availabilities|length }}</td>
-              <td>
-                <small>{{ teacher.email or '—' }}<br>{{ teacher.phone or '' }}</small>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="teachersListHeading">
+      <button class="accordion-button collapsed bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#teachersList" aria-expanded="false" aria-controls="teachersList">
+        Enseignants existants
+      </button>
+    </h2>
+    <div id="teachersList" class="accordion-collapse collapse" aria-labelledby="teachersListHeading" data-bs-parent="#teachersAccordion">
+      <div class="accordion-body">
+        <div class="table-responsive">
+          <table class="table table-striped align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Créneaux déclarés</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for teacher in teachers %}
+              <tr>
+                <td>
+                  <a href="{{ url_for('main.teacher_detail', teacher_id=teacher.id) }}">
+                    {{ teacher.name }}
+                  </a>
+                </td>
+                <td>{{ teacher.availabilities|length }}</td>
+                <td>
+                  <small>{{ teacher.email or '—' }}<br>{{ teacher.phone or '' }}</small>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>

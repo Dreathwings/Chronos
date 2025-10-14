@@ -11,6 +11,10 @@
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="update">
           <div>
+            <label class="form-label">Nom</label>
+            <input type="text" name="name" class="form-control" value="{{ teacher.name }}" required>
+          </div>
+          <div>
             <label class="form-label">E-mail</label>
             <input type="email" name="email" class="form-control" value="{{ teacher.email }}">
           </div>

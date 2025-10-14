@@ -663,6 +663,9 @@ def teacher_detail(teacher_id: int):
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "update":
+            new_name = request.form.get("name", "").strip()
+            if new_name:
+                teacher.name = new_name
             teacher.email = request.form.get("email")
             teacher.phone = request.form.get("phone")
             teacher.unavailable_dates = serialise_unavailability_ranges(
@@ -672,8 +675,13 @@ def teacher_detail(teacher_id: int):
                 )
             )
             teacher.notes = request.form.get("notes")
-            db.session.commit()
-            flash("Fiche enseignant mise à jour", "success")
+            try:
+                db.session.commit()
+                flash("Fiche enseignant mise à jour", "success")
+            except IntegrityError:
+                db.session.rollback()
+                db.session.refresh(teacher)
+                flash("Nom d'enseignant déjà utilisé", "danger")
         elif form_name == "assign-course":
             course_id = int(request.form["course_id"])
             course = Course.query.get_or_404(course_id)
@@ -796,11 +804,19 @@ def class_detail(class_id: int):
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "update":
+            new_name = request.form.get("name", "").strip()
+            if new_name:
+                class_group.name = new_name
             class_group.size = int(request.form.get("size", class_group.size))
             class_group.unavailable_dates = request.form.get("unavailable_dates")
             class_group.notes = request.form.get("notes")
-            db.session.commit()
-            flash("Classe mise à jour", "success")
+            try:
+                db.session.commit()
+                flash("Classe mise à jour", "success")
+            except IntegrityError:
+                db.session.rollback()
+                db.session.refresh(class_group)
+                flash("Nom de classe déjà utilisé", "danger")
         elif form_name == "assign-course":
             course_id = int(request.form["course_id"])
             course = Course.query.get_or_404(course_id)
@@ -859,11 +875,19 @@ def rooms_list():
             flash("Salle créée", "success")
         elif form_name == "update":
             room = Room.query.get_or_404(int(request.form["room_id"]))
+            new_name = request.form.get("name", "").strip()
+            if new_name:
+                room.name = new_name
             room.capacity = int(request.form.get("capacity", room.capacity))
             room.computers = int(request.form.get("computers", room.computers))
             room.notes = request.form.get("notes")
-            db.session.commit()
-            flash("Salle mise à jour", "success")
+            try:
+                db.session.commit()
+                flash("Salle mise à jour", "success")
+            except IntegrityError:
+                db.session.rollback()
+                db.session.refresh(room)
+                flash("Nom de salle déjà utilisé", "danger")
         return redirect(url_for("main.rooms_list"))
 
     rooms = Room.query.order_by(Room.name).all()
@@ -884,6 +908,9 @@ def room_detail(room_id: int):
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "update":
+            new_name = request.form.get("name", "").strip()
+            if new_name:
+                room.name = new_name
             room.capacity = int(request.form.get("capacity", room.capacity))
             room.computers = int(request.form.get("computers", room.computers))
             room.notes = request.form.get("notes")
@@ -897,8 +924,13 @@ def room_detail(room_id: int):
                 for software in (Software.query.get(int(sid)) for sid in request.form.getlist("softwares"))
                 if software is not None
             ]
-            db.session.commit()
-            flash("Salle mise à jour", "success")
+            try:
+                db.session.commit()
+                flash("Salle mise à jour", "success")
+            except IntegrityError:
+                db.session.rollback()
+                db.session.refresh(room)
+                flash("Nom de salle déjà utilisé", "danger")
         return redirect(url_for("main.room_detail", room_id=room_id))
 
     events = sessions_to_grouped_events(room.sessions)
@@ -987,6 +1019,9 @@ def course_detail(course_id: int):
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "update":
+            new_name = request.form.get("name", "").strip()
+            if new_name:
+                course.name = new_name
             course.description = request.form.get("description")
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.sessions_required = int(request.form.get("sessions_required", course.sessions_required))
@@ -1022,8 +1057,13 @@ def course_detail(course_id: int):
             _sync_simple_relationship(course.softwares, selected_softwares)
             _sync_course_class_links(course, class_ids, existing_links=class_links_map)
             _sync_simple_relationship(course.teachers, selected_teachers)
-            db.session.commit()
-            flash("Cours mis à jour", "success")
+            try:
+                db.session.commit()
+                flash("Cours mis à jour", "success")
+            except IntegrityError:
+                db.session.rollback()
+                db.session.refresh(course)
+                flash("Nom de cours déjà utilisé", "danger")
         elif form_name == "auto-schedule":
             try:
                 created_sessions = generate_schedule(course)

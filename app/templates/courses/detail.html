@@ -10,6 +10,10 @@
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="update">
           <div>
+            <label class="form-label">Nom</label>
+            <input type="text" class="form-control" name="name" value="{{ course.name }}" required>
+          </div>
+          <div>
             <label class="form-label">Description</label>
             <textarea name="description" class="form-control" rows="3">{{ course.description }}</textarea>
           </div>

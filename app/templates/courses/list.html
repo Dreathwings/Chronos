@@ -2,11 +2,15 @@
 {% block title %}Cours — Chronos{% endblock %}
 
 {% block content %}
-<div class="row g-4">
-  <div class="col-lg-4">
-    <div class="card shadow-sm">
-      <div class="card-header bg-primary text-white">Nouveau cours</div>
-      <div class="card-body">
+<div class="accordion" id="coursesAccordion">
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="coursesCreateHeading">
+      <button class="accordion-button bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#coursesCreate" aria-expanded="true" aria-controls="coursesCreate">
+        Nouveau cours
+      </button>
+    </h2>
+    <div id="coursesCreate" class="accordion-collapse collapse show" aria-labelledby="coursesCreateHeading" data-bs-parent="#coursesAccordion">
+      <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="create">
           <div>
@@ -101,89 +105,95 @@
       </div>
     </div>
   </div>
-  <div class="col-lg-8">
-    <div class="card shadow-sm">
-      <div class="card-header bg-secondary text-white">Cours</div>
-      <div class="table-responsive">
-        <table class="table table-striped align-middle mb-0">
-          <thead>
-            <tr>
-              <th>Nom</th>
-              <th>Type</th>
-              <th>Période</th>
-              <th>Heures planifiées</th>
-              <th>Priorité</th>
-              <th>Classes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for course in courses %}
-            <tr>
-              <td><a href="{{ url_for('main.course_detail', course_id=course.id) }}">{{ course.name }}</a></td>
-              <td>{{ course_type_labels.get(course.course_type, course.course_type) }}</td>
-              <td>{{ course.start_date or '—' }} → {{ course.end_date or '—' }}</td>
-              {% set group_total = course.class_links | map(attribute='group_count') | sum %}
-              {% set required_hours = course.total_required_hours %}
-              <td>{{ course.scheduled_hours }}h/{{ required_hours }}h</td>
-              <td>{{ course.priority }}</td>
-              <td>
-                {% if course.class_links %}
-                {% if course.course_type == 'CM' %}
-                <div class="text-muted small mb-2">Cours magistral — classes regroupées</div>
-                {% endif %}
-                <div class="vstack gap-2">
-                  {% for link in course.class_links %}
-                  <div>
-                    <span class="fw-semibold">{{ link.class_group.name }}</span>
-                    {% if course.course_type == 'TP' %}
-                    <span class="badge bg-info text-dark ms-1">Demi-groupes</span>
-                    {% endif %}
-                    <ul class="list-unstyled ms-3 mb-0 small text-muted">
-                      {% if course.course_type == 'SAE' %}
-                      <li>
-                        Enseignant 1
-                        {% if link.teacher_a %}
-                        — {{ link.teacher_a.name }}
-                        {% else %}
-                        — Aucun enseignant
-                        {% endif %}
-                      </li>
-                      <li>
-                        Enseignant 2
-                        {% if link.teacher_b %}
-                        — {{ link.teacher_b.name }}
-                        {% else %}
-                        — Aucun enseignant
-                        {% endif %}
-                      </li>
-                      {% else %}
-                      {% for label, teacher in link.teacher_labels() %}
-                      <li>
-                        {% if label %}
-                          {% if label == 'A/B' %}Groupes A et B{% else %}{{ label }}{% endif %}
-                        {% else %}
-                        Classe entière
-                        {% endif %}
-                        {% if teacher %}
-                        — {{ teacher.name }}
-                        {% else %}
-                        — Aucun enseignant
-                        {% endif %}
-                      </li>
-                      {% endfor %}
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="coursesListHeading">
+      <button class="accordion-button collapsed bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#coursesList" aria-expanded="false" aria-controls="coursesList">
+        Cours
+      </button>
+    </h2>
+    <div id="coursesList" class="accordion-collapse collapse" aria-labelledby="coursesListHeading" data-bs-parent="#coursesAccordion">
+      <div class="accordion-body">
+        <div class="table-responsive">
+          <table class="table table-striped align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Type</th>
+                <th>Période</th>
+                <th>Heures planifiées</th>
+                <th>Priorité</th>
+                <th>Classes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for course in courses %}
+              <tr>
+                <td><a href="{{ url_for('main.course_detail', course_id=course.id) }}">{{ course.name }}</a></td>
+                <td>{{ course_type_labels.get(course.course_type, course.course_type) }}</td>
+                <td>{{ course.start_date or '—' }} → {{ course.end_date or '—' }}</td>
+                {% set group_total = course.class_links | map(attribute='group_count') | sum %}
+                {% set required_hours = course.total_required_hours %}
+                <td>{{ course.scheduled_hours }}h/{{ required_hours }}h</td>
+                <td>{{ course.priority }}</td>
+                <td>
+                  {% if course.class_links %}
+                  {% if course.course_type == 'CM' %}
+                  <div class="text-muted small mb-2">Cours magistral — classes regroupées</div>
+                  {% endif %}
+                  <div class="vstack gap-2">
+                    {% for link in course.class_links %}
+                    <div>
+                      <span class="fw-semibold">{{ link.class_group.name }}</span>
+                      {% if course.course_type == 'TP' %}
+                      <span class="badge bg-info text-dark ms-1">Demi-groupes</span>
                       {% endif %}
-                    </ul>
+                      <ul class="list-unstyled ms-3 mb-0 small text-muted">
+                        {% if course.course_type == 'SAE' %}
+                        <li>
+                          Enseignant 1
+                          {% if link.teacher_a %}
+                          — {{ link.teacher_a.name }}
+                          {% else %}
+                          — Aucun enseignant
+                          {% endif %}
+                        </li>
+                        <li>
+                          Enseignant 2
+                          {% if link.teacher_b %}
+                          — {{ link.teacher_b.name }}
+                          {% else %}
+                          — Aucun enseignant
+                          {% endif %}
+                        </li>
+                        {% else %}
+                        {% for label, teacher in link.teacher_labels() %}
+                        <li>
+                          {% if label %}
+                            {% if label == 'A/B' %}Groupes A et B{% else %}{{ label }}{% endif %}
+                          {% else %}
+                          Classe entière
+                          {% endif %}
+                          {% if teacher %}
+                          — {{ teacher.name }}
+                          {% else %}
+                          — Aucun enseignant
+                          {% endif %}
+                        </li>
+                        {% endfor %}
+                        {% endif %}
+                      </ul>
+                    </div>
+                    {% endfor %}
                   </div>
-                  {% endfor %}
-                </div>
-                {% else %}
-                —
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+                  {% else %}
+                  —
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
