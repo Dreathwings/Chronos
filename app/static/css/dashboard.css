@@ -1,0 +1,26 @@
+.dashboard-layout .accordion-item + .accordion-item {
+  margin-top: 1rem;
+}
+
+.dashboard-layout .accordion-button {
+  font-weight: 600;
+}
+
+.dashboard-layout .accordion-body {
+  background-color: #f8f9fa;
+  border-radius: 0.75rem;
+}
+
+.dashboard-layout #global-calendar {
+  min-height: 560px;
+}
+
+@media (max-width: 991.98px) {
+  .dashboard-layout .col-lg-5 {
+    order: -1;
+  }
+
+  .dashboard-layout #global-calendar {
+    min-height: 420px;
+  }
+}

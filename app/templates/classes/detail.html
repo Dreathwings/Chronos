@@ -1,8 +1,13 @@
 {% extends 'base.html' %}
 {% block title %}{{ class_group.name }} — Classe{% endblock %}
 
+{% block head %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/classes.css') }}">
+{% endblock %}
+
 {% block content %}
-<div class="row g-4">
+<div class="row g-4 class-detail-layout">
   <div class="col-xl-4">
     <div class="card shadow-sm">
       <div class="card-header bg-primary text-white">Informations</div>

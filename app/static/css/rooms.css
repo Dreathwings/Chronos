@@ -1,0 +1,39 @@
+#roomsAccordion,
+#roomDetailAccordion {
+  --chronos-accordion-gap: 1rem;
+}
+
+#roomsAccordion .accordion-item + .accordion-item,
+#roomDetailAccordion .accordion-item + .accordion-item {
+  margin-top: var(--chronos-accordion-gap);
+}
+
+#roomsAccordion .accordion-button,
+#roomDetailAccordion .accordion-button {
+  font-weight: 600;
+}
+
+#roomsAccordion .accordion-body,
+#roomDetailAccordion .accordion-body {
+  background-color: #f8f9fa;
+  border-radius: 0.75rem;
+}
+
+#roomsAccordion form.vstack,
+#roomDetailAccordion form.vstack {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+#roomsAccordion .table-responsive {
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+#room-calendar {
+  min-height: 520px;
+}
+
+#roomDetailAccordion .form-check + .form-check {
+  margin-top: 0.25rem;
+}

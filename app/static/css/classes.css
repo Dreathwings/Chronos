@@ -1,0 +1,58 @@
+#classesAccordion {
+  --chronos-accordion-gap: 1rem;
+}
+
+#classesAccordion .accordion-item + .accordion-item {
+  margin-top: var(--chronos-accordion-gap);
+}
+
+#classesAccordion .accordion-button {
+  font-weight: 600;
+}
+
+#classesAccordion .accordion-body {
+  background-color: #f8f9fa;
+  border-radius: 0.75rem;
+}
+
+#classesAccordion form.vstack {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+#classesAccordion .table-responsive {
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+.class-detail-layout .card {
+  border: none;
+  border-radius: 1rem;
+  box-shadow: 0 0.25rem 1.5rem rgba(15, 23, 42, 0.08);
+}
+
+.class-detail-layout .card-header {
+  font-weight: 600;
+}
+
+.class-detail-layout .card + .card {
+  margin-top: 1.5rem;
+}
+
+.class-detail-layout #class-calendar {
+  min-height: 520px;
+}
+
+.class-detail-layout .list-unstyled li + li {
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 1199.98px) {
+  .class-detail-layout .col-xl-8 {
+    order: -1;
+  }
+
+  .class-detail-layout #class-calendar {
+    min-height: 420px;
+  }
+}

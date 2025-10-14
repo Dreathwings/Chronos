@@ -1,8 +1,13 @@
 {% extends 'base.html' %}
 {% block title %}{{ room.name }} — Salle{% endblock %}
 
+{% block head %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/rooms.css') }}">
+{% endblock %}
+
 {% block content %}
-<div class="accordion" id="roomDetailAccordion">
+<div class="accordion chronos-accordion" id="roomDetailAccordion">
   <div class="accordion-item">
     <h2 class="accordion-header" id="roomInfoHeading">
       <button class="accordion-button bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#roomInfo" aria-expanded="true" aria-controls="roomInfo">

@@ -1,0 +1,63 @@
+#teachersAccordion {
+  --chronos-accordion-gap: 1rem;
+}
+
+#teachersAccordion .accordion-item + .accordion-item {
+  margin-top: var(--chronos-accordion-gap);
+}
+
+#teachersAccordion .accordion-button {
+  font-weight: 600;
+}
+
+#teachersAccordion .accordion-body {
+  background-color: #f8f9fa;
+  border-radius: 0.75rem;
+}
+
+#teachersAccordion form.vstack {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+#teachersAccordion .table-responsive {
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+.teacher-detail-layout .card {
+  border: none;
+  border-radius: 1rem;
+  box-shadow: 0 0.25rem 1.5rem rgba(15, 23, 42, 0.08);
+}
+
+.teacher-detail-layout .card-header {
+  font-weight: 600;
+}
+
+.teacher-detail-layout .card + .card {
+  margin-top: 1.5rem;
+}
+
+.teacher-detail-layout .availability-grid {
+  min-width: 640px;
+}
+
+.teacher-detail-layout .availability-grid th,
+.teacher-detail-layout .availability-grid td {
+  vertical-align: middle;
+}
+
+.teacher-detail-layout #teacher-calendar {
+  min-height: 520px;
+}
+
+@media (max-width: 1199.98px) {
+  .teacher-detail-layout .col-xl-8 {
+    order: -1;
+  }
+
+  .teacher-detail-layout .availability-grid {
+    min-width: 100%;
+  }
+}

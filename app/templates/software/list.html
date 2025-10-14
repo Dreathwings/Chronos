@@ -1,8 +1,13 @@
 {% extends 'base.html' %}
 {% block title %}Logiciels — Chronos{% endblock %}
 
+{% block head %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/software.css') }}">
+{% endblock %}
+
 {% block content %}
-<div class="accordion" id="softwareAccordion">
+<div class="accordion chronos-accordion" id="softwareAccordion">
   <div class="accordion-item">
     <h2 class="accordion-header" id="softwareCreateHeading">
       <button class="accordion-button collapsed bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#softwareCreate" aria-expanded="false" aria-controls="softwareCreate">
