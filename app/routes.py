@@ -41,6 +41,7 @@ bp = Blueprint("main", __name__)
 WORKDAY_START = time(hour=7)
 WORKDAY_END = time(hour=19)
 BACKGROUND_BLOCK_COLOR = "#6c757d"
+CLOSING_PERIOD_COLOR = "rgba(108, 117, 125, 0.45)"
 
 SCHEDULE_SLOT_LOOKUP = {start: end for start, end in SCHEDULE_SLOTS}
 SCHEDULE_SLOT_CHOICES = [
@@ -94,6 +95,22 @@ def _build_default_backgrounds() -> list[dict[str, object]]:
 
 
 DEFAULT_WORKDAY_BACKGROUNDS = _build_default_backgrounds()
+
+
+def _closing_period_backgrounds() -> list[dict[str, object]]:
+    backgrounds: list[dict[str, object]] = []
+    periods = ClosingPeriod.ordered_periods()
+    for period in periods:
+        backgrounds.append(
+            {
+                "start": period.start_date.strftime("%Y-%m-%dT00:00:00"),
+                "end": (period.end_date + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"),
+                "display": "background",
+                "overlap": False,
+                "color": CLOSING_PERIOD_COLOR,
+            }
+        )
+    return backgrounds
 
 
 def _unique_entities(entities: Iterable[object]) -> list[object]:
@@ -220,6 +237,7 @@ def inject_calendar_defaults() -> dict[str, object]:
     return {
         "default_backgrounds_json": json.dumps(DEFAULT_WORKDAY_BACKGROUNDS),
         "background_block_color": BACKGROUND_BLOCK_COLOR,
+        "closing_backgrounds_json": json.dumps(_closing_period_backgrounds()),
         "schedule_slot_starts_json": json.dumps(slot_starts),
     }
 

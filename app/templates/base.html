@@ -54,6 +54,7 @@
         }
       ];
       window.CHRONOS_DEFAULT_BACKGROUNDS = {{ default_backgrounds_json|safe }};
+      window.CHRONOS_CLOSING_BACKGROUNDS = {{ closing_backgrounds_json|safe }};
       window.CHRONOS_SLOT_STARTS = {{ schedule_slot_starts_json|safe }};
 
       function chronosSlotDateForDay(dayDate, timeString) {
@@ -427,6 +428,9 @@
 
         if (Array.isArray(window.CHRONOS_DEFAULT_BACKGROUNDS) && window.CHRONOS_DEFAULT_BACKGROUNDS.length) {
           calendar.addEventSource(chronosCloneEvents(window.CHRONOS_DEFAULT_BACKGROUNDS));
+        }
+        if (Array.isArray(window.CHRONOS_CLOSING_BACKGROUNDS) && window.CHRONOS_CLOSING_BACKGROUNDS.length) {
+          calendar.addEventSource(chronosCloneEvents(window.CHRONOS_CLOSING_BACKGROUNDS));
         }
         if (Array.isArray(window.CHRONOS_PAUSE_BACKGROUNDS) && window.CHRONOS_PAUSE_BACKGROUNDS.length) {
           calendar.addEventSource(chronosCloneEvents(window.CHRONOS_PAUSE_BACKGROUNDS));
