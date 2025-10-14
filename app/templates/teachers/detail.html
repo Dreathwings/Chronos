@@ -2,14 +2,22 @@
 {% import 'teachers/_macros.html' as teacher_macros %}
 {% block title %}{{ teacher.name }} — Enseignant{% endblock %}
 
+{% block stylesheets %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/teachers.css') }}">
+{% endblock %}
+
 {% block content %}
-<div class="row g-4">
+<div class="row g-4 teacher-detail-layout">
   <div class="col-xl-4">
     <div class="card shadow-sm">
       <div class="card-header bg-primary text-white">Profil</div>
       <div class="card-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="update">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" name="name" class="form-control" value="{{ teacher.name }}" required>
+          </div>
           <div>
             <label class="form-label">E-mail</label>
             <input type="email" name="email" class="form-control" value="{{ teacher.email }}">

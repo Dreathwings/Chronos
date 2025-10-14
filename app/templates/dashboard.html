@@ -1,12 +1,22 @@
 {% extends 'base.html' %}
 {% block title %}Tableau de bord — Chronos{% endblock %}
 
+{% block stylesheets %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+
 {% block content %}
-<div class="row g-4">
-  <div class="col-xl-4">
-    <div class="card shadow-sm">
-      <div class="card-header bg-secondary text-white">Récapitulatif des cours</div>
-      <div class="card-body">
+<div class="row g-4 dashboard-layout">
+  <div class="col-lg-7">
+    <div class="accordion" id="dashboardAccordion">
+      <div class="accordion-item">
+    <h2 class="accordion-header" id="dashboardSummaryHeading">
+      <button class="accordion-button bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardSummary" aria-expanded="true" aria-controls="dashboardSummary">
+        Récapitulatif des cours
+      </button>
+    </h2>
+    <div id="dashboardSummary" class="accordion-collapse collapse show" aria-labelledby="dashboardSummaryHeading" data-bs-parent="#dashboardAccordion">
+      <div class="accordion-body">
         {% if course_summaries %}
         <div class="list-group list-group-flush">
           {% for item in course_summaries %}
@@ -61,9 +71,15 @@
         {% endif %}
       </div>
     </div>
-    <div class="card shadow-sm mt-4">
-      <div class="card-header bg-primary text-white">Génération automatique</div>
-      <div class="card-body">
+      </div>
+      <div class="accordion-item">
+    <h2 class="accordion-header" id="dashboardAutoHeading">
+      <button class="accordion-button collapsed bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardAuto" aria-expanded="false" aria-controls="dashboardAuto">
+        Génération automatique
+      </button>
+    </h2>
+    <div id="dashboardAuto" class="accordion-collapse collapse" aria-labelledby="dashboardAutoHeading" data-bs-parent="#dashboardAccordion">
+      <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="bulk-auto-schedule">
           <div>
@@ -75,13 +91,19 @@
             <input type="date" class="form-control" name="period_end" required>
           </div>
           <div class="form-text">Les cours sont traités selon leur priorité décroissante.</div>
-          <button type="submit" class="btn btn-outline-light text-white">Générer l'ensemble des cours</button>
+          <button type="submit" class="btn btn-primary">Générer l'ensemble des cours</button>
         </form>
       </div>
     </div>
-    <div class="card shadow-sm mt-4">
-      <div class="card-header bg-primary text-white">Planification rapide</div>
-      <div class="card-body">
+      </div>
+      <div class="accordion-item">
+    <h2 class="accordion-header" id="dashboardQuickHeading">
+      <button class="accordion-button collapsed bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardQuick" aria-expanded="false" aria-controls="dashboardQuick">
+        Planification rapide
+      </button>
+    </h2>
+    <div id="dashboardQuick" class="accordion-collapse collapse" aria-labelledby="dashboardQuickHeading" data-bs-parent="#dashboardAccordion">
+      <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="quick-session">
           <div>
@@ -159,12 +181,22 @@
         </form>
       </div>
     </div>
+      </div>
+    </div>
   </div>
-  <div class="col-xl-8">
-    <div class="card shadow-sm">
-      <div class="card-header bg-secondary text-white">Calendrier global</div>
-      <div class="card-body">
-        <div id="global-calendar"></div>
+  <div class="col-lg-5">
+    <div class="accordion h-100" id="dashboardCalendarAccordion">
+      <div class="accordion-item h-100">
+        <h2 class="accordion-header" id="dashboardCalendarHeading">
+          <button class="accordion-button bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardCalendar" aria-expanded="true" aria-controls="dashboardCalendar">
+            Calendrier global
+          </button>
+        </h2>
+        <div id="dashboardCalendar" class="accordion-collapse collapse show" aria-labelledby="dashboardCalendarHeading" data-bs-parent="#dashboardCalendarAccordion">
+          <div class="accordion-body">
+            <div id="global-calendar"></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -1,0 +1,31 @@
+#softwareAccordion {
+  --chronos-accordion-gap: 1rem;
+}
+
+#softwareAccordion .accordion-item + .accordion-item {
+  margin-top: var(--chronos-accordion-gap);
+}
+
+#softwareAccordion .accordion-button {
+  font-weight: 600;
+}
+
+#softwareAccordion .accordion-body {
+  background-color: #f8f9fa;
+  border-radius: 0.75rem;
+}
+
+#softwareAccordion form.vstack {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+#softwareAccordion .list-group-item {
+  border: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+#softwareAccordion .list-group-item + .list-group-item {
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}

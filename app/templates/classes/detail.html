@@ -1,8 +1,12 @@
 {% extends 'base.html' %}
 {% block title %}{{ class_group.name }} — Classe{% endblock %}
 
+{% block stylesheets %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/classes.css') }}">
+{% endblock %}
+
 {% block content %}
-<div class="row g-4">
+<div class="row g-4 class-detail-layout">
   <div class="col-xl-4">
     <div class="card shadow-sm">
       <div class="card-header bg-primary text-white">Informations</div>
@@ -11,7 +15,7 @@
           <input type="hidden" name="form" value="update">
           <div>
             <label class="form-label">Nom</label>
-            <input type="text" class="form-control" value="{{ class_group.name }}" disabled>
+            <input type="text" class="form-control" name="name" value="{{ class_group.name }}" required>
           </div>
           <div>
             <label class="form-label">Effectif</label>

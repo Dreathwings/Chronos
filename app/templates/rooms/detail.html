@@ -1,14 +1,26 @@
 {% extends 'base.html' %}
 {% block title %}{{ room.name }} — Salle{% endblock %}
 
+{% block stylesheets %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/rooms.css') }}">
+{% endblock %}
+
 {% block content %}
-<div class="row g-4">
-  <div class="col-lg-4">
-    <div class="card shadow-sm">
-      <div class="card-header bg-primary text-white">Informations</div>
-      <div class="card-body">
+<div class="accordion chronos-accordion" id="roomDetailAccordion">
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="roomInfoHeading">
+      <button class="accordion-button bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#roomInfo" aria-expanded="true" aria-controls="roomInfo">
+        Informations
+      </button>
+    </h2>
+    <div id="roomInfo" class="accordion-collapse collapse show" aria-labelledby="roomInfoHeading" data-bs-parent="#roomDetailAccordion">
+      <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="update">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" class="form-control" name="name" value="{{ room.name }}" required>
+          </div>
           <div>
             <label class="form-label">Capacité</label>
             <input type="number" class="form-control" name="capacity" value="{{ room.capacity }}" min="1">
@@ -46,10 +58,14 @@
       </div>
     </div>
   </div>
-  <div class="col-lg-8">
-    <div class="card shadow-sm">
-      <div class="card-header bg-secondary text-white">Calendrier des réservations</div>
-      <div class="card-body">
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="roomCalendarHeading">
+      <button class="accordion-button collapsed bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#roomCalendar" aria-expanded="false" aria-controls="roomCalendar">
+        Calendrier des réservations
+      </button>
+    </h2>
+    <div id="roomCalendar" class="accordion-collapse collapse" aria-labelledby="roomCalendarHeading" data-bs-parent="#roomDetailAccordion">
+      <div class="accordion-body">
         <div id="room-calendar"></div>
       </div>
     </div>

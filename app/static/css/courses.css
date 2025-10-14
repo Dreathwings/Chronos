@@ -1,0 +1,71 @@
+#coursesAccordion {
+  --chronos-accordion-gap: 1rem;
+}
+
+#coursesAccordion .accordion-item + .accordion-item {
+  margin-top: var(--chronos-accordion-gap);
+}
+
+#coursesAccordion .accordion-button {
+  font-weight: 600;
+}
+
+#coursesAccordion .accordion-body {
+  background-color: #f8f9fa;
+  border-radius: 0.75rem;
+}
+
+#coursesAccordion form.vstack {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+#coursesAccordion .table-responsive {
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+#coursesAccordion .vstack.gap-2 > .border {
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  border-radius: 0.75rem;
+}
+
+.course-detail-layout .card {
+  border: none;
+  border-radius: 1rem;
+  box-shadow: 0 0.25rem 1.5rem rgba(15, 23, 42, 0.08);
+}
+
+.course-detail-layout .card-header {
+  font-weight: 600;
+}
+
+.course-detail-layout .card + .card {
+  margin-top: 1.5rem;
+}
+
+.course-detail-layout #course-teachers-list,
+.course-detail-layout #course-classes-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.course-detail-layout #course-classes-list .border {
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  border-radius: 0.75rem;
+}
+
+.course-detail-layout #course-calendar {
+  min-height: 520px;
+}
+
+.course-detail-layout .list-unstyled li + li {
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 1199.98px) {
+  .course-detail-layout .col-xl-8 {
+    order: -1;
+  }
+}
