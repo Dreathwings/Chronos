@@ -15,12 +15,11 @@ migrate = Migrate()
 
 def create_app(config_class: type[Config] = Config) -> Flask:
     url_prefix = _normalise_prefix(getattr(config_class, "URL_PREFIX", ""))
-    if url_prefix:
-        app = Flask(__name__, static_url_path=f"{url_prefix}/static")
-    else:
-        app = Flask(__name__)
+
     app.config.from_object(config_class)
     app.config["URL_PREFIX"] = url_prefix
+    app.config["APPLICATION_ROOT"] = url_prefix or "/"
+    
     app = Flask(__name__)
     app.config.from_object(config_class)
 
@@ -43,8 +42,8 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     app.register_blueprint(main_bp, url_prefix=url_prefix or None)
     if url_prefix:
         app.add_url_rule(
-            "/static/<path:filename>",
-            endpoint="static_fallback",
+            f"{url_prefix}/static/<path:filename>",
+            endpoint="static_prefixed",
             view_func=app.send_static_file,
         )
     @app.cli.command("seed")
