@@ -4,7 +4,7 @@ from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
-
+import os
 from config import Config, _normalise_prefix
 
 
@@ -14,12 +14,29 @@ migrate = Migrate()
 
 
 def create_app(config_class: type[Config] = Config) -> Flask:
-    url_prefix = _normalise_prefix(getattr(config_class, "URL_PREFIX", ""))
-    
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder=None)
     app.config.from_object(config_class)
+
+    url_prefix = _normalise_prefix(app.config.get("URL_PREFIX", ""))
     app.config["URL_PREFIX"] = url_prefix
-    app.config["APPLICATION_ROOT"] = url_prefix or "/"
+
+    static_folder = os.path.join(app.root_path, "static")
+    app.static_folder = static_folder
+
+    static_url_path = f"{url_prefix}/static" if url_prefix else "/static"
+    app.static_url_path = static_url_path
+    app.add_url_rule(
+        f"{static_url_path}/<path:filename>",
+        endpoint="static",
+        view_func=app.send_static_file,
+    )
+
+    if url_prefix:
+        app.add_url_rule(
+            "/static/<path:filename>",
+            endpoint="static_without_prefix",
+            view_func=app.send_static_file,
+        )
     db.init_app(app)
     migrate.init_app(app, db)
 
@@ -37,12 +54,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     from .routes import bp as main_bp
 
     app.register_blueprint(main_bp, url_prefix=url_prefix or None)
-    if url_prefix:
-        app.add_url_rule(
-            f"{url_prefix}/static/<path:filename>",
-            endpoint="static_prefixed",
-            view_func=app.send_static_file,
-        )
+
     @app.cli.command("seed")
     @with_appcontext
     def seed() -> None:
