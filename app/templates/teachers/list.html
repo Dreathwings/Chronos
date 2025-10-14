@@ -6,11 +6,11 @@
 <div class="accordion" id="teachersAccordion">
   <div class="accordion-item">
     <h2 class="accordion-header" id="teachersCreateHeading">
-      <button class="accordion-button bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#teachersCreate" aria-expanded="true" aria-controls="teachersCreate">
+      <button class="accordion-button collapsed bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#teachersCreate" aria-expanded="false" aria-controls="teachersCreate">
         Nouvel enseignant
       </button>
     </h2>
-    <div id="teachersCreate" class="accordion-collapse collapse show" aria-labelledby="teachersCreateHeading" data-bs-parent="#teachersAccordion">
+    <div id="teachersCreate" class="accordion-collapse collapse" aria-labelledby="teachersCreateHeading" data-bs-parent="#teachersAccordion">
       <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="create">
@@ -45,11 +45,11 @@
   </div>
   <div class="accordion-item">
     <h2 class="accordion-header" id="teachersListHeading">
-      <button class="accordion-button collapsed bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#teachersList" aria-expanded="false" aria-controls="teachersList">
+      <button class="accordion-button bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#teachersList" aria-expanded="true" aria-controls="teachersList">
         Enseignants existants
       </button>
     </h2>
-    <div id="teachersList" class="accordion-collapse collapse" aria-labelledby="teachersListHeading" data-bs-parent="#teachersAccordion">
+    <div id="teachersList" class="accordion-collapse collapse show" aria-labelledby="teachersListHeading" data-bs-parent="#teachersAccordion">
       <div class="accordion-body">
         <div class="table-responsive">
           <table class="table table-striped align-middle mb-0">

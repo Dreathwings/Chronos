@@ -2,11 +2,15 @@
 {% block title %}Équipements — Chronos{% endblock %}
 
 {% block content %}
-<div class="row g-4">
-  <div class="col-md-4">
-    <div class="card shadow-sm">
-      <div class="card-header bg-primary text-white">Nouvel équipement</div>
-      <div class="card-body">
+<div class="accordion" id="equipmentAccordion">
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="equipmentCreateHeading">
+      <button class="accordion-button collapsed bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#equipmentCreate" aria-expanded="false" aria-controls="equipmentCreate">
+        Nouvel équipement
+      </button>
+    </h2>
+    <div id="equipmentCreate" class="accordion-collapse collapse" aria-labelledby="equipmentCreateHeading" data-bs-parent="#equipmentAccordion">
+      <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <div>
             <label class="form-label">Nom</label>
@@ -17,19 +21,25 @@
       </div>
     </div>
   </div>
-  <div class="col-md-8">
-    <div class="card shadow-sm">
-      <div class="card-header bg-secondary text-white">Référentiel équipements</div>
-      <ul class="list-group list-group-flush">
-        {% for equipment in equipments %}
-        <li class="list-group-item d-flex justify-content-between align-items-center">
-          {{ equipment.name }}
-          <span class="badge bg-light text-dark">{{ equipment.rooms|length }} salles • {{ equipment.courses|length }} cours</span>
-        </li>
-        {% else %}
-        <li class="list-group-item">Aucun équipement pour le moment.</li>
-        {% endfor %}
-      </ul>
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="equipmentListHeading">
+      <button class="accordion-button bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#equipmentList" aria-expanded="true" aria-controls="equipmentList">
+        Référentiel équipements
+      </button>
+    </h2>
+    <div id="equipmentList" class="accordion-collapse collapse show" aria-labelledby="equipmentListHeading" data-bs-parent="#equipmentAccordion">
+      <div class="accordion-body">
+        <ul class="list-group list-group-flush">
+          {% for equipment in equipments %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ equipment.name }}
+            <span class="badge bg-light text-dark">{{ equipment.rooms|length }} salles • {{ equipment.courses|length }} cours</span>
+          </li>
+          {% else %}
+          <li class="list-group-item">Aucun équipement pour le moment.</li>
+          {% endfor %}
+        </ul>
+      </div>
     </div>
   </div>
 </div>

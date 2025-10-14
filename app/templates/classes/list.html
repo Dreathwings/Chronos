@@ -5,11 +5,11 @@
 <div class="accordion" id="classesAccordion">
   <div class="accordion-item">
     <h2 class="accordion-header" id="classesCreateHeading">
-      <button class="accordion-button bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#classesCreate" aria-expanded="true" aria-controls="classesCreate">
+      <button class="accordion-button collapsed bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#classesCreate" aria-expanded="false" aria-controls="classesCreate">
         Nouvelle classe
       </button>
     </h2>
-    <div id="classesCreate" class="accordion-collapse collapse show" aria-labelledby="classesCreateHeading" data-bs-parent="#classesAccordion">
+    <div id="classesCreate" class="accordion-collapse collapse" aria-labelledby="classesCreateHeading" data-bs-parent="#classesAccordion">
       <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="create">
@@ -36,11 +36,11 @@
   </div>
   <div class="accordion-item">
     <h2 class="accordion-header" id="classesListHeading">
-      <button class="accordion-button collapsed bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#classesList" aria-expanded="false" aria-controls="classesList">
+      <button class="accordion-button bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#classesList" aria-expanded="true" aria-controls="classesList">
         Classes existantes
       </button>
     </h2>
-    <div id="classesList" class="accordion-collapse collapse" aria-labelledby="classesListHeading" data-bs-parent="#classesAccordion">
+    <div id="classesList" class="accordion-collapse collapse show" aria-labelledby="classesListHeading" data-bs-parent="#classesAccordion">
       <div class="accordion-body">
         <div class="table-responsive">
           <table class="table table-striped align-middle mb-0">
