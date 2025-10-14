@@ -27,15 +27,21 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Créez un fichier `.env` (optionnel) pour définir la clé secrète et l'URL de base de données :
+Créez un fichier `.env` (optionnel) pour définir la clé secrète et les informations de connexion à la base de données :
 
 ```env
 SECRET_KEY=change-me
-DATABASE_URL=mysql+pymysql://user:password@localhost:3306/chronos
+DATABASE_USER=root
+DATABASE_PASSWORD=chronos
+DATABASE_HOST=localhost
+DATABASE_PORT=3306
+DATABASE_NAME=chronos
+FLASK_URL_PREFIX=
 ```
 
-Si `DATABASE_URL` n'est pas défini, l'application utilisera automatiquement une base SQLite `chronos.db` dans le répertoire du projet.
+Avec ces variables, l'application utilisera par défaut la base MySQL `chronos` exposée sur le port `3306` avec l'utilisateur `root` et le mot de passe `chronos`. Vous pouvez également fournir directement `DATABASE_URL`; dans ce cas, il prendra le pas sur les variables ci-dessus.
 
+`FLASK_URL_PREFIX` permet de servir l'application derrière un proxy en la plaçant sous un sous-chemin (par exemple `/chronos`). Laissez la valeur vide pour conserver les routes à la racine.
 ## Lancement
 
 ```bash

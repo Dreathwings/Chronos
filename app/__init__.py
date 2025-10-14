@@ -5,7 +5,8 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from config import Config
+from config import Config, _normalise_prefix
+
 
 
 db = SQLAlchemy()
@@ -13,6 +14,13 @@ migrate = Migrate()
 
 
 def create_app(config_class: type[Config] = Config) -> Flask:
+    url_prefix = _normalise_prefix(getattr(config_class, "URL_PREFIX", ""))
+    if url_prefix:
+        app = Flask(__name__, static_url_path=f"{url_prefix}/static")
+    else:
+        app = Flask(__name__)
+    app.config.from_object(config_class)
+    app.config["URL_PREFIX"] = url_prefix
     app = Flask(__name__)
     app.config.from_object(config_class)
 
@@ -32,7 +40,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
 
     from .routes import bp as main_bp
 
-    app.register_blueprint(main_bp)
+    app.register_blueprint(main_bp, url_prefix=url_prefix or None)
 
     @app.cli.command("seed")
     @with_appcontext
