@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, List, Optional, Set
 
@@ -151,6 +152,60 @@ class ScheduleReporter:
             logger.log(log_level, "[%s] %s", self.course.name, text)
 
 
+class PlacementDiagnostics:
+    def __init__(self) -> None:
+        self.teacher_reasons: set[str] = set()
+        self.room_reasons: set[str] = set()
+        self.class_reasons: set[str] = set()
+        self.other_reasons: set[str] = set()
+
+    def add_teacher(self, message: str | None) -> None:
+        if message:
+            self.teacher_reasons.add(message)
+
+    def add_room(self, message: str | None) -> None:
+        if message:
+            self.room_reasons.add(message)
+
+    def add_class(self, message: str | None) -> None:
+        if message:
+            self.class_reasons.add(message)
+
+    def add_other(self, message: str | None) -> None:
+        if message:
+            self.other_reasons.add(message)
+
+    def emit(
+        self,
+        reporter: ScheduleReporter | None,
+        *,
+        context_label: str,
+        day: date,
+    ) -> None:
+        if reporter is None:
+            return
+        day_label = day.strftime("%d/%m/%Y")
+        for message in sorted(self.class_reasons):
+            reporter.warning(f"{context_label} — {day_label} : {message}")
+        for message in sorted(self.teacher_reasons):
+            reporter.warning(f"{context_label} — {day_label} : {message}")
+        for message in sorted(self.room_reasons):
+            reporter.warning(f"{context_label} — {day_label} : {message}")
+        for message in sorted(self.other_reasons):
+            reporter.warning(f"{context_label} — {day_label} : {message}")
+        if not any(
+            (
+                self.class_reasons,
+                self.teacher_reasons,
+                self.room_reasons,
+                self.other_reasons,
+            )
+        ):
+            reporter.warning(
+                f"{context_label} — {day_label} : aucune option compatible trouvée sur ce créneau."
+            )
+
+
 def daterange(start: date, end: date) -> Iterable[date]:
     current = start
     while current <= end:
@@ -213,6 +268,180 @@ def find_available_room(
                 break
 
     return best_room
+
+
+def _format_session_label(session: Session) -> str:
+    start_label = session.start_time.strftime("%d/%m %H:%M")
+    end_label = session.end_time.strftime("%H:%M")
+    return f"{session.course.name} ({start_label} → {end_label})"
+
+
+def _describe_teacher_unavailability(
+    course: Course,
+    start: datetime,
+    end: datetime,
+    *,
+    link: CourseClassLink | None = None,
+    subgroup_label: str | None = None,
+    segments: Optional[list[tuple[datetime, datetime]]] = None,
+) -> str:
+    preferred: list[Teacher] = []
+    if link is not None:
+        for assigned in link.preferred_teachers(subgroup_label):
+            if assigned is not None and assigned not in preferred:
+                preferred.append(assigned)
+
+    if course.teachers:
+        fallback_pool = list(course.teachers)
+    else:
+        fallback_pool = Teacher.query.all()
+
+    candidates = preferred + [teacher for teacher in fallback_pool if teacher not in preferred]
+    if not candidates:
+        return "Aucun enseignant n'est associé au cours."
+
+    segments_to_check = segments or [(start, end)]
+    reasons: list[str] = []
+    for teacher in sorted(candidates, key=lambda t: t.name.lower()):
+        if not all(
+            teacher.is_available_during(segment_start, segment_end)
+            for segment_start, segment_end in segments_to_check
+        ):
+            reasons.append(f"{teacher.name} est déclaré indisponible sur ce créneau.")
+            continue
+        conflicts = [
+            _format_session_label(session)
+            for session in teacher.sessions
+            for segment_start, segment_end in segments_to_check
+            if overlaps(session.start_time, session.end_time, segment_start, segment_end)
+        ]
+        if conflicts:
+            summary = ", ".join(conflicts[:2])
+            if len(conflicts) > 2:
+                summary += ", …"
+            reasons.append(f"{teacher.name} est déjà planifié : {summary}")
+            continue
+    if reasons:
+        return " ; ".join(reasons)
+    teacher_names = ", ".join(sorted(teacher.name for teacher in candidates))
+    return f"Aucun enseignant disponible parmi : {teacher_names}."
+
+
+def _describe_room_unavailability(
+    course: Course,
+    start: datetime,
+    end: datetime,
+    *,
+    required_capacity: int | None = None,
+) -> str:
+    rooms = Room.query.order_by(Room.capacity.asc()).all()
+    if not rooms:
+        return "Aucune salle n'est enregistrée dans la base."
+
+    required_students = required_capacity or 1
+    capacity_rejects: list[str] = []
+    computer_rejects: list[str] = []
+    equipment_counter: Counter[str] = Counter()
+    software_counter: Counter[str] = Counter()
+    conflicts: list[str] = []
+    compatible_rooms: list[Room] = []
+
+    required_equipment_ids = {equipment.id for equipment in course.equipments}
+    required_software_ids = {software.id for software in course.softwares}
+
+    for room in rooms:
+        if room.capacity < required_students:
+            capacity_rejects.append(room.name)
+            continue
+        if course.requires_computers and room.computers <= 0:
+            computer_rejects.append(room.name)
+            continue
+        room_equipment_ids = {equipment.id for equipment in room.equipments}
+        missing_equipment = required_equipment_ids.difference(room_equipment_ids)
+        if missing_equipment:
+            for equipment_id in missing_equipment:
+                equipment = next(
+                    (item for item in course.equipments if item.id == equipment_id),
+                    None,
+                )
+                if equipment is not None:
+                    equipment_counter[equipment.name] += 1
+            continue
+        room_software_ids = {software.id for software in room.softwares}
+        missing_softwares = required_software_ids.difference(room_software_ids)
+        if missing_softwares:
+            for software_id in missing_softwares:
+                software = next(
+                    (item for item in course.softwares if item.id == software_id),
+                    None,
+                )
+                if software is not None:
+                    software_counter[software.name] += 1
+            continue
+        compatible_rooms.append(room)
+
+    for room in compatible_rooms:
+        overlapping = [
+            _format_session_label(session)
+            for session in room.sessions
+            if overlaps(session.start_time, session.end_time, start, end)
+        ]
+        if overlapping:
+            label = f"{room.name} occupée par {', '.join(overlapping[:2])}"
+            if len(overlapping) > 2:
+                label += ", …"
+            conflicts.append(label)
+
+    parts: list[str] = []
+    if capacity_rejects:
+        if len(capacity_rejects) == len(rooms):
+            parts.append("Aucune salle n'atteint la capacité requise.")
+        else:
+            display = ", ".join(sorted(capacity_rejects[:3]))
+            if len(capacity_rejects) > 3:
+                display += ", …"
+            parts.append(f"Salles trop petites : {display}")
+    if course.requires_computers and computer_rejects:
+        if len(computer_rejects) == len(rooms) - len(capacity_rejects):
+            parts.append("Aucune salle équipée d'ordinateurs disponibles.")
+        else:
+            display = ", ".join(sorted(computer_rejects[:3]))
+            if len(computer_rejects) > 3:
+                display += ", …"
+            parts.append(f"Sans postes informatiques : {display}")
+    if equipment_counter:
+        equipment_display = ", ".join(
+            f"{name} ({count})" for name, count in equipment_counter.most_common(3)
+        )
+        if len(equipment_counter) > 3:
+            equipment_display += ", …"
+        parts.append(f"Équipements manquants : {equipment_display}")
+    if software_counter:
+        software_display = ", ".join(
+            f"{name} ({count})" for name, count in software_counter.most_common(3)
+        )
+        if len(software_counter) > 3:
+            software_display += ", …"
+        parts.append(f"Logiciels manquants : {software_display}")
+    if conflicts:
+        conflict_display = "; ".join(conflicts[:2])
+        if len(conflicts) > 2:
+            conflict_display += "; …"
+        parts.append(f"Salles déjà réservées : {conflict_display}")
+
+    if not parts:
+        return "Aucune salle compatible n'est disponible sur ce créneau."
+    return " ; ".join(parts)
+
+
+def _describe_class_unavailability(
+    class_group: ClassGroup,
+    start: datetime,
+    end: datetime,
+) -> str:
+    start_label = start.strftime("%H:%M")
+    end_label = end.strftime("%H:%M")
+    return f"{class_group.name} est indisponible de {start_label} à {end_label}."
 
 
 def find_available_teacher(
@@ -316,7 +545,12 @@ def _schedule_block_for_day(
     day: date,
     desired_hours: int,
     base_offset: int,
+    reporter: ScheduleReporter | None = None,
 ) -> list[Session] | None:
+    diagnostics = PlacementDiagnostics()
+    context = class_group.name
+    if subgroup_label:
+        context += f" — groupe {subgroup_label.upper()}"
     placement = _try_full_block(
         course=course,
         class_group=class_group,
@@ -325,12 +559,18 @@ def _schedule_block_for_day(
         day=day,
         desired_hours=desired_hours,
         base_offset=base_offset,
+        diagnostics=diagnostics,
     )
     if placement:
         return placement
     if desired_hours <= 1:
+        diagnostics.emit(
+            reporter,
+            context_label=context,
+            day=day,
+        )
         return None
-    return _try_split_block(
+    placement = _try_split_block(
         course=course,
         class_group=class_group,
         link=link,
@@ -338,7 +578,16 @@ def _schedule_block_for_day(
         day=day,
         desired_hours=desired_hours,
         base_offset=base_offset,
+        diagnostics=diagnostics,
     )
+    if placement:
+        return placement
+    diagnostics.emit(
+        reporter,
+        context_label=context,
+        day=day,
+    )
+    return None
 
 
 def _try_full_block(
@@ -350,6 +599,7 @@ def _try_full_block(
     day: date,
     desired_hours: int,
     base_offset: int,
+    diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     required_capacity = course.capacity_needed_for(class_group)
     for offset in range(len(START_TIMES)):
@@ -360,6 +610,10 @@ def _try_full_block(
         if not fits_in_windows(start_dt.time(), end_dt.time()):
             continue
         if not class_group.is_available_during(start_dt, end_dt):
+            if diagnostics is not None:
+                diagnostics.add_class(
+                    _describe_class_unavailability(class_group, start_dt, end_dt)
+                )
             continue
         teacher = find_available_teacher(
             course,
@@ -369,6 +623,16 @@ def _try_full_block(
             subgroup_label=subgroup_label,
         )
         if not teacher:
+            if diagnostics is not None:
+                diagnostics.add_teacher(
+                    _describe_teacher_unavailability(
+                        course,
+                        start_dt,
+                        end_dt,
+                        link=link,
+                        subgroup_label=subgroup_label,
+                    )
+                )
             continue
         room = find_available_room(
             course,
@@ -377,6 +641,15 @@ def _try_full_block(
             required_capacity=required_capacity,
         )
         if not room:
+            if diagnostics is not None:
+                diagnostics.add_room(
+                    _describe_room_unavailability(
+                        course,
+                        start_dt,
+                        end_dt,
+                        required_capacity=required_capacity,
+                    )
+                )
             continue
         session = Session(
             course=course,
@@ -407,6 +680,7 @@ def _try_split_block(
     day: date,
     desired_hours: int,
     base_offset: int,
+    diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     segment_count = desired_hours
     required_capacity = course.capacity_needed_for(class_group)
@@ -428,6 +702,16 @@ def _try_split_block(
             class_group.is_available_during(segment_start, segment_end)
             for segment_start, segment_end in segment_datetimes
         ):
+            if diagnostics is not None:
+                for segment_start, segment_end in segment_datetimes:
+                    if not class_group.is_available_during(segment_start, segment_end):
+                        diagnostics.add_class(
+                            _describe_class_unavailability(
+                                class_group,
+                                segment_start,
+                                segment_end,
+                            )
+                        )
             continue
         teacher = find_available_teacher(
             course,
@@ -438,6 +722,17 @@ def _try_split_block(
             segments=segment_datetimes,
         )
         if not teacher:
+            if diagnostics is not None:
+                diagnostics.add_teacher(
+                    _describe_teacher_unavailability(
+                        course,
+                        start_dt,
+                        end_dt,
+                        link=link,
+                        subgroup_label=subgroup_label,
+                        segments=segment_datetimes,
+                    )
+                )
             continue
         rooms: list[Room] = []
         valid = True
@@ -446,6 +741,10 @@ def _try_split_block(
                 overlaps(existing.start_time, existing.end_time, seg_start, seg_end)
                 for existing in teacher.sessions
             ):
+                if diagnostics is not None:
+                    diagnostics.add_teacher(
+                        f"{teacher.name} est déjà planifié sur {seg_start.strftime('%d/%m %H:%M')}"
+                    )
                 valid = False
                 break
             room = find_available_room(
@@ -455,6 +754,15 @@ def _try_split_block(
                 required_capacity=required_capacity,
             )
             if not room:
+                if diagnostics is not None:
+                    diagnostics.add_room(
+                        _describe_room_unavailability(
+                            course,
+                            seg_start,
+                            seg_end,
+                            required_capacity=required_capacity,
+                        )
+                    )
                 valid = False
                 break
             rooms.append(room)
@@ -506,7 +814,10 @@ def _cm_schedule_block_for_day(
     day: date,
     desired_hours: int,
     base_offset: int,
+    reporter: ScheduleReporter | None = None,
 ) -> list[Session] | None:
+    diagnostics = PlacementDiagnostics()
+    context = ", ".join(group.name for group in class_groups) or course.name
     placement = _cm_try_full_block(
         course=course,
         class_groups=class_groups,
@@ -514,19 +825,34 @@ def _cm_schedule_block_for_day(
         day=day,
         desired_hours=desired_hours,
         base_offset=base_offset,
+        diagnostics=diagnostics,
     )
     if placement:
         return placement
     if desired_hours <= 1:
+        diagnostics.emit(
+            reporter,
+            context_label=context,
+            day=day,
+        )
         return None
-    return _cm_try_split_block(
+    placement = _cm_try_split_block(
         course=course,
         class_groups=class_groups,
         primary_link=primary_link,
         day=day,
         desired_hours=desired_hours,
         base_offset=base_offset,
+        diagnostics=diagnostics,
     )
+    if placement:
+        return placement
+    diagnostics.emit(
+        reporter,
+        context_label=context,
+        day=day,
+    )
+    return None
 
 
 def _cm_try_full_block(
@@ -537,6 +863,7 @@ def _cm_try_full_block(
     day: date,
     desired_hours: int,
     base_offset: int,
+    diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     if not class_groups:
         return None
@@ -549,10 +876,17 @@ def _cm_try_full_block(
         end_dt = start_dt + timedelta(hours=desired_hours)
         if not fits_in_windows(start_dt.time(), end_dt.time()):
             continue
-        if not all(
-            class_group.is_available_during(start_dt, end_dt)
+        unavailable_groups = [
+            class_group
             for class_group in class_groups
-        ):
+            if not class_group.is_available_during(start_dt, end_dt)
+        ]
+        if unavailable_groups:
+            if diagnostics is not None:
+                for group in unavailable_groups:
+                    diagnostics.add_class(
+                        _describe_class_unavailability(group, start_dt, end_dt)
+                    )
             continue
         teacher = find_available_teacher(
             course,
@@ -562,6 +896,16 @@ def _cm_try_full_block(
             subgroup_label=None,
         )
         if not teacher:
+            if diagnostics is not None:
+                diagnostics.add_teacher(
+                    _describe_teacher_unavailability(
+                        course,
+                        start_dt,
+                        end_dt,
+                        link=primary_link,
+                        subgroup_label=None,
+                    )
+                )
             continue
         room = find_available_room(
             course,
@@ -570,6 +914,15 @@ def _cm_try_full_block(
             required_capacity=required_capacity,
         )
         if not room:
+            if diagnostics is not None:
+                diagnostics.add_room(
+                    _describe_room_unavailability(
+                        course,
+                        start_dt,
+                        end_dt,
+                        required_capacity=required_capacity,
+                    )
+                )
             continue
         session = Session(
             course=course,
@@ -594,6 +947,7 @@ def _cm_try_split_block(
     day: date,
     desired_hours: int,
     base_offset: int,
+    diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     if not class_groups:
         return None
@@ -612,11 +966,17 @@ def _cm_try_split_block(
             (datetime.combine(day, slot_start), datetime.combine(day, slot_end))
             for slot_start, slot_end in contiguous
         ]
-        if not all(
-            class_group.is_available_during(segment_start, segment_end)
-            for class_group in class_groups
-            for segment_start, segment_end in segment_datetimes
-        ):
+        availability_blocks = []
+        for class_group in class_groups:
+            for segment_start, segment_end in segment_datetimes:
+                if not class_group.is_available_during(segment_start, segment_end):
+                    availability_blocks.append((class_group, segment_start, segment_end))
+        if availability_blocks:
+            if diagnostics is not None:
+                for group, segment_start, segment_end in availability_blocks:
+                    diagnostics.add_class(
+                        _describe_class_unavailability(group, segment_start, segment_end)
+                    )
             continue
         teacher = find_available_teacher(
             course,
@@ -627,6 +987,17 @@ def _cm_try_split_block(
             segments=segment_datetimes,
         )
         if not teacher:
+            if diagnostics is not None:
+                diagnostics.add_teacher(
+                    _describe_teacher_unavailability(
+                        course,
+                        segment_datetimes[0][0],
+                        segment_datetimes[-1][1],
+                        link=primary_link,
+                        subgroup_label=None,
+                        segments=segment_datetimes,
+                    )
+                )
             continue
         rooms: list[Room] = []
         valid = True
@@ -635,6 +1006,10 @@ def _cm_try_split_block(
                 overlaps(existing.start_time, existing.end_time, seg_start, seg_end)
                 for existing in teacher.sessions
             ):
+                if diagnostics is not None:
+                    diagnostics.add_teacher(
+                        f"{teacher.name} est déjà planifié sur {seg_start.strftime('%d/%m %H:%M')}"
+                    )
                 valid = False
                 break
             room = find_available_room(
@@ -644,6 +1019,15 @@ def _cm_try_split_block(
                 required_capacity=required_capacity,
             )
             if not room:
+                if diagnostics is not None:
+                    diagnostics.add_room(
+                        _describe_room_unavailability(
+                            course,
+                            seg_start,
+                            seg_end,
+                            required_capacity=required_capacity,
+                        )
+                    )
                 valid = False
                 break
             rooms.append(room)
@@ -795,6 +1179,7 @@ def generate_schedule(
                     day=day,
                     desired_hours=desired_hours,
                     base_offset=base_offset,
+                    reporter=reporter,
                 )
                 if not block_sessions:
                     continue
@@ -880,6 +1265,7 @@ def generate_schedule(
                         day=day,
                         desired_hours=desired_hours,
                         base_offset=base_offset,
+                        reporter=reporter,
                     )
                     if not block_sessions:
                         continue

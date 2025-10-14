@@ -875,6 +875,11 @@ def teacher_detail(teacher_id: int):
                 key = f"{availability.weekday}-{slot_start.strftime('%H:%M')}"
                 selected_slots.add(key)
 
+    if not selected_slots:
+        for weekday in range(5):
+            for slot_start, _ in SCHEDULE_SLOTS:
+                selected_slots.add(f"{weekday}-{slot_start.strftime('%H:%M')}")
+
     backgrounds = _teacher_unavailability_backgrounds(teacher)
 
     return render_template(
@@ -1307,11 +1312,10 @@ def course_detail(course_id: int):
         return redirect(url_for("main.course_detail", course_id=course_id))
 
     events = sessions_to_grouped_events(course.sessions)
-    generation_logs = (
+    latest_generation_log = (
         CourseScheduleLog.query.filter_by(course_id=course.id)
         .order_by(CourseScheduleLog.created_at.desc())
-        .limit(5)
-        .all()
+        .first()
     )
 
     status_badges = {
@@ -1337,7 +1341,7 @@ def course_detail(course_id: int):
         class_links_map=class_links_map,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
-        generation_logs=generation_logs,
+        latest_generation_log=latest_generation_log,
         status_labels=CourseScheduleLog.STATUS_LABELS,
         status_badges=status_badges,
         level_badges=level_badges,
