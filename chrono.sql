@@ -155,6 +155,47 @@ INSERT INTO `course_teacher` (`course_id`, `teacher_id`) VALUES
 -- --------------------------------------------------------
 
 --
+-- Structure de la table `course_schedule_log`
+--
+
+CREATE TABLE `course_schedule_log` (
+  `id` int(11) NOT NULL,
+  `course_id` int(11) NOT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'success',
+  `summary` text DEFAULT NULL,
+  `messages` text NOT NULL,
+  `window_start` date DEFAULT NULL,
+  `window_end` date DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Déchargement des données de la table `course_schedule_log`
+--
+
+-- --------------------------------------------------------
+
+--
+-- Structure de la table `closing_period`
+--
+
+CREATE TABLE `closing_period` (
+  `id` int(11) NOT NULL,
+  `start_date` date NOT NULL,
+  `end_date` date NOT NULL,
+  `label` varchar(255) DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Déchargement des données de la table `closing_period`
+--
+
+-- --------------------------------------------------------
+
+--
 -- Structure de la table `equipment`
 --
 
@@ -479,6 +520,22 @@ ALTER TABLE `course_teacher`
   ADD KEY `teacher_id` (`teacher_id`);
 
 --
+-- Index pour la table `course_schedule_log`
+--
+ALTER TABLE `course_schedule_log`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `course_schedule_log_course_id_idx` (`course_id`),
+  ADD KEY `course_schedule_log_created_idx` (`created_at`);
+
+--
+-- Index pour la table `closing_period`
+--
+ALTER TABLE `closing_period`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `closing_period_start_idx` (`start_date`),
+  ADD KEY `closing_period_end_idx` (`end_date`);
+
+--
 -- Index pour la table `equipment`
 --
 ALTER TABLE `equipment`
@@ -554,6 +611,18 @@ ALTER TABLE `course`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
+-- AUTO_INCREMENT pour la table `course_schedule_log`
+--
+ALTER TABLE `course_schedule_log`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT pour la table `closing_period`
+--
+ALTER TABLE `closing_period`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT pour la table `equipment`
 --
 ALTER TABLE `equipment`
@@ -620,6 +689,12 @@ ALTER TABLE `course_software`
 ALTER TABLE `course_teacher`
   ADD CONSTRAINT `course_teacher_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
   ADD CONSTRAINT `course_teacher_ibfk_2` FOREIGN KEY (`teacher_id`) REFERENCES `teacher` (`id`);
+
+--
+-- Contraintes pour la table `course_schedule_log`
+--
+ALTER TABLE `course_schedule_log`
+  ADD CONSTRAINT `course_schedule_log_course_fk` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`);
 
 --
 -- Contraintes pour la table `room_equipment`

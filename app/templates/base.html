@@ -54,6 +54,7 @@
         }
       ];
       window.CHRONOS_DEFAULT_BACKGROUNDS = {{ default_backgrounds_json|safe }};
+      window.CHRONOS_CLOSING_BACKGROUNDS = {{ closing_backgrounds_json|safe }};
       window.CHRONOS_SLOT_STARTS = {{ schedule_slot_starts_json|safe }};
 
       function chronosSlotDateForDay(dayDate, timeString) {
@@ -428,6 +429,9 @@
         if (Array.isArray(window.CHRONOS_DEFAULT_BACKGROUNDS) && window.CHRONOS_DEFAULT_BACKGROUNDS.length) {
           calendar.addEventSource(chronosCloneEvents(window.CHRONOS_DEFAULT_BACKGROUNDS));
         }
+        if (Array.isArray(window.CHRONOS_CLOSING_BACKGROUNDS) && window.CHRONOS_CLOSING_BACKGROUNDS.length) {
+          calendar.addEventSource(chronosCloneEvents(window.CHRONOS_CLOSING_BACKGROUNDS));
+        }
         if (Array.isArray(window.CHRONOS_PAUSE_BACKGROUNDS) && window.CHRONOS_PAUSE_BACKGROUNDS.length) {
           calendar.addEventSource(chronosCloneEvents(window.CHRONOS_PAUSE_BACKGROUNDS));
         }
@@ -460,6 +464,7 @@
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.courses_list') }}">Cours</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.equipment_list') }}">Équipements</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.software_list') }}">Logiciels</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.configuration') }}">Configuration</a></li>
           </ul>
         </div>
       </div>

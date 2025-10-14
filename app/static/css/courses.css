@@ -57,7 +57,7 @@
 }
 
 .course-detail-layout #course-calendar {
-  min-height: 520px;
+  min-height: 767px;
 }
 
 .course-detail-layout .list-unstyled li + li {

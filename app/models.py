@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time
 from math import ceil
 from typing import List, Optional, Set
@@ -79,6 +80,43 @@ def default_end_time() -> time:
 class TimeStampedModel:
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ClosingPeriod(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    label: Mapped[Optional[str]] = mapped_column(String(255))
+
+    __table_args__ = (
+        CheckConstraint("end_date >= start_date", name="chk_closing_period_range"),
+    )
+
+    @classmethod
+    def ordered_periods(cls) -> List["ClosingPeriod"]:
+        return cls.query.order_by(cls.start_date, cls.end_date, cls.id).all()
+
+    @classmethod
+    def is_day_closed(cls, day: date) -> bool:
+        return (
+            cls.query.filter(cls.start_date <= day, cls.end_date >= day).first()
+            is not None
+        )
+
+    @classmethod
+    def overlaps(cls, start: date, end: date) -> bool:
+        if start > end:
+            start, end = end, start
+        return (
+            cls.query.filter(cls.start_date <= end, cls.end_date >= start).first()
+            is not None
+        )
+
+    def as_range(self) -> tuple[date, date]:
+        return (self.start_date, self.end_date)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"ClosingPeriod<{self.start_date}→{self.end_date}>"
 
 
 class Teacher(db.Model, TimeStampedModel):
@@ -188,6 +226,13 @@ class Course(db.Model, TimeStampedModel):
     )
     sessions: Mapped[List["Session"]] = relationship(back_populates="course", cascade="all, delete-orphan")
 
+    generation_logs: Mapped[List["CourseScheduleLog"]] = relationship(
+        "CourseScheduleLog",
+        back_populates="course",
+        cascade="all, delete-orphan",
+        order_by="CourseScheduleLog.created_at.desc()",
+    )
+
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
@@ -254,6 +299,10 @@ class Course(db.Model, TimeStampedModel):
         else:
             multiplier = group_total or 1
         return self.sessions_required * self.session_length_hours * multiplier
+
+    @property
+    def latest_generation_log(self) -> "CourseScheduleLog | None":
+        return self.generation_logs[0] if self.generation_logs else None
 
 
 class Session(db.Model, TimeStampedModel):
@@ -354,6 +403,62 @@ class Session(db.Model, TimeStampedModel):
         return max(int(delta.total_seconds() // 3600), 0)
 
 
+class CourseScheduleLog(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="success")
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    messages: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    window_start: Mapped[Optional[date]] = mapped_column(Date)
+    window_end: Mapped[Optional[date]] = mapped_column(Date)
+
+    course: Mapped[Course] = relationship("Course", back_populates="generation_logs")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('success','warning','error')",
+            name="chk_course_schedule_log_status",
+        ),
+    )
+
+    STATUS_LABELS = {
+        "success": "Succès",
+        "warning": "Avertissement",
+        "error": "Erreur",
+    }
+
+    LEVEL_LABELS = {
+        "info": "Info",
+        "warning": "Avertissement",
+        "error": "Erreur",
+    }
+
+    def parsed_messages(self) -> list[dict[str, str]]:
+        try:
+            payload = json.loads(self.messages or "[]")
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(payload, list):
+            return []
+        normalised: list[dict[str, str]] = []
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            level = str(entry.get("level", "info")).lower()
+            message = str(entry.get("message", "")).strip()
+            if not message:
+                continue
+            normalised.append({"level": level, "message": message})
+        return normalised
+
+    @property
+    def status_label(self) -> str:
+        return self.STATUS_LABELS.get(self.status, self.status)
+
+    def level_label(self, level: str) -> str:
+        return self.LEVEL_LABELS.get(level, level.title())
+
+
 class Equipment(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
@@ -439,6 +544,8 @@ class ClassGroup(db.Model, TimeStampedModel):
     def is_available_on(self, day: datetime | date) -> bool:
         target_date = day.date() if isinstance(day, datetime) else day
         if target_date.weekday() >= 5:
+            return False
+        if ClosingPeriod.is_day_closed(target_date):
             return False
         if target_date.strftime("%Y-%m-%d") in self._unavailable_set():
             return False

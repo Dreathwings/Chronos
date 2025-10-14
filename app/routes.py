@@ -6,14 +6,17 @@ from typing import Iterable, MutableSequence
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 
 from . import db
 from .events import sessions_to_grouped_events
 from .models import (
     COURSE_TYPE_CHOICES,
     ClassGroup,
+    ClosingPeriod,
     Course,
     CourseClassLink,
+    CourseScheduleLog,
     Equipment,
     Room,
     Session,
@@ -40,6 +43,7 @@ bp = Blueprint("main", __name__)
 WORKDAY_START = time(hour=7)
 WORKDAY_END = time(hour=19)
 BACKGROUND_BLOCK_COLOR = "#6c757d"
+CLOSING_PERIOD_COLOR = "rgba(108, 117, 125, 0.45)"
 
 SCHEDULE_SLOT_LOOKUP = {start: end for start, end in SCHEDULE_SLOTS}
 SCHEDULE_SLOT_CHOICES = [
@@ -93,6 +97,22 @@ def _build_default_backgrounds() -> list[dict[str, object]]:
 
 
 DEFAULT_WORKDAY_BACKGROUNDS = _build_default_backgrounds()
+
+
+def _closing_period_backgrounds() -> list[dict[str, object]]:
+    backgrounds: list[dict[str, object]] = []
+    periods = ClosingPeriod.ordered_periods()
+    for period in periods:
+        backgrounds.append(
+            {
+                "start": period.start_date.strftime("%Y-%m-%dT00:00:00"),
+                "end": (period.end_date + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"),
+                "display": "background",
+                "overlap": False,
+                "color": CLOSING_PERIOD_COLOR,
+            }
+        )
+    return backgrounds
 
 
 def _unique_entities(entities: Iterable[object]) -> list[object]:
@@ -219,6 +239,7 @@ def inject_calendar_defaults() -> dict[str, object]:
     return {
         "default_backgrounds_json": json.dumps(DEFAULT_WORKDAY_BACKGROUNDS),
         "background_block_color": BACKGROUND_BLOCK_COLOR,
+        "closing_backgrounds_json": json.dumps(_closing_period_backgrounds()),
         "schedule_slot_starts_json": json.dumps(slot_starts),
     }
 
@@ -378,6 +399,8 @@ def _validate_session_constraints(
 ) -> str | None:
     if start_dt.weekday() >= 5:
         return "Les séances doivent être planifiées du lundi au vendredi."
+    if ClosingPeriod.overlaps(start_dt.date(), end_dt.date()):
+        return "L'établissement est fermé sur la période sélectionnée."
     if not fits_in_windows(start_dt.time(), end_dt.time()):
         return "Le créneau choisi dépasse les fenêtres horaires autorisées."
     if not teacher.is_available_during(start_dt, end_dt):
@@ -406,14 +429,21 @@ def _validate_session_constraints(
 
 @bp.route("/", methods=["GET", "POST"])
 def dashboard():
-    courses = Course.query.order_by(Course.priority.desc()).all()
+    courses = (
+        Course.query.options(selectinload(Course.generation_logs))
+        .order_by(Course.priority.desc())
+        .all()
+    )
     teachers = Teacher.query.order_by(Teacher.name).all()
     rooms = Room.query.order_by(Room.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    equipments = Equipment.query.order_by(Equipment.name).all()
+    softwares = Software.query.order_by(Software.name).all()
 
     course_class_options: dict[int, list[dict[str, str]]] = {}
     course_subgroup_hints: dict[int, bool] = {}
     course_types: dict[int, str] = {}
+    global_search_index: list[dict[str, str]] = []
     for course in courses:
         options: list[dict[str, str]] = []
         links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
@@ -459,6 +489,70 @@ def dashboard():
                         has_subgroups = True
         course_class_options[course.id] = options
         course_subgroup_hints[course.id] = has_subgroups
+        global_search_index.append(
+            {
+                "label": course.name,
+                "type": "Cours",
+                "type_label": "Cours",
+                "url": url_for("main.course_detail", course_id=course.id),
+                "tokens": f"{course.name.lower()} cours",
+            }
+        )
+
+    for teacher in teachers:
+        global_search_index.append(
+            {
+                "label": teacher.name,
+                "type": "Enseignant",
+                "type_label": "Enseignant",
+                "url": url_for("main.teacher_detail", teacher_id=teacher.id),
+                "tokens": f"{teacher.name.lower()} enseignant",
+            }
+        )
+
+    for room in rooms:
+        global_search_index.append(
+            {
+                "label": room.name,
+                "type": "Salle",
+                "type_label": "Salle",
+                "url": url_for("main.room_detail", room_id=room.id),
+                "tokens": f"{room.name.lower()} salle",
+            }
+        )
+
+    for class_group in class_groups:
+        global_search_index.append(
+            {
+                "label": class_group.name,
+                "type": "Classe",
+                "type_label": "Classe",
+                "url": url_for("main.class_detail", class_id=class_group.id),
+                "tokens": f"{class_group.name.lower()} classe",
+            }
+        )
+
+    for equipment in equipments:
+        global_search_index.append(
+            {
+                "label": equipment.name,
+                "type": "Équipement",
+                "type_label": "Équipement",
+                "url": url_for("main.equipment_list"),
+                "tokens": f"{equipment.name.lower()} equipement",
+            }
+        )
+
+    for software in softwares:
+        global_search_index.append(
+            {
+                "label": software.name,
+                "type": "Logiciel",
+                "type_label": "Logiciel",
+                "url": url_for("main.software_list"),
+                "tokens": f"{software.name.lower()} logiciel",
+            }
+        )
 
     if request.method == "POST":
         if request.form.get("form") == "quick-session":
@@ -556,7 +650,7 @@ def dashboard():
                 db.session.commit()
                 flash(f"{total_created} séance(s) générée(s).", "success")
             else:
-                db.session.rollback()
+                db.session.commit()
                 flash("Aucune séance n'a pu être générée sur la période indiquée.", "info")
 
             if error_messages:
@@ -595,6 +689,7 @@ def dashboard():
         required_total = course.total_required_hours
         scheduled_total = course.scheduled_hours
         remaining = max(required_total - scheduled_total, 0)
+        latest_log = course.latest_generation_log
         course_summaries.append(
             {
                 "course": course,
@@ -603,6 +698,9 @@ def dashboard():
                 "scheduled": scheduled_total,
                 "remaining": remaining,
                 "priority": course.priority,
+                "latest_status": latest_log.status if latest_log else "none",
+                "latest_summary": latest_log.summary if latest_log and latest_log.summary else None,
+                "latest_timestamp": latest_log.created_at if latest_log else None,
             }
         )
 
@@ -620,6 +718,30 @@ def dashboard():
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         course_type_labels=COURSE_TYPE_LABELS,
+        global_search_index_json=json.dumps(global_search_index, ensure_ascii=False),
+        status_labels=CourseScheduleLog.STATUS_LABELS,
+    )
+
+
+@bp.route("/config", methods=["GET", "POST"])
+def configuration():
+    if request.method == "POST":
+        if request.form.get("form") == "closing-periods":
+            ranges = parse_unavailability_ranges(request.form.get("closing_periods"))
+            ClosingPeriod.query.delete()
+            for start, end in ranges:
+                db.session.add(ClosingPeriod(start_date=start, end_date=end))
+            db.session.commit()
+            flash("Périodes de fermeture mises à jour", "success")
+        return redirect(url_for("main.configuration"))
+
+    periods = ClosingPeriod.ordered_periods()
+    closing_ranges = ranges_as_payload(period.as_range() for period in periods)
+
+    return render_template(
+        "config/index.html",
+        closing_periods=closing_ranges,
+        closing_period_records=periods,
     )
 
 
@@ -752,6 +874,11 @@ def teacher_detail(teacher_id: int):
             if availability.start_time <= slot_start and slot_end <= availability.end_time:
                 key = f"{availability.weekday}-{slot_start.strftime('%H:%M')}"
                 selected_slots.add(key)
+
+    if not selected_slots:
+        for weekday in range(5):
+            for slot_start, _ in SCHEDULE_SLOTS:
+                selected_slots.add(f"{weekday}-{slot_start.strftime('%H:%M')}")
 
     backgrounds = _teacher_unavailability_backgrounds(teacher)
 
@@ -1008,7 +1135,10 @@ def courses_list():
 
 @bp.route("/matiere/<int:course_id>", methods=["GET", "POST"])
 def course_detail(course_id: int):
-    course = Course.query.get_or_404(course_id)
+    course = (
+        Course.query.options(selectinload(Course.generation_logs))
+        .get_or_404(course_id)
+    )
     equipments = Equipment.query.order_by(Equipment.name).all()
     softwares = Software.query.order_by(Software.name).all()
     teachers = Teacher.query.order_by(Teacher.name).all()
@@ -1067,12 +1197,13 @@ def course_detail(course_id: int):
         elif form_name == "auto-schedule":
             try:
                 created_sessions = generate_schedule(course)
+                db.session.commit()
                 if created_sessions:
-                    db.session.commit()
                     flash(f"{len(created_sessions)} séance(s) générée(s)", "success")
                 else:
                     flash("Aucune séance générée", "info")
             except ValueError as exc:
+                db.session.commit()
                 flash(str(exc), "danger")
         elif form_name == "update-class-teachers":
             if course.is_cm:
@@ -1181,6 +1312,24 @@ def course_detail(course_id: int):
         return redirect(url_for("main.course_detail", course_id=course_id))
 
     events = sessions_to_grouped_events(course.sessions)
+    latest_generation_log = (
+        CourseScheduleLog.query.filter_by(course_id=course.id)
+        .order_by(CourseScheduleLog.created_at.desc())
+        .first()
+    )
+
+    status_badges = {
+        "success": "bg-success",
+        "warning": "bg-warning text-dark",
+        "error": "bg-danger",
+        "none": "bg-secondary",
+    }
+    level_badges = {
+        "info": "bg-secondary",
+        "warning": "bg-warning text-dark",
+        "error": "bg-danger",
+    }
+
     return render_template(
         "courses/detail.html",
         course=course,
@@ -1192,6 +1341,10 @@ def course_detail(course_id: int):
         class_links_map=class_links_map,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
+        latest_generation_log=latest_generation_log,
+        status_labels=CourseScheduleLog.STATUS_LABELS,
+        status_badges=status_badges,
+        level_badges=level_badges,
     )
 
 
