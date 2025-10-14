@@ -6,6 +6,7 @@ from typing import Iterable, MutableSequence
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 
 from . import db
 from .events import sessions_to_grouped_events
@@ -15,6 +16,7 @@ from .models import (
     ClosingPeriod,
     Course,
     CourseClassLink,
+    CourseScheduleLog,
     Equipment,
     Room,
     Session,
@@ -427,14 +429,21 @@ def _validate_session_constraints(
 
 @bp.route("/", methods=["GET", "POST"])
 def dashboard():
-    courses = Course.query.order_by(Course.priority.desc()).all()
+    courses = (
+        Course.query.options(selectinload(Course.generation_logs))
+        .order_by(Course.priority.desc())
+        .all()
+    )
     teachers = Teacher.query.order_by(Teacher.name).all()
     rooms = Room.query.order_by(Room.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    equipments = Equipment.query.order_by(Equipment.name).all()
+    softwares = Software.query.order_by(Software.name).all()
 
     course_class_options: dict[int, list[dict[str, str]]] = {}
     course_subgroup_hints: dict[int, bool] = {}
     course_types: dict[int, str] = {}
+    global_search_index: list[dict[str, str]] = []
     for course in courses:
         options: list[dict[str, str]] = []
         links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
@@ -480,6 +489,70 @@ def dashboard():
                         has_subgroups = True
         course_class_options[course.id] = options
         course_subgroup_hints[course.id] = has_subgroups
+        global_search_index.append(
+            {
+                "label": course.name,
+                "type": "Cours",
+                "type_label": "Cours",
+                "url": url_for("main.course_detail", course_id=course.id),
+                "tokens": f"{course.name.lower()} cours",
+            }
+        )
+
+    for teacher in teachers:
+        global_search_index.append(
+            {
+                "label": teacher.name,
+                "type": "Enseignant",
+                "type_label": "Enseignant",
+                "url": url_for("main.teacher_detail", teacher_id=teacher.id),
+                "tokens": f"{teacher.name.lower()} enseignant",
+            }
+        )
+
+    for room in rooms:
+        global_search_index.append(
+            {
+                "label": room.name,
+                "type": "Salle",
+                "type_label": "Salle",
+                "url": url_for("main.room_detail", room_id=room.id),
+                "tokens": f"{room.name.lower()} salle",
+            }
+        )
+
+    for class_group in class_groups:
+        global_search_index.append(
+            {
+                "label": class_group.name,
+                "type": "Classe",
+                "type_label": "Classe",
+                "url": url_for("main.class_detail", class_id=class_group.id),
+                "tokens": f"{class_group.name.lower()} classe",
+            }
+        )
+
+    for equipment in equipments:
+        global_search_index.append(
+            {
+                "label": equipment.name,
+                "type": "Équipement",
+                "type_label": "Équipement",
+                "url": url_for("main.equipment_list"),
+                "tokens": f"{equipment.name.lower()} equipement",
+            }
+        )
+
+    for software in softwares:
+        global_search_index.append(
+            {
+                "label": software.name,
+                "type": "Logiciel",
+                "type_label": "Logiciel",
+                "url": url_for("main.software_list"),
+                "tokens": f"{software.name.lower()} logiciel",
+            }
+        )
 
     if request.method == "POST":
         if request.form.get("form") == "quick-session":
@@ -577,7 +650,7 @@ def dashboard():
                 db.session.commit()
                 flash(f"{total_created} séance(s) générée(s).", "success")
             else:
-                db.session.rollback()
+                db.session.commit()
                 flash("Aucune séance n'a pu être générée sur la période indiquée.", "info")
 
             if error_messages:
@@ -616,6 +689,7 @@ def dashboard():
         required_total = course.total_required_hours
         scheduled_total = course.scheduled_hours
         remaining = max(required_total - scheduled_total, 0)
+        latest_log = course.latest_generation_log
         course_summaries.append(
             {
                 "course": course,
@@ -624,6 +698,9 @@ def dashboard():
                 "scheduled": scheduled_total,
                 "remaining": remaining,
                 "priority": course.priority,
+                "latest_status": latest_log.status if latest_log else "none",
+                "latest_summary": latest_log.summary if latest_log and latest_log.summary else None,
+                "latest_timestamp": latest_log.created_at if latest_log else None,
             }
         )
 
@@ -641,6 +718,8 @@ def dashboard():
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         course_type_labels=COURSE_TYPE_LABELS,
+        global_search_index_json=json.dumps(global_search_index, ensure_ascii=False),
+        status_labels=CourseScheduleLog.STATUS_LABELS,
     )
 
 
@@ -1051,7 +1130,10 @@ def courses_list():
 
 @bp.route("/matiere/<int:course_id>", methods=["GET", "POST"])
 def course_detail(course_id: int):
-    course = Course.query.get_or_404(course_id)
+    course = (
+        Course.query.options(selectinload(Course.generation_logs))
+        .get_or_404(course_id)
+    )
     equipments = Equipment.query.order_by(Equipment.name).all()
     softwares = Software.query.order_by(Software.name).all()
     teachers = Teacher.query.order_by(Teacher.name).all()
@@ -1110,12 +1192,13 @@ def course_detail(course_id: int):
         elif form_name == "auto-schedule":
             try:
                 created_sessions = generate_schedule(course)
+                db.session.commit()
                 if created_sessions:
-                    db.session.commit()
                     flash(f"{len(created_sessions)} séance(s) générée(s)", "success")
                 else:
                     flash("Aucune séance générée", "info")
             except ValueError as exc:
+                db.session.commit()
                 flash(str(exc), "danger")
         elif form_name == "update-class-teachers":
             if course.is_cm:
@@ -1224,6 +1307,25 @@ def course_detail(course_id: int):
         return redirect(url_for("main.course_detail", course_id=course_id))
 
     events = sessions_to_grouped_events(course.sessions)
+    generation_logs = (
+        CourseScheduleLog.query.filter_by(course_id=course.id)
+        .order_by(CourseScheduleLog.created_at.desc())
+        .limit(5)
+        .all()
+    )
+
+    status_badges = {
+        "success": "bg-success",
+        "warning": "bg-warning text-dark",
+        "error": "bg-danger",
+        "none": "bg-secondary",
+    }
+    level_badges = {
+        "info": "bg-secondary",
+        "warning": "bg-warning text-dark",
+        "error": "bg-danger",
+    }
+
     return render_template(
         "courses/detail.html",
         course=course,
@@ -1235,6 +1337,10 @@ def course_detail(course_id: int):
         class_links_map=class_links_map,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
+        generation_logs=generation_logs,
+        status_labels=CourseScheduleLog.STATUS_LABELS,
+        status_badges=status_badges,
+        level_badges=level_badges,
     )
 
 

@@ -233,6 +233,44 @@
   </div>
   <div class="col-xl-8">
     <div class="card shadow-sm mb-4">
+      <div class="card-header bg-dark text-white">Journal de génération</div>
+      <div class="card-body">
+        {% if generation_logs %}
+        <div class="vstack gap-3">
+          {% for log in generation_logs %}
+          <div class="border rounded p-3">
+            <div class="d-flex justify-content-between align-items-start gap-3">
+              <div>
+                <div class="fw-semibold">{{ log.summary or 'Résultat enregistré' }}</div>
+                <div class="text-muted small">
+                  {{ log.created_at.strftime('%d/%m/%Y %H:%M') }}
+                  {% if log.window_start and log.window_end %}
+                  — Période : {{ log.window_start }} → {{ log.window_end }}
+                  {% endif %}
+                </div>
+              </div>
+              <span class="badge {{ status_badges.get(log.status, 'bg-secondary') }}">{{ status_labels.get(log.status, log.status|title) }}</span>
+            </div>
+            {% set messages = log.parsed_messages() %}
+            {% if messages %}
+            <ul class="list-unstyled small mb-0 mt-3">
+              {% for entry in messages %}
+              <li class="d-flex align-items-start gap-2 mb-1">
+                <span class="badge {{ level_badges.get(entry.level, 'bg-secondary') }}">{{ log.level_label(entry.level) }}</span>
+                <span>{{ entry.message }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted mb-0 small">Aucune génération enregistrée pour ce cours.</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="card shadow-sm mb-4">
       <div class="card-header bg-info text-white">Ajouter une séance manuelle</div>
       <div class="card-body">
         {% if teachers and rooms and course.class_links %}

@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+import json
+import logging
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, List, Optional, Set
 
 from flask import current_app
 
 from . import db
-from .models import ClassGroup, Course, CourseClassLink, Room, Session, Teacher
+from .models import (
+    ClassGroup,
+    Course,
+    CourseClassLink,
+    CourseScheduleLog,
+    Room,
+    Session,
+    Teacher,
+)
 
 # Working windows respecting pauses
 WORKING_WINDOWS: List[tuple[time, time]] = [
@@ -46,6 +56,99 @@ def _build_extended_breaks() -> set[tuple[time, time]]:
 EXTENDED_BREAKS = _build_extended_breaks()
 
 START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
+
+
+class ScheduleReporter:
+    LEVELS = {
+        "info": logging.INFO,
+        "warning": logging.WARNING,
+        "error": logging.ERROR,
+    }
+
+    def __init__(
+        self,
+        course: Course,
+        *,
+        window_start: date | None = None,
+        window_end: date | None = None,
+    ) -> None:
+        self.course = course
+        self.window_start = window_start
+        self.window_end = window_end
+        self.entries: list[dict[str, str]] = []
+        self.status = "success"
+        self.summary: str | None = None
+        self._finalised = False
+        self._record: CourseScheduleLog | None = None
+
+    def set_window(self, start: date, end: date) -> None:
+        self.window_start = start
+        self.window_end = end
+        self.info(f"Fenêtre de planification : {start} → {end}")
+
+    def info(self, message: str) -> None:
+        self._add_entry("info", message)
+
+    def warning(self, message: str) -> None:
+        self._add_entry("warning", message)
+        if self.status != "error":
+            self.status = "warning"
+
+    def error(self, message: str) -> None:
+        self._add_entry("error", message)
+        self.status = "error"
+
+    def session_created(self, session: Session) -> None:
+        start_label = session.start_time.strftime("%d/%m/%Y %H:%M")
+        end_label = session.end_time.strftime("%H:%M")
+        attendees = ", ".join(session.attendee_names())
+        teacher_name = session.teacher.name if session.teacher else "Aucun enseignant"
+        room_name = session.room.name if session.room else "Aucune salle"
+        duration = session.duration_hours
+        self.info(
+            f"Séance planifiée le {start_label} → {end_label} ({duration} h)"
+            f" — {attendees} avec {teacher_name} en salle {room_name}"
+        )
+
+    def finalise(self, created_count: int) -> CourseScheduleLog:
+        if self._finalised and self._record is not None:
+            return self._record
+        if self.summary is None:
+            if created_count:
+                if self.status == "success":
+                    self.summary = f"{created_count} séance(s) générée(s)"
+                else:
+                    self.summary = (
+                        f"{created_count} séance(s) générée(s) avec avertissements"
+                    )
+            else:
+                if self.status == "success":
+                    self.summary = "Aucune séance générée"
+                else:
+                    self.summary = "Aucune séance générée — vérifier les avertissements"
+
+        log = CourseScheduleLog(
+            course=self.course,
+            status=self.status,
+            summary=self.summary,
+            messages=json.dumps(self.entries, ensure_ascii=False),
+            window_start=self.window_start,
+            window_end=self.window_end,
+        )
+        db.session.add(log)
+        self._finalised = True
+        self._record = log
+        return log
+
+    def _add_entry(self, level: str, message: str) -> None:
+        text = message.strip()
+        if not text:
+            return
+        self.entries.append({"level": level, "message": text})
+        logger = getattr(current_app, "logger", None)
+        if logger is not None:
+            log_level = self.LEVELS.get(level, logging.INFO)
+            logger.log(log_level, "[%s] %s", self.course.name, text)
 
 
 def daterange(start: date, end: date) -> Iterable[date]:
@@ -586,25 +689,62 @@ def generate_schedule(
     window_start: date | None = None,
     window_end: date | None = None,
 ) -> list[Session]:
-    schedule_start, schedule_end = _resolve_schedule_window(course, window_start, window_end)
-    if not course.classes:
-        raise ValueError("Associez au moins une classe au cours avant de planifier.")
-
+    reporter = ScheduleReporter(course)
     created_sessions: list[Session] = []
 
+    try:
+        schedule_start, schedule_end = _resolve_schedule_window(
+            course, window_start, window_end
+        )
+        reporter.set_window(schedule_start, schedule_end)
+    except ValueError as exc:
+        reporter.error(str(exc))
+        reporter.summary = str(exc)
+        reporter.finalise(len(created_sessions))
+        raise
+
+    if not course.classes:
+        message = "Associez au moins une classe au cours avant de planifier."
+        reporter.error(message)
+        reporter.summary = message
+        reporter.finalise(0)
+        raise ValueError(message)
+
+    reporter.info(
+        f"Durée cible des séances : {course.session_length_hours} h — "
+        f"{course.sessions_required} occurrence(s) par groupe"
+    )
+
+    created_sessions = []
     slot_length_hours = max(int(course.session_length_hours), 1)
 
     links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
+    if links:
+        reporter.info(
+            "Classes associées : "
+            + ", ".join(link.class_group.name for link in links)
+        )
+    else:
+        reporter.warning("Aucune classe n'est associée au cours.")
     if course.is_cm:
         class_groups = [link.class_group for link in links]
         if not class_groups:
-            raise ValueError("Associez au moins une classe au cours avant de planifier.")
+            message = "Associez au moins une classe au cours avant de planifier."
+            reporter.error(message)
+            reporter.summary = message
+            reporter.finalise(0)
+            raise ValueError(message)
         target_ids = {group.id for group in class_groups}
         existing_day_hours = _cm_existing_hours_by_day(course, target_ids)
         total_required = course.sessions_required * course.session_length_hours
         already_scheduled = sum(existing_day_hours.values())
         hours_remaining = max(total_required - already_scheduled, 0)
+        reporter.info(
+            f"Heures requises : {total_required} h — déjà planifiées : {already_scheduled} h"
+        )
         if hours_remaining == 0:
+            reporter.info("Toutes les heures requises sont déjà planifiées.")
+            reporter.finalise(len(created_sessions))
             return created_sessions
         available_days = [
             day
@@ -612,12 +752,10 @@ def generate_schedule(
             if day.weekday() < 5 and all(group.is_available_on(day) for group in class_groups)
         ]
         if not available_days:
-            current_app.logger.warning(
-                "Aucune journée commune disponible pour %s entre %s et %s",
-                course.name,
-                schedule_start,
-                schedule_end,
+            reporter.warning(
+                "Aucune journée commune disponible pour les classes sélectionnées"
             )
+            reporter.finalise(len(created_sessions))
             return created_sessions
         per_day_hours = {day: existing_day_hours.get(day, 0) for day in available_days}
         day_indices = {day: index for index, day in enumerate(available_days)}
@@ -661,6 +799,8 @@ def generate_schedule(
                 if not block_sessions:
                     continue
                 created_sessions.extend(block_sessions)
+                for session in block_sessions:
+                    reporter.session_created(session)
                 block_hours = sum(session.duration_hours for session in block_sessions)
                 per_day_hours[day] += block_hours
                 hours_remaining = max(hours_remaining - block_hours, 0)
@@ -672,11 +812,11 @@ def generate_schedule(
                 break
 
         if hours_remaining > 0:
-            current_app.logger.warning(
-                "Impossible de planifier %s heure(s) pour %s (cours magistral)",
-                hours_remaining,
-                course.name,
+            reporter.warning(
+                f"Impossible de planifier {hours_remaining} heure(s) supplémentaire(s) (cours magistral)"
             )
+        reporter.info(f"Total de séances générées : {len(created_sessions)}")
+        reporter.finalise(len(created_sessions))
         return created_sessions
     for link in links:
         class_group = link.class_group
@@ -690,12 +830,8 @@ def generate_schedule(
                 if day.weekday() < 5 and class_group.is_available_on(day)
             ]
             if not available_days:
-                current_app.logger.warning(
-                    "Aucune journée disponible pour %s (%s) entre %s et %s",
-                    course.name,
-                    class_group.name,
-                    schedule_start,
-                    schedule_end,
+                reporter.warning(
+                    f"Aucune journée disponible pour {class_group.name} sur la période"
                 )
                 continue
 
@@ -748,6 +884,8 @@ def generate_schedule(
                     if not block_sessions:
                         continue
                     created_sessions.extend(block_sessions)
+                    for session in block_sessions:
+                        reporter.session_created(session)
                     block_hours = sum(
                         session.duration_hours for session in block_sessions
                     )
@@ -761,10 +899,9 @@ def generate_schedule(
                     break
 
             if hours_remaining > 0:
-                current_app.logger.warning(
-                    "Impossible de planifier %s heure(s) pour %s (%s)",
-                    hours_remaining,
-                    course.name,
-                    class_group.name,
+                reporter.warning(
+                    f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
                 )
+    reporter.info(f"Total de séances générées : {len(created_sessions)}")
+    reporter.finalise(len(created_sessions))
     return created_sessions

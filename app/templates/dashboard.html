@@ -8,6 +8,13 @@
 {% block content %}
 <div class="row g-4 dashboard-layout">
   <div class="col-lg-7">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <label for="dashboard-global-search" class="form-label text-uppercase small fw-semibold mb-2">Recherche globale</label>
+        <input type="search" class="form-control" id="dashboard-global-search" placeholder="Rechercher un cours, une salle, une classe..." autocomplete="off">
+        <div class="list-group mt-3 d-none" id="global-search-results"></div>
+      </div>
+    </div>
     <div class="accordion" id="dashboardAccordion">
       <div class="accordion-item">
     <h2 class="accordion-header" id="dashboardSummaryHeading">
@@ -18,12 +25,34 @@
     <div id="dashboardSummary" class="accordion-collapse collapse show" aria-labelledby="dashboardSummaryHeading" data-bs-parent="#dashboardAccordion">
       <div class="accordion-body">
         {% if course_summaries %}
-        <div class="list-group list-group-flush">
+        {% set status_badge_classes = {'success': 'bg-success', 'warning': 'bg-warning text-dark', 'error': 'bg-danger', 'none': 'bg-secondary'} %}
+        <div class="row g-2 align-items-center mb-3">
+          <div class="col-md">
+            <input type="search" class="form-control form-control-sm" id="course-summary-search" placeholder="Rechercher un cours..." autocomplete="off">
+          </div>
+          <div class="col-md-auto">
+            <select class="form-select form-select-sm" id="course-status-filter">
+              <option value="all">Tous les statuts</option>
+              <option value="success">Succès</option>
+              <option value="warning">Avertissements</option>
+              <option value="error">Erreurs</option>
+              <option value="none">Jamais généré</option>
+            </select>
+          </div>
+        </div>
+        <div id="course-summary-empty" class="alert alert-info py-2 d-none">Aucun cours ne correspond aux critères.</div>
+        <div class="list-group list-group-flush" data-course-summary-list>
           {% for item in course_summaries %}
           {% set required = item.required %}
           {% set scheduled = item.scheduled %}
           {% set progress = 0 if required == 0 else (scheduled / required * 100) %}
-          <div class="list-group-item px-0">
+          <div
+            class="list-group-item px-0"
+            data-course-summary-item
+            data-course-name="{{ item.course.name|lower|e }}"
+            data-course-summary="{{ (item.latest_summary or '')|lower|e }}"
+            data-generation-status="{{ item.latest_status }}"
+          >
             <div class="d-flex justify-content-between align-items-start">
               <div>
                 <div class="fw-semibold">{{ item.course.name }}</div>
@@ -34,7 +63,14 @@
                   {% endif %}
                 </div>
               </div>
-              <span class="badge bg-light text-dark">Priorité {{ item.priority }}</span>
+              <div class="text-end d-flex flex-column align-items-end gap-1">
+                <span class="badge bg-light text-dark">Priorité {{ item.priority }}</span>
+                {% if item.latest_status != 'none' %}
+                <span class="badge {{ status_badge_classes.get(item.latest_status, 'bg-secondary') }}">{{ status_labels.get(item.latest_status, item.latest_status|title) }}</span>
+                {% else %}
+                <span class="badge {{ status_badge_classes.get('none') }}">Jamais généré</span>
+                {% endif %}
+              </div>
             </div>
             <div class="mt-2">
               <div class="d-flex justify-content-between small text-muted">
@@ -51,6 +87,14 @@
                 <div class="progress-bar{% if item.remaining == 0 and required > 0 %} bg-success{% endif %}" role="progressbar" style="width: {{ progress|round(0, 'floor') }}%"></div>
               </div>
             </div>
+            {% if item.latest_summary %}
+            <div class="text-muted small mt-2">{{ item.latest_summary }}</div>
+            {% elif item.latest_status == 'none' %}
+            <div class="text-muted small mt-2">Jamais généré automatiquement.</div>
+            {% endif %}
+            {% if item.latest_timestamp %}
+            <div class="text-muted small">Dernière génération : {{ item.latest_timestamp.strftime('%d/%m/%Y %H:%M') }}</div>
+            {% endif %}
             <div class="d-flex align-items-center gap-2 mt-3">
               <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.course_detail', course_id=item.course.id) }}">
                 Ouvrir
@@ -276,6 +320,96 @@
       courseSelect.addEventListener('change', refreshClassChoices);
       refreshClassChoices();
     }
+
+    const globalSearchData = {{ global_search_index_json|safe }};
+    const globalSearchInput = document.getElementById('dashboard-global-search');
+    const globalSearchResults = document.getElementById('global-search-results');
+    if (globalSearchInput && globalSearchResults && Array.isArray(globalSearchData)) {
+      const renderGlobalResults = function(query) {
+        globalSearchResults.innerHTML = '';
+        if (!query) {
+          globalSearchResults.classList.add('d-none');
+          return;
+        }
+        const lowered = query.toLowerCase();
+        const matches = globalSearchData.filter(function(item) {
+          return (item.tokens || '').indexOf(lowered) !== -1;
+        }).slice(0, 8);
+        if (!matches.length) {
+          const emptyItem = document.createElement('div');
+          emptyItem.className = 'list-group-item small text-muted';
+          emptyItem.textContent = 'Aucun résultat';
+          globalSearchResults.appendChild(emptyItem);
+          globalSearchResults.classList.remove('d-none');
+          return;
+        }
+        matches.forEach(function(item) {
+          const link = document.createElement('a');
+          link.className = 'list-group-item list-group-item-action';
+          link.href = item.url;
+          link.innerHTML = '<div class="fw-semibold">' + item.label + '</div>' +
+            '<div class="small text-muted">' + item.type_label + '</div>';
+          globalSearchResults.appendChild(link);
+        });
+        globalSearchResults.classList.remove('d-none');
+      };
+
+      globalSearchInput.addEventListener('input', function() {
+        renderGlobalResults(this.value.trim());
+      });
+
+      globalSearchInput.addEventListener('focus', function() {
+        if (this.value) {
+          renderGlobalResults(this.value.trim());
+        }
+      });
+
+      globalSearchInput.addEventListener('blur', function() {
+        setTimeout(function() {
+          globalSearchResults.classList.add('d-none');
+        }, 200);
+      });
+    }
+
+    const summarySearchInput = document.getElementById('course-summary-search');
+    const summaryStatusFilter = document.getElementById('course-status-filter');
+    const summaryList = document.querySelector('[data-course-summary-list]');
+    const summaryItems = summaryList ? Array.from(summaryList.querySelectorAll('[data-course-summary-item]')) : [];
+    const summaryEmptyState = document.getElementById('course-summary-empty');
+
+    function applyCourseSummaryFilters() {
+      const query = summarySearchInput ? summarySearchInput.value.trim().toLowerCase() : '';
+      const statusValue = summaryStatusFilter ? summaryStatusFilter.value : 'all';
+      let visibleCount = 0;
+
+      summaryItems.forEach(function(item) {
+        const itemStatus = item.getAttribute('data-generation-status') || 'none';
+        const itemTokens = (
+          (item.getAttribute('data-course-name') || '') + ' ' +
+          (item.getAttribute('data-course-summary') || '')
+        ).toLowerCase();
+        const matchesQuery = !query || itemTokens.indexOf(query) !== -1;
+        const matchesStatus = statusValue === 'all' || itemStatus === statusValue;
+        if (matchesQuery && matchesStatus) {
+          item.classList.remove('d-none');
+          visibleCount += 1;
+        } else {
+          item.classList.add('d-none');
+        }
+      });
+
+      if (summaryEmptyState) {
+        summaryEmptyState.classList.toggle('d-none', visibleCount !== 0);
+      }
+    }
+
+    if (summarySearchInput) {
+      summarySearchInput.addEventListener('input', applyCourseSummaryFilters);
+    }
+    if (summaryStatusFilter) {
+      summaryStatusFilter.addEventListener('change', applyCourseSummaryFilters);
+    }
+    applyCourseSummaryFilters();
   });
 </script>
 {% endblock %}

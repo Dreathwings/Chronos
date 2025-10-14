@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time
 from math import ceil
 from typing import List, Optional, Set
@@ -225,6 +226,13 @@ class Course(db.Model, TimeStampedModel):
     )
     sessions: Mapped[List["Session"]] = relationship(back_populates="course", cascade="all, delete-orphan")
 
+    generation_logs: Mapped[List["CourseScheduleLog"]] = relationship(
+        "CourseScheduleLog",
+        back_populates="course",
+        cascade="all, delete-orphan",
+        order_by="CourseScheduleLog.created_at.desc()",
+    )
+
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
@@ -291,6 +299,10 @@ class Course(db.Model, TimeStampedModel):
         else:
             multiplier = group_total or 1
         return self.sessions_required * self.session_length_hours * multiplier
+
+    @property
+    def latest_generation_log(self) -> "CourseScheduleLog | None":
+        return self.generation_logs[0] if self.generation_logs else None
 
 
 class Session(db.Model, TimeStampedModel):
@@ -389,6 +401,62 @@ class Session(db.Model, TimeStampedModel):
     def duration_hours(self) -> int:
         delta = self.end_time - self.start_time
         return max(int(delta.total_seconds() // 3600), 0)
+
+
+class CourseScheduleLog(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="success")
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    messages: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    window_start: Mapped[Optional[date]] = mapped_column(Date)
+    window_end: Mapped[Optional[date]] = mapped_column(Date)
+
+    course: Mapped[Course] = relationship("Course", back_populates="generation_logs")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('success','warning','error')",
+            name="chk_course_schedule_log_status",
+        ),
+    )
+
+    STATUS_LABELS = {
+        "success": "Succès",
+        "warning": "Avertissement",
+        "error": "Erreur",
+    }
+
+    LEVEL_LABELS = {
+        "info": "Info",
+        "warning": "Avertissement",
+        "error": "Erreur",
+    }
+
+    def parsed_messages(self) -> list[dict[str, str]]:
+        try:
+            payload = json.loads(self.messages or "[]")
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(payload, list):
+            return []
+        normalised: list[dict[str, str]] = []
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            level = str(entry.get("level", "info")).lower()
+            message = str(entry.get("message", "")).strip()
+            if not message:
+                continue
+            normalised.append({"level": level, "message": message})
+        return normalised
+
+    @property
+    def status_label(self) -> str:
+        return self.STATUS_LABELS.get(self.status, self.status)
+
+    def level_label(self, level: str) -> str:
+        return self.LEVEL_LABELS.get(level, level.title())
 
 
 class Equipment(db.Model):
