@@ -41,7 +41,12 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     from .routes import bp as main_bp
 
     app.register_blueprint(main_bp, url_prefix=url_prefix or None)
-
+    if url_prefix:
+        app.add_url_rule(
+            "/static/<path:filename>",
+            endpoint="static_fallback",
+            view_func=app.send_static_file,
+        )
     @app.cli.command("seed")
     @with_appcontext
     def seed() -> None:
