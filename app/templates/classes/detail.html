@@ -1,8 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}{{ class_group.name }} — Classe{% endblock %}
 
-{% block head %}
-  {{ super() }}
+{% block stylesheets %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/classes.css') }}">
 {% endblock %}
 

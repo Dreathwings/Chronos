@@ -1,8 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Logiciels — Chronos{% endblock %}
 
-{% block head %}
-  {{ super() }}
+{% block stylesheets %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/software.css') }}">
 {% endblock %}
 

@@ -1,8 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Cours — Chronos{% endblock %}
 
-{% block head %}
-  {{ super() }}
+{% block stylesheets %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/courses.css') }}">
 {% endblock %}
 

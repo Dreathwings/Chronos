@@ -2,8 +2,7 @@
 {% import 'teachers/_macros.html' as teacher_macros %}
 {% block title %}{{ teacher.name }} — Enseignant{% endblock %}
 
-{% block head %}
-  {{ super() }}
+{% block stylesheets %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/teachers.css') }}">
 {% endblock %}
 
