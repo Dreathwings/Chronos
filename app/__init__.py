@@ -15,14 +15,11 @@ migrate = Migrate()
 
 def create_app(config_class: type[Config] = Config) -> Flask:
     url_prefix = _normalise_prefix(getattr(config_class, "URL_PREFIX", ""))
-
-    app.config.from_object(config_class)
-    app.config["URL_PREFIX"] = url_prefix
-    app.config["APPLICATION_ROOT"] = url_prefix or "/"
     
     app = Flask(__name__)
     app.config.from_object(config_class)
-
+    app.config["URL_PREFIX"] = url_prefix
+    app.config["APPLICATION_ROOT"] = url_prefix or "/"
     db.init_app(app)
     migrate.init_app(app, db)
 
