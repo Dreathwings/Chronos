@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% import 'teachers/_macros.html' as macros %}
+
+{% block title %}Configuration — Chronos{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1 class="h3 mb-0">Configuration</h1>
+</div>
+<form method="post" class="vstack gap-4">
+  <input type="hidden" name="form" value="closing-periods">
+  <div class="card">
+    <div class="card-header">
+      <h2 class="h5 mb-0">Périodes de fermeture</h2>
+    </div>
+    <div class="card-body vstack gap-3">
+      <p class="text-muted mb-0">
+        Définissez les périodes pendant lesquelles l'établissement est fermé. Ces dates seront prises en compte lors de la
+        planification et empêcheront la création de séances.
+      </p>
+      {{ macros.unavailability_ranges_widget(
+        'closing_periods',
+        closing_periods,
+        "Périodes de fermeture",
+        "Ajoutez une ou plusieurs plages pour indiquer les jours où aucune séance ne peut être programmée."
+      ) }}
+      {% if closing_period_records %}
+      <div>
+        <h3 class="h6">Périodes enregistrées</h3>
+        <ul class="mb-0">
+          {% for period in closing_period_records %}
+          <li>
+            {% if period.start_date == period.end_date %}
+              Fermeture le {{ period.start_date.strftime('%d/%m/%Y') }}
+            {% else %}
+              Fermeture du {{ period.start_date.strftime('%d/%m/%Y') }} au {{ period.end_date.strftime('%d/%m/%Y') }}
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">Aucune période de fermeture n'est définie pour le moment.</p>
+      {% endif %}
+    </div>
+    <div class="card-footer text-end">
+      <button type="submit" class="btn btn-primary">Enregistrer</button>
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+  {% include 'teachers/_unavailability_script.html' %}
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof setupUnavailabilityWidgets === 'function') {
+        setupUnavailabilityWidgets();
+      }
+    });
+  </script>
+{% endblock %}

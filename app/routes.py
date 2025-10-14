@@ -12,6 +12,7 @@ from .events import sessions_to_grouped_events
 from .models import (
     COURSE_TYPE_CHOICES,
     ClassGroup,
+    ClosingPeriod,
     Course,
     CourseClassLink,
     Equipment,
@@ -378,6 +379,8 @@ def _validate_session_constraints(
 ) -> str | None:
     if start_dt.weekday() >= 5:
         return "Les séances doivent être planifiées du lundi au vendredi."
+    if ClosingPeriod.overlaps(start_dt.date(), end_dt.date()):
+        return "L'établissement est fermé sur la période sélectionnée."
     if not fits_in_windows(start_dt.time(), end_dt.time()):
         return "Le créneau choisi dépasse les fenêtres horaires autorisées."
     if not teacher.is_available_during(start_dt, end_dt):
@@ -620,6 +623,28 @@ def dashboard():
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         course_type_labels=COURSE_TYPE_LABELS,
+    )
+
+
+@bp.route("/config", methods=["GET", "POST"])
+def configuration():
+    if request.method == "POST":
+        if request.form.get("form") == "closing-periods":
+            ranges = parse_unavailability_ranges(request.form.get("closing_periods"))
+            ClosingPeriod.query.delete()
+            for start, end in ranges:
+                db.session.add(ClosingPeriod(start_date=start, end_date=end))
+            db.session.commit()
+            flash("Périodes de fermeture mises à jour", "success")
+        return redirect(url_for("main.configuration"))
+
+    periods = ClosingPeriod.ordered_periods()
+    closing_ranges = ranges_as_payload(period.as_range() for period in periods)
+
+    return render_template(
+        "config/index.html",
+        closing_periods=closing_ranges,
+        closing_period_records=periods,
     )
 
 

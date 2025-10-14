@@ -155,6 +155,25 @@ INSERT INTO `course_teacher` (`course_id`, `teacher_id`) VALUES
 -- --------------------------------------------------------
 
 --
+-- Structure de la table `closing_period`
+--
+
+CREATE TABLE `closing_period` (
+  `id` int(11) NOT NULL,
+  `start_date` date NOT NULL,
+  `end_date` date NOT NULL,
+  `label` varchar(255) DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Déchargement des données de la table `closing_period`
+--
+
+-- --------------------------------------------------------
+
+--
 -- Structure de la table `equipment`
 --
 
@@ -479,6 +498,14 @@ ALTER TABLE `course_teacher`
   ADD KEY `teacher_id` (`teacher_id`);
 
 --
+-- Index pour la table `closing_period`
+--
+ALTER TABLE `closing_period`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `closing_period_start_idx` (`start_date`),
+  ADD KEY `closing_period_end_idx` (`end_date`);
+
+--
 -- Index pour la table `equipment`
 --
 ALTER TABLE `equipment`
@@ -551,6 +578,12 @@ ALTER TABLE `class_group`
 -- AUTO_INCREMENT pour la table `course`
 --
 ALTER TABLE `course`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT pour la table `closing_period`
+--
+ALTER TABLE `closing_period`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --

@@ -81,6 +81,43 @@ class TimeStampedModel:
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class ClosingPeriod(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    label: Mapped[Optional[str]] = mapped_column(String(255))
+
+    __table_args__ = (
+        CheckConstraint("end_date >= start_date", name="chk_closing_period_range"),
+    )
+
+    @classmethod
+    def ordered_periods(cls) -> List["ClosingPeriod"]:
+        return cls.query.order_by(cls.start_date, cls.end_date, cls.id).all()
+
+    @classmethod
+    def is_day_closed(cls, day: date) -> bool:
+        return (
+            cls.query.filter(cls.start_date <= day, cls.end_date >= day).first()
+            is not None
+        )
+
+    @classmethod
+    def overlaps(cls, start: date, end: date) -> bool:
+        if start > end:
+            start, end = end, start
+        return (
+            cls.query.filter(cls.start_date <= end, cls.end_date >= start).first()
+            is not None
+        )
+
+    def as_range(self) -> tuple[date, date]:
+        return (self.start_date, self.end_date)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"ClosingPeriod<{self.start_date}→{self.end_date}>"
+
+
 class Teacher(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
@@ -439,6 +476,8 @@ class ClassGroup(db.Model, TimeStampedModel):
     def is_available_on(self, day: datetime | date) -> bool:
         target_date = day.date() if isinstance(day, datetime) else day
         if target_date.weekday() >= 5:
+            return False
+        if ClosingPeriod.is_day_closed(target_date):
             return False
         if target_date.strftime("%Y-%m-%d") in self._unavailable_set():
             return False
