@@ -51,6 +51,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_class_teacher_columns()
         _ensure_course_type_column()
         _ensure_course_semester_column()
+        _ensure_course_course_name_column()
         _ensure_session_attendance_backfill()
 
     from .routes import bp as main_bp
@@ -298,6 +299,40 @@ def _ensure_course_semester_column() -> None:
         except SQLAlchemyError:
             current_app.logger.warning(
                 "Unable to tighten constraints on course.semester; continuing with relaxed column."
+            )
+
+
+def _ensure_course_course_name_column() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course")}
+    if "course_name_id" in existing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE course ADD COLUMN course_name_id INTEGER")
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard for legacy DBs
+        current_app.logger.warning("Unable to add course_name_id column to course: %s", exc)
+        return
+
+    if engine.dialect.name not in {"sqlite"}:
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE course ADD CONSTRAINT course_course_name_fk "
+                        "FOREIGN KEY (course_name_id) REFERENCES course_name (id)"
+                    )
+                )
+        except SQLAlchemyError:
+            current_app.logger.warning(
+                "Unable to add foreign key constraint to course.course_name_id; continuing without constraint."
             )
 
 
