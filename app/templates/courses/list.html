@@ -93,7 +93,7 @@
                   </label>
                 </div>
                 <div class="mt-2 ms-4 text-muted small">
-                  Les travaux pratiques seront automatiquement répartis en demi-groupes.
+                  Les travaux pratiques seront automatiquement répartis en demi-groupes A et B, identifiés par leur lettre dans l'interface.
                 </div>
               </div>
               {% endfor %}
@@ -189,9 +189,9 @@
                         {% for label, teacher in link.teacher_labels() %}
                         <li>
                           {% if label %}
-                            {% if label == 'A/B' %}Groupes A et B{% else %}{{ label }}{% endif %}
+                            {{ label }}
                           {% else %}
-                          Classe entière
+                            Classe entière
                           {% endif %}
                           {% if teacher %}
                           — {{ teacher.name }}

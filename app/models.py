@@ -673,7 +673,10 @@ class CourseClassLink(db.Model):
             ]
         teacher = self.teacher_a or self.teacher_b
         if self.group_count == 2:
-            return [("A/B", teacher)]
+            return [
+                ("Groupe A", self.teacher_for_label("A")),
+                ("Groupe B", self.teacher_for_label("B")),
+            ]
         return [("", teacher)]
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper

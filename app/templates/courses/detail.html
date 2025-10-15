@@ -131,7 +131,7 @@
                 </div>
                 <div class="mt-2 ms-4 text-muted small">
                   {% if course.course_type == 'TP' %}
-                  Ce cours sera planifié en deux demi-groupes A et B.
+                  Ce cours sera planifié en deux demi-groupes A et B. Les sous-groupes sont identifiés par leur lettre dans les formulaires et le calendrier.
                   {% elif course.course_type == 'SAE' %}
                   Deux enseignants peuvent être assignés simultanément pour cette classe.
                   {% elif course.course_type == 'CM' %}
@@ -253,6 +253,21 @@
               Classe entière
               {% endif %}
             </div>
+            {% if link.group_count == 2 %}
+            <ul class="list-unstyled small ms-3 mb-2 text-muted">
+              {% for subgroup_label in link.group_labels() %}
+              {% set assigned_teacher = link.teacher_for_label(subgroup_label) %}
+              <li>
+                Groupe {{ subgroup_label|upper }}
+                {% if assigned_teacher %}
+                — {{ assigned_teacher.name }}
+                {% else %}
+                — Aucun enseignant
+                {% endif %}
+              </li>
+              {% endfor %}
+            </ul>
+            {% endif %}
             <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}">
               <option value="" {% if not assigned_teacher %}selected{% endif %}>— Aucun enseignant —</option>
               {% for teacher in teachers %}
