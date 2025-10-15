@@ -64,6 +64,7 @@ CREATE TABLE `course` (
   `priority` int(11) NOT NULL,
   `course_type` varchar(3) NOT NULL,
   `requires_computers` tinyint(1) NOT NULL,
+  `computers_required` int(11) NOT NULL DEFAULT 0,
   `created_at` datetime NOT NULL,
   `updated_at` datetime NOT NULL
 ) ;
@@ -72,8 +73,8 @@ CREATE TABLE `course` (
 -- Déchargement des données de la table `course`
 --
 
-INSERT INTO `course` (`id`, `name`, `description`, `session_length_hours`, `sessions_required`, `start_date`, `end_date`, `priority`, `course_type`, `requires_computers`, `created_at`, `updated_at`) VALUES
-(1, 'Python Avancé', 'Programmation avancée en Python', 2, 4, '2025-10-11', '2025-11-21', 1, 'TD', 1, '2025-10-11 11:14:23', '2025-10-12 19:48:23');
+INSERT INTO `course` (`id`, `name`, `description`, `session_length_hours`, `sessions_required`, `start_date`, `end_date`, `priority`, `course_type`, `requires_computers`, `computers_required`, `created_at`, `updated_at`) VALUES
+(1, 'Python Avancé', 'Programmation avancée en Python', 2, 4, '2025-10-11', '2025-11-21', 1, 'TD', 1, 20, '2025-10-11 11:14:23', '2025-10-12 19:48:23');
 
 -- --------------------------------------------------------
 

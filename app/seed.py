@@ -30,6 +30,7 @@ def seed_data() -> None:
         priority=1,
         course_type="TD",
         requires_computers=True,
+        computers_required=20,
     )
 
     teacher = Teacher(

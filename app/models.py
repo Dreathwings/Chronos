@@ -210,6 +210,7 @@ class Course(db.Model, TimeStampedModel):
     course_type: Mapped[str] = mapped_column(String(3), default="CM")
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
+    computers_required: Mapped[int] = mapped_column(Integer, default=0)
 
     teachers: Mapped[List[Teacher]] = relationship(secondary=course_teacher, back_populates="courses")
     softwares: Mapped[List["Software"]] = relationship(secondary=course_software, back_populates="courses")
@@ -236,6 +237,7 @@ class Course(db.Model, TimeStampedModel):
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
+        CheckConstraint("computers_required >= 0", name="chk_course_computers_non_negative"),
         CheckConstraint(
             "course_type IN ('CM','TD','TP','SAE')",
             name="chk_course_type_valid",
@@ -286,6 +288,16 @@ class Course(db.Model, TimeStampedModel):
         if link and link.group_count > 1:
             return max(1, ceil(baseline / link.group_count))
         return max(1, baseline)
+
+    def required_computer_posts(self) -> int:
+        if not self.requires_computers:
+            return 0
+        value = self.computers_required or 0
+        try:
+            numeric = int(value)
+        except (TypeError, ValueError):
+            numeric = 0
+        return max(numeric, 1)
 
     @property
     def scheduled_hours(self) -> int:
@@ -349,7 +361,7 @@ class Session(db.Model, TimeStampedModel):
         group_suffix = f" — groupe {self.subgroup_label}" if self.subgroup_label else ""
         return f"{self.course.name} — {class_label}{group_suffix} ({room_name})"
 
-    def as_event(self) -> dict[str, str]:
+    def as_event(self) -> dict[str, object]:
         title = self.title_with_room()
         course_softwares = sorted(software.name for software in self.course.softwares)
         room_softwares = sorted(software.name for software in self.room.softwares)
@@ -376,6 +388,8 @@ class Session(db.Model, TimeStampedModel):
                 ),
                 "course_description": self.course.description,
                 "requires_computers": self.course.requires_computers,
+                "computers_required": self.course.required_computer_posts(),
+                "room_computers": self.room.computers,
                 "course_softwares": course_softwares,
                 "room_softwares": room_softwares,
                 "missing_softwares": missing_softwares,

@@ -58,6 +58,8 @@ EXTENDED_BREAKS = _build_extended_breaks()
 
 START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
 
+COURSE_TYPE_CHRONOLOGY: dict[str, int] = {"CM": 0, "TD": 1, "TP": 2}
+
 
 class ScheduleReporter:
     LEVELS = {
@@ -233,6 +235,7 @@ def find_available_room(
 ) -> Optional[Room]:
     rooms = Room.query.order_by(Room.capacity.asc()).all()
     required_students = required_capacity or 1
+    required_posts = course.required_computer_posts()
     required_equipment_ids = {equipment.id for equipment in course.equipments}
     required_software_ids = {software.id for software in course.softwares}
 
@@ -242,7 +245,7 @@ def find_available_room(
     for room in rooms:
         if room.capacity < required_students:
             continue
-        if course.requires_computers and room.computers <= 0:
+        if required_posts and (room.computers or 0) < required_posts:
             continue
 
         room_equipment_ids = {equipment.id for equipment in room.equipments}
@@ -339,6 +342,7 @@ def _describe_room_unavailability(
         return "Aucune salle n'est enregistrée dans la base."
 
     required_students = required_capacity or 1
+    required_posts = course.required_computer_posts()
     capacity_rejects: list[str] = []
     computer_rejects: list[str] = []
     equipment_counter: Counter[str] = Counter()
@@ -353,7 +357,7 @@ def _describe_room_unavailability(
         if room.capacity < required_students:
             capacity_rejects.append(room.name)
             continue
-        if course.requires_computers and room.computers <= 0:
+        if required_posts and (room.computers or 0) < required_posts:
             computer_rejects.append(room.name)
             continue
         room_equipment_ids = {equipment.id for equipment in room.equipments}
@@ -401,14 +405,16 @@ def _describe_room_unavailability(
             if len(capacity_rejects) > 3:
                 display += ", …"
             parts.append(f"Salles trop petites : {display}")
-    if course.requires_computers and computer_rejects:
+    if required_posts and computer_rejects:
         if len(computer_rejects) == len(rooms) - len(capacity_rejects):
-            parts.append("Aucune salle équipée d'ordinateurs disponibles.")
+            parts.append(
+                "Aucune salle ne dispose du nombre de postes informatiques requis."
+            )
         else:
             display = ", ".join(sorted(computer_rejects[:3]))
             if len(computer_rejects) > 3:
                 display += ", …"
-            parts.append(f"Sans postes informatiques : {display}")
+            parts.append(f"Sans nombre de postes suffisant : {display}")
     if equipment_counter:
         equipment_display = ", ".join(
             f"{name} ({count})" for name, count in equipment_counter.most_common(3)
@@ -432,6 +438,72 @@ def _describe_room_unavailability(
     if not parts:
         return "Aucune salle compatible n'est disponible sur ce créneau."
     return " ; ".join(parts)
+
+
+def _week_bounds(day: date) -> tuple[date, date]:
+    start = day - timedelta(days=day.weekday())
+    end = start + timedelta(days=6)
+    return start, end
+
+
+def _session_involves_class(session: Session, class_group: ClassGroup) -> bool:
+    if session.class_group_id == class_group.id:
+        return True
+    attendees = session.attendees or []
+    return any(att.id == class_group.id for att in attendees)
+
+
+def _class_sessions_in_week(
+    class_group: ClassGroup,
+    week_start: date,
+    week_end: date,
+    pending_sessions: Iterable[Session] = (),
+) -> Iterable[Session]:
+    seen: set[int] = set()
+    for session in class_group.all_sessions:
+        marker = id(session)
+        if marker in seen:
+            continue
+        if not _session_involves_class(session, class_group):
+            continue
+        session_day = session.start_time.date()
+        if week_start <= session_day <= week_end:
+            seen.add(marker)
+            yield session
+    for session in pending_sessions:
+        marker = id(session)
+        if marker in seen:
+            continue
+        if not _session_involves_class(session, class_group):
+            continue
+        session_day = session.start_time.date()
+        if week_start <= session_day <= week_end:
+            seen.add(marker)
+            yield session
+
+
+def _day_respects_chronology(
+    course: Course,
+    class_group: ClassGroup,
+    day: date,
+    pending_sessions: Iterable[Session] = (),
+) -> bool:
+    priority = COURSE_TYPE_CHRONOLOGY.get(course.course_type)
+    if priority is None:
+        return True
+    week_start, week_end = _week_bounds(day)
+    for session in _class_sessions_in_week(
+        class_group, week_start, week_end, pending_sessions
+    ):
+        other_priority = COURSE_TYPE_CHRONOLOGY.get(session.course.course_type)
+        if other_priority is None or other_priority == priority:
+            continue
+        session_day = session.start_time.date()
+        if other_priority < priority and session_day > day:
+            return False
+        if other_priority > priority and session_day < day:
+            return False
+    return True
 
 
 def _describe_class_unavailability(
@@ -1170,7 +1242,15 @@ def generate_schedule(
             )
 
             placed = False
+            chronology_weeks: set[date] = set()
             for day in ordered_days:
+                if not all(
+                    _day_respects_chronology(course, group, day, created_sessions)
+                    for group in class_groups
+                ):
+                    week_start, _ = _week_bounds(day)
+                    chronology_weeks.add(week_start)
+                    continue
                 base_offset = int(per_day_hours[day])
                 block_sessions = _cm_schedule_block_for_day(
                     course=course,
@@ -1194,6 +1274,11 @@ def generate_schedule(
                 break
 
             if not placed:
+                for week_start in sorted(chronology_weeks):
+                    reporter.warning(
+                        "Ordre CM → TD → TP impossible à respecter "
+                        f"la semaine du {week_start.strftime('%d/%m/%Y')}"
+                    )
                 break
 
         if hours_remaining > 0:
@@ -1255,7 +1340,14 @@ def generate_schedule(
                 )
 
                 placed = False
+                chronology_weeks: set[date] = set()
                 for day in ordered_days:
+                    if not _day_respects_chronology(
+                        course, class_group, day, created_sessions
+                    ):
+                        week_start, _ = _week_bounds(day)
+                        chronology_weeks.add(week_start)
+                        continue
                     base_offset = int(per_day_hours[day])
                     block_sessions = _schedule_block_for_day(
                         course=course,
@@ -1282,6 +1374,11 @@ def generate_schedule(
                     break
 
                 if not placed:
+                    for week_start in sorted(chronology_weeks):
+                        reporter.warning(
+                            f"Chronologie CM → TD → TP impossible pour {class_group.name} "
+                            f"sur la semaine du {week_start.strftime('%d/%m/%Y')}"
+                        )
                     break
 
             if hours_remaining > 0:

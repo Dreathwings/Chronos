@@ -68,6 +68,16 @@ def _normalise_course_type(raw_value: str | None) -> str:
     return "CM"
 
 
+def _parse_non_negative_int(raw_value: str | None, default: int = 0) -> int:
+    if not raw_value:
+        return default
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return max(value, 0)
+
+
 def _build_default_backgrounds() -> list[dict[str, object]]:
     spans: list[tuple[time, time]] = []
     pointer = WORKDAY_START
@@ -420,8 +430,14 @@ def _validate_session_constraints(
             "La salle ne peut pas accueillir la taille cumulée des classes "
             f"({required_capacity} étudiants)."
         )
-    if course.requires_computers and room.computers <= 0:
-        return "La salle ne dispose pas d'ordinateurs alors que le cours en requiert."
+    required_posts = course.required_computer_posts()
+    if required_posts and (room.computers or 0) < required_posts:
+        if required_posts == 1:
+            return "La salle ne dispose pas d'ordinateur alors que le cours en requiert."
+        return (
+            "La salle ne propose pas suffisamment de postes informatiques "
+            f"({required_posts} requis)."
+        )
     if any(eq not in room.equipments for eq in course.equipments):
         return "La salle ne possède pas l'équipement requis pour ce cours."
     return None
@@ -1082,6 +1098,9 @@ def courses_list():
         form_name = request.form.get("form")
         if form_name == "create":
             course_type = _normalise_course_type(request.form.get("course_type"))
+            computers_required = _parse_non_negative_int(
+                request.form.get("computers_required"), 0
+            )
             course = Course(
                 name=request.form["name"],
                 description=request.form.get("description"),
@@ -1092,6 +1111,7 @@ def courses_list():
                 priority=int(request.form.get("priority", 1)),
                 course_type=course_type,
                 requires_computers=bool(request.form.get("requires_computers")),
+                computers_required=computers_required,
             )
             selected_equipments = [
                 equipment
@@ -1160,6 +1180,9 @@ def course_detail(course_id: int):
             course.priority = int(request.form.get("priority", course.priority))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.requires_computers = bool(request.form.get("requires_computers"))
+            course.computers_required = _parse_non_negative_int(
+                request.form.get("computers_required"), course.computers_required
+            )
             selected_equipments = [
                 equipment
                 for equipment in (
