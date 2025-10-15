@@ -458,13 +458,27 @@ def _class_sessions_in_week(
     week_start: date,
     week_end: date,
     pending_sessions: Iterable[Session] = (),
+    *,
+    subgroup_label: str | None = None,
 ) -> Iterable[Session]:
+    target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
+
+    def _matches_scope(session: Session) -> bool:
+        if not _session_involves_class(session, class_group):
+            return False
+        if target_label is None:
+            return True
+        session_label = _normalise_label(session.subgroup_label)
+        if session_label and session_label != target_label:
+            return False
+        return True
+
     seen: set[int] = set()
     for session in class_group.all_sessions:
         marker = id(session)
         if marker in seen:
             continue
-        if not _session_involves_class(session, class_group):
+        if not _matches_scope(session):
             continue
         session_day = session.start_time.date()
         if week_start <= session_day <= week_end:
@@ -474,7 +488,7 @@ def _class_sessions_in_week(
         marker = id(session)
         if marker in seen:
             continue
-        if not _session_involves_class(session, class_group):
+        if not _matches_scope(session):
             continue
         session_day = session.start_time.date()
         if week_start <= session_day <= week_end:
@@ -487,13 +501,19 @@ def _day_respects_chronology(
     class_group: ClassGroup,
     day: date,
     pending_sessions: Iterable[Session] = (),
+    *,
+    subgroup_label: str | None = None,
 ) -> bool:
     priority = COURSE_TYPE_CHRONOLOGY.get(course.course_type)
     if priority is None:
         return True
     week_start, week_end = _week_bounds(day)
     for session in _class_sessions_in_week(
-        class_group, week_start, week_end, pending_sessions
+        class_group,
+        week_start,
+        week_end,
+        pending_sessions,
+        subgroup_label=subgroup_label,
     ):
         other_priority = COURSE_TYPE_CHRONOLOGY.get(session.course.course_type)
         if other_priority is None or other_priority == priority:
@@ -1245,7 +1265,9 @@ def generate_schedule(
             chronology_weeks: set[date] = set()
             for day in ordered_days:
                 if not all(
-                    _day_respects_chronology(course, group, day, created_sessions)
+                    _day_respects_chronology(
+                        course, group, day, created_sessions, subgroup_label=None
+                    )
                     for group in class_groups
                 ):
                     week_start, _ = _week_bounds(day)
@@ -1343,7 +1365,11 @@ def generate_schedule(
                 chronology_weeks: set[date] = set()
                 for day in ordered_days:
                     if not _day_respects_chronology(
-                        course, class_group, day, created_sessions
+                        course,
+                        class_group,
+                        day,
+                        created_sessions,
+                        subgroup_label=subgroup_label,
                     ):
                         week_start, _ = _week_bounds(day)
                         chronology_weeks.add(week_start)
