@@ -66,16 +66,38 @@
         </form>
         <hr>
         <h3 class="h6">Noms disponibles</h3>
-        <ul class="list-group list-group-flush">
+        <div class="list-group list-group-flush">
           {% for name in course_names %}
-          <li class="list-group-item d-flex justify-content-between align-items-center">
-            <span>{{ name.name }}</span>
-            <span class="badge bg-light text-dark">{{ name.usage_count }} sous-groupe{% if name.usage_count > 1 %}s{% endif %}</span>
-          </li>
+          <form method="post" class="list-group-item vstack gap-2">
+            <input type="hidden" name="form" value="course-name-preferences">
+            <input type="hidden" name="course_name_id" value="{{ name.id }}">
+            <div class="d-flex justify-content-between align-items-start gap-3">
+              <div>
+                <div class="fw-semibold">{{ name.name }}</div>
+                <div class="text-muted small">{{ name.usage_count }} sous-groupe{% if name.usage_count > 1 %}s{% endif %}</div>
+              </div>
+              <button type="submit" class="btn btn-outline-primary btn-sm">Enregistrer</button>
+            </div>
+            <div>
+              <label class="form-label small mb-1" for="preferred-rooms-{{ name.id }}">Salles à privilégier</label>
+              <select
+                id="preferred-rooms-{{ name.id }}"
+                class="form-select form-select-sm"
+                name="preferred_rooms"
+                multiple
+                size="5"
+              >
+                {% for room in rooms %}
+                <option value="{{ room.id }}" {% if room in name.preferred_rooms %}selected{% endif %}>{{ room.name }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">Les salles sélectionnées seront privilégiées lors de l'auto-génération.</div>
+            </div>
+          </form>
           {% else %}
-          <li class="list-group-item">Ajoutez un premier nom pour commencer.</li>
+          <div class="list-group-item">Ajoutez un premier nom pour commencer.</div>
           {% endfor %}
-        </ul>
+        </div>
       </div>
     </div>
   </div>

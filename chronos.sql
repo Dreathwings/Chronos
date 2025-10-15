@@ -228,6 +228,17 @@ INSERT INTO `course_teacher` (`course_id`, `teacher_id`) VALUES
 -- --------------------------------------------------------
 
 --
+-- Structure de la table `course_name_preferred_room`
+--
+
+CREATE TABLE `course_name_preferred_room` (
+  `course_name_id` int(11) NOT NULL,
+  `room_id` int(11) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
 -- Structure de la table `equipment`
 --
 
@@ -687,6 +698,13 @@ ALTER TABLE `course_teacher`
   ADD KEY `teacher_id` (`teacher_id`);
 
 --
+-- Index pour la table `course_name_preferred_room`
+--
+ALTER TABLE `course_name_preferred_room`
+  ADD PRIMARY KEY (`course_name_id`,`room_id`),
+  ADD KEY `room_id` (`room_id`);
+
+--
 -- Index pour la table `equipment`
 --
 ALTER TABLE `equipment`
@@ -867,6 +885,13 @@ ALTER TABLE `course_software`
 ALTER TABLE `course_teacher`
   ADD CONSTRAINT `course_teacher_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
   ADD CONSTRAINT `course_teacher_ibfk_2` FOREIGN KEY (`teacher_id`) REFERENCES `teacher` (`id`);
+
+--
+-- Contraintes pour la table `course_name_preferred_room`
+--
+ALTER TABLE `course_name_preferred_room`
+  ADD CONSTRAINT `course_name_preferred_room_ibfk_1` FOREIGN KEY (`course_name_id`) REFERENCES `course_name` (`id`),
+  ADD CONSTRAINT `course_name_preferred_room_ibfk_2` FOREIGN KEY (`room_id`) REFERENCES `room` (`id`);
 
 --
 -- Contraintes pour la table `room_equipment`

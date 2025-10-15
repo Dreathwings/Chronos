@@ -61,6 +61,14 @@ course_teacher = Table(
 )
 
 
+course_name_preferred_room = Table(
+    "course_name_preferred_room",
+    db.Model.metadata,
+    Column("course_name_id", ForeignKey("course_name.id"), primary_key=True),
+    Column("room_id", ForeignKey("room.id"), primary_key=True),
+)
+
+
 session_attendance = Table(
     "session_attendance",
     db.Model.metadata,
@@ -184,6 +192,11 @@ class Room(db.Model, TimeStampedModel):
     equipments: Mapped[List["Equipment"]] = relationship(secondary=room_equipment, back_populates="rooms")
     softwares: Mapped[List["Software"]] = relationship(secondary=room_software, back_populates="rooms")
     sessions: Mapped[List["Session"]] = relationship(back_populates="room", cascade="all, delete-orphan")
+    preferred_for_course_names: Mapped[List["CourseName"]] = relationship(
+        "CourseName",
+        secondary=course_name_preferred_room,
+        back_populates="preferred_rooms",
+    )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Room<{self.id} {self.name}>"
@@ -312,6 +325,12 @@ class Course(db.Model, TimeStampedModel):
         if link is None:
             return [None]
         return link.group_labels()
+
+    @property
+    def preferred_rooms(self) -> list["Room"]:
+        if self.configured_name and self.configured_name.preferred_rooms:
+            return list(self.configured_name.preferred_rooms)
+        return []
 
     def subgroup_name_for(
         self, class_group: "ClassGroup" | int, subgroup_label: str | None
@@ -563,6 +582,12 @@ class CourseName(db.Model, TimeStampedModel):
 
     courses: Mapped[List[Course]] = relationship(
         "Course", back_populates="configured_name"
+    )
+
+    preferred_rooms: Mapped[List[Room]] = relationship(
+        "Room",
+        secondary=course_name_preferred_room,
+        back_populates="preferred_for_course_names",
     )
 
     subgroup_links_a: Mapped[List["CourseClassLink"]] = relationship(

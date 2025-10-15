@@ -62,6 +62,8 @@ COURSE_TYPE_CHRONOLOGY: dict[str, int] = {"CM": 0, "TD": 1, "TP": 2}
 
 
 class ScheduleReporter:
+    MAX_DETAILED_ENTRIES = 50
+    MAX_TOTAL_ENTRIES = 120
     LEVELS = {
         "info": logging.INFO,
         "warning": logging.WARNING,
@@ -134,7 +136,7 @@ class ScheduleReporter:
             course=self.course,
             status=self.status,
             summary=self.summary,
-            messages=json.dumps(self.entries, ensure_ascii=False),
+            messages=json.dumps(self._serialise_entries(), ensure_ascii=False),
             window_start=self.window_start,
             window_end=self.window_end,
         )
@@ -152,6 +154,50 @@ class ScheduleReporter:
         if logger is not None:
             log_level = self.LEVELS.get(level, logging.INFO)
             logger.log(log_level, "[%s] %s", self.course.name, text)
+
+    def _serialise_entries(self) -> list[dict[str, str]]:
+        if not self.entries:
+            return []
+        if len(self.entries) <= self.MAX_DETAILED_ENTRIES:
+            return list(self.entries)
+
+        detailed = list(self.entries[: self.MAX_DETAILED_ENTRIES])
+        summary_counts: dict[tuple[str, str], int] = {}
+        summary_order: list[tuple[str, str]] = []
+        for entry in self.entries[self.MAX_DETAILED_ENTRIES :]:
+            key = (entry["level"], entry["message"])
+            if key not in summary_counts:
+                summary_counts[key] = 0
+                summary_order.append(key)
+            summary_counts[key] += 1
+
+        for level, message in summary_order:
+            count = summary_counts[(level, message)]
+            if count > 1:
+                label = f"{message} (résumé {count}×)"
+            else:
+                label = f"{message} (résumé)"
+            detailed.append({"level": level, "message": label})
+            if len(detailed) >= self.MAX_TOTAL_ENTRIES - 1:
+                break
+
+        detailed.append(
+            {
+                "level": "info",
+                "message": "Journal abrégé pour limiter la taille enregistrée.",
+            }
+        )
+
+        if len(detailed) > self.MAX_TOTAL_ENTRIES:
+            detailed = detailed[: self.MAX_TOTAL_ENTRIES - 1]
+            detailed.append(
+                {
+                    "level": "info",
+                    "message": "D'autres messages ont été omis.",
+                }
+            )
+
+        return detailed
 
 
 class PlacementDiagnostics:
@@ -233,7 +279,18 @@ def find_available_room(
     *,
     required_capacity: int | None = None,
 ) -> Optional[Room]:
-    rooms = Room.query.order_by(Room.capacity.asc()).all()
+    rooms = Room.query.order_by(Room.capacity.asc(), Room.name.asc()).all()
+    preferred_rooms: list[Room] = []
+    preferred_room_ids: set[int] = set()
+    if course.preferred_rooms:
+        preferred_rooms = sorted(
+            [room for room in course.preferred_rooms if room is not None],
+            key=lambda room: (room.capacity or 0, (room.name or "").lower()),
+        )
+        preferred_room_ids = {room.id for room in preferred_rooms if room.id}
+    ordered_rooms: list[Room] = []
+    ordered_rooms.extend(preferred_rooms)
+    ordered_rooms.extend(room for room in rooms if room.id not in preferred_room_ids)
     required_students = required_capacity or 1
     required_posts = course.required_computer_posts()
     required_equipment_ids = {equipment.id for equipment in course.equipments}
@@ -242,7 +299,7 @@ def find_available_room(
     best_room: Room | None = None
     best_missing_softwares: int | None = None
 
-    for room in rooms:
+    for room in ordered_rooms:
         if room.capacity < required_students:
             continue
         if required_posts and (room.computers or 0) < required_posts:

@@ -393,16 +393,6 @@ def _parse_teacher_selection(
         return None
     return Teacher.query.get(teacher_id)
 
-
-def _infer_course_base_label(course: Course) -> str:
-    if course.configured_name:
-        return course.configured_name.name
-    base = course.base_display_name
-    if base:
-        return base
-    return course.name
-
-
 def _parse_class_group_choice(raw_value: str | None) -> tuple[int, str | None] | None:
     if not raw_value:
         return None
@@ -777,6 +767,7 @@ def configuration():
     course_names = CourseName.query.order_by(CourseName.name).all()
     equipments = Equipment.query.order_by(Equipment.name).all()
     softwares = Software.query.order_by(Software.name).all()
+    rooms = Room.query.order_by(Room.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
@@ -799,6 +790,26 @@ def configuration():
                 except IntegrityError:
                     db.session.rollback()
                     flash("Ce nom de cours existe déjà", "danger")
+        elif form_name == "course-name-preferences":
+            course_name_id = request.form.get("course_name_id")
+            try:
+                course_name = CourseName.query.get(int(course_name_id)) if course_name_id else None
+            except (TypeError, ValueError):
+                course_name = None
+            if not course_name:
+                flash("Nom de cours introuvable", "danger")
+            else:
+                selected_ids = {
+                    int(room_id)
+                    for room_id in request.form.getlist("preferred_rooms")
+                    if room_id.isdigit()
+                }
+                preferred_rooms = [
+                    room for room in rooms if room.id in selected_ids
+                ]
+                course_name.preferred_rooms = preferred_rooms
+                db.session.commit()
+                flash("Salles privilégiées mises à jour", "success")
         elif form_name == "equipment-create":
             name = (request.form.get("name") or "").strip()
             if not name:
@@ -835,6 +846,7 @@ def configuration():
         course_names=course_names,
         equipments=equipments,
         softwares=softwares,
+        rooms=rooms,
     )
 
 
@@ -1274,18 +1286,10 @@ def course_detail(course_id: int):
                     selected_course_name = CourseName.query.get(int(course_name_id))
                 except (TypeError, ValueError):
                     selected_course_name = None
-            custom_name = (request.form.get("name") or "").strip()
-            if not selected_course_name and not custom_name and course_names:
-                flash(
-                    "Sélectionnez un nom de cours configuré ou saisissez un libellé personnalisé.",
-                    "danger",
-                )
-                return redirect(url_for("main.course_detail", course_id=course_id))
             base_label = (
                 selected_course_name.name
                 if selected_course_name
-                else custom_name
-                or course.base_display_name
+                else course.base_display_name
                 or course.name
             )
             course.description = request.form.get("description")
@@ -1379,47 +1383,32 @@ def course_detail(course_id: int):
                     link.teacher_b = teacher_b
             else:
                 for link in course.class_links:
-                    teacher = _parse_teacher_selection(
-                        request.form.get(f"class_link_teacher_{link.class_group_id}"),
-                        allowed_ids=allowed_teacher_ids,
-                    )
-                    link.teacher_a = teacher
-                    link.teacher_b = teacher if link.group_count == 2 and teacher else None
+                    if link.group_count == 2:
+                        teacher_a = _parse_teacher_selection(
+                            request.form.get(
+                                f"class_link_teacher_{link.class_group_id}_A"
+                            ),
+                            allowed_ids=allowed_teacher_ids,
+                        )
+                        teacher_b = _parse_teacher_selection(
+                            request.form.get(
+                                f"class_link_teacher_{link.class_group_id}_B"
+                            ),
+                            allowed_ids=allowed_teacher_ids,
+                        )
+                        link.teacher_a = teacher_a
+                        link.teacher_b = teacher_b
+                    else:
+                        teacher = _parse_teacher_selection(
+                            request.form.get(
+                                f"class_link_teacher_{link.class_group_id}"
+                            ),
+                            allowed_ids=allowed_teacher_ids,
+                        )
+                        link.teacher_a = teacher
+                        link.teacher_b = None
             db.session.commit()
             flash("Enseignants par classe mis à jour", "success")
-        elif form_name == "update-subgroups":
-            if not course.is_tp:
-                flash("Les sous-groupes ne concernent que les travaux pratiques.", "info")
-                return redirect(url_for("main.course_detail", course_id=course_id))
-            lookup = {str(name.id): name for name in course_names}
-            pending_updates: list[tuple[CourseClassLink, CourseName, CourseName]] = []
-            missing_for: list[str] = []
-            for link in course.class_links:
-                if not link.is_half_group:
-                    link.subgroup_a_course_name = None
-                    link.subgroup_b_course_name = None
-                    continue
-                key_a = request.form.get(f"subgroup_{link.class_group_id}_A") or ""
-                key_b = request.form.get(f"subgroup_{link.class_group_id}_B") or ""
-                name_a = lookup.get(key_a)
-                name_b = lookup.get(key_b)
-                if not name_a or not name_b:
-                    missing_for.append(link.class_group.name)
-                    continue
-                pending_updates.append((link, name_a, name_b))
-            if missing_for:
-                missing_list = ", ".join(sorted(missing_for))
-                flash(
-                    "Sélectionnez un nom de cours pour chaque sous-groupe (manquant : "
-                    f"{missing_list}).",
-                    "danger",
-                )
-                return redirect(url_for("main.course_detail", course_id=course_id))
-            for link, name_a, name_b in pending_updates:
-                link.subgroup_a_course_name = name_a
-                link.subgroup_b_course_name = name_b
-            db.session.commit()
-            flash("Sous-groupes mis à jour", "success")
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
@@ -1518,7 +1507,6 @@ def course_detail(course_id: int):
         course.teachers,
         key=lambda teacher: (teacher.name or "").lower(),
     )
-    course_base_name = _infer_course_base_label(course)
 
     return render_template(
         "courses/detail.html",
@@ -1533,7 +1521,6 @@ def course_detail(course_id: int):
         semester_choices=SEMESTER_CHOICES,
         default_semester=DEFAULT_SEMESTER,
         available_teachers=available_teachers,
-        course_base_name=course_base_name,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
