@@ -66,16 +66,72 @@
         </form>
         <hr>
         <h3 class="h6">Noms disponibles</h3>
-        <ul class="list-group list-group-flush">
+        <div class="list-group list-group-flush">
           {% for name in course_names %}
-          <li class="list-group-item d-flex justify-content-between align-items-center">
-            <span>{{ name.name }}</span>
-            <span class="badge bg-light text-dark">{{ name.usage_count }} sous-groupe{% if name.usage_count > 1 %}s{% endif %}</span>
-          </li>
+          <form method="post" class="list-group-item vstack gap-2">
+            <input type="hidden" name="form" value="course-name-preferences">
+            <input type="hidden" name="course_name_id" value="{{ name.id }}">
+            <div class="d-flex justify-content-between align-items-start gap-3">
+              <div>
+                <div class="fw-semibold">{{ name.name }}</div>
+                <div class="text-muted small">{{ name.usage_count }} sous-groupe{% if name.usage_count > 1 %}s{% endif %}</div>
+              </div>
+              <button type="submit" class="btn btn-outline-primary btn-sm">Enregistrer</button>
+            </div>
+            <div class="vstack gap-2" data-preferred-rooms-selector>
+              <label class="form-label small mb-1" for="preferred-rooms-search-{{ name.id }}">Salles à privilégier</label>
+              <div class="d-flex flex-wrap gap-2" data-role="selected-list">
+                {% for room in name.preferred_rooms %}
+                <span
+                  class="badge text-bg-light border d-inline-flex align-items-center gap-2 py-2 px-3"
+                  data-room-id="{{ room.id }}"
+                >
+                  <span>{{ room.name }}</span>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary px-2 py-0"
+                    data-role="remove"
+                    aria-label="Retirer {{ room.name }}"
+                  >&times;</button>
+                  <input type="hidden" name="preferred_rooms" value="{{ room.id }}">
+                </span>
+                {% endfor %}
+              </div>
+              <p
+                class="text-muted small mb-0"
+                data-role="empty-placeholder"
+                {% if name.preferred_rooms %}style="display: none;"{% endif %}
+              >
+                Aucune salle sélectionnée pour le moment.
+              </p>
+              <div class="input-group input-group-sm">
+                <input
+                  type="search"
+                  class="form-control"
+                  id="preferred-rooms-search-{{ name.id }}"
+                  placeholder="Rechercher une salle"
+                  list="preferred-rooms-list-{{ name.id }}"
+                  data-role="search-input"
+                  aria-describedby="preferred-rooms-help-{{ name.id }}"
+                  autocomplete="off"
+                  name="preferred_rooms_search"
+                >
+                <button type="button" class="btn btn-outline-secondary" data-role="add-button">Ajouter</button>
+              </div>
+              <datalist id="preferred-rooms-list-{{ name.id }}">
+                {% for room in rooms %}
+                <option value="{{ room.name }}" data-room-id="{{ room.id }}"></option>
+                {% endfor %}
+              </datalist>
+              <div class="form-text" id="preferred-rooms-help-{{ name.id }}">
+                Les salles sélectionnées seront privilégiées lors de l'auto-génération.
+              </div>
+            </div>
+          </form>
           {% else %}
-          <li class="list-group-item">Ajoutez un premier nom pour commencer.</li>
+          <div class="list-group-item">Ajoutez un premier nom pour commencer.</div>
           {% endfor %}
-        </ul>
+        </div>
       </div>
     </div>
   </div>
@@ -143,10 +199,166 @@
 {% block scripts %}
   {% include 'teachers/_unavailability_script.html' %}
   <script>
+    function setupPreferredRoomSelectors() {
+      const selectors = document.querySelectorAll('[data-preferred-rooms-selector]');
+      if (!selectors.length) {
+        return;
+      }
+
+      selectors.forEach(function(selector) {
+        const searchInput = selector.querySelector('[data-role="search-input"]');
+        const addButton = selector.querySelector('[data-role="add-button"]');
+        const selectedList = selector.querySelector('[data-role="selected-list"]');
+        const placeholder = selector.querySelector('[data-role="empty-placeholder"]');
+        const datalistId = searchInput ? searchInput.getAttribute('list') : null;
+        const datalist = datalistId ? document.getElementById(datalistId) : null;
+
+        function updatePlaceholder() {
+          if (!placeholder) {
+            return;
+          }
+          const hasSelection = selectedList && selectedList.querySelector('[data-room-id]');
+          placeholder.style.display = hasSelection ? 'none' : '';
+        }
+
+        function reportInvalidSelection() {
+          if (!searchInput) {
+            return;
+          }
+          searchInput.setCustomValidity('Sélectionnez une salle proposée.');
+          searchInput.reportValidity();
+          searchInput.setCustomValidity('');
+        }
+
+        function findOption(value) {
+          if (!datalist || typeof value !== 'string') {
+            return null;
+          }
+          const trimmed = value.trim();
+          if (!trimmed.length) {
+            return null;
+          }
+          const lower = trimmed.toLowerCase();
+          const options = datalist.options && datalist.options.length
+            ? datalist.options
+            : datalist.querySelectorAll('option');
+          for (let index = 0; index < options.length; index += 1) {
+            const option = options[index];
+            if (typeof option.value === 'string' && option.value.trim().toLowerCase() === lower) {
+              return option;
+            }
+          }
+          return null;
+        }
+
+        function isRoomSelected(roomId) {
+          if (!selectedList || !roomId) {
+            return false;
+          }
+          const items = selectedList.querySelectorAll('[data-room-id]');
+          for (let index = 0; index < items.length; index += 1) {
+            if (items[index].getAttribute('data-room-id') === roomId) {
+              return true;
+            }
+          }
+          return false;
+        }
+
+        function addRoom(roomId, label) {
+          if (!selectedList || !roomId) {
+            return;
+          }
+          const badge = document.createElement('span');
+          badge.className = 'badge text-bg-light border d-inline-flex align-items-center gap-2 py-2 px-3';
+          badge.setAttribute('data-room-id', roomId);
+
+          const text = document.createElement('span');
+          text.textContent = label;
+          badge.appendChild(text);
+
+          const removeButton = document.createElement('button');
+          removeButton.type = 'button';
+          removeButton.className = 'btn btn-sm btn-outline-secondary px-2 py-0';
+          removeButton.setAttribute('data-role', 'remove');
+          removeButton.setAttribute('aria-label', 'Retirer ' + label);
+          removeButton.textContent = '×';
+          badge.appendChild(removeButton);
+
+          const hiddenInput = document.createElement('input');
+          hiddenInput.type = 'hidden';
+          hiddenInput.name = 'preferred_rooms';
+          hiddenInput.value = roomId;
+          badge.appendChild(hiddenInput);
+
+          selectedList.appendChild(badge);
+          updatePlaceholder();
+        }
+
+        function handleAdd() {
+          if (!searchInput) {
+            return;
+          }
+          const option = findOption(searchInput.value || '');
+          if (!option) {
+            reportInvalidSelection();
+            return;
+          }
+          const roomId = option.getAttribute('data-room-id');
+          const label = option.getAttribute('label') || option.value;
+          if (!roomId) {
+            reportInvalidSelection();
+            return;
+          }
+          if (isRoomSelected(roomId)) {
+            searchInput.value = '';
+            searchInput.focus();
+            return;
+          }
+          addRoom(roomId, label);
+          searchInput.value = '';
+          searchInput.focus();
+        }
+
+        if (selectedList) {
+          selectedList.addEventListener('click', function(event) {
+            const trigger = event.target.closest('[data-role="remove"]');
+            if (!trigger) {
+              return;
+            }
+            const badge = trigger.closest('[data-room-id]');
+            if (!badge) {
+              return;
+            }
+            badge.remove();
+            updatePlaceholder();
+          });
+        }
+
+        if (searchInput) {
+          searchInput.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              handleAdd();
+            }
+          });
+        }
+
+        if (addButton) {
+          addButton.addEventListener('click', function(event) {
+            event.preventDefault();
+            handleAdd();
+          });
+        }
+
+        updatePlaceholder();
+      });
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
       if (typeof setupUnavailabilityWidgets === 'function') {
         setupUnavailabilityWidgets();
       }
+      setupPreferredRoomSelectors();
     });
   </script>
 {% endblock %}
