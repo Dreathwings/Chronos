@@ -253,10 +253,30 @@
         chronosSetField(modal, 'course', props.course || '');
         const typeLabel = props.course_type_label || CHRONOS_COURSE_TYPE_LABELS[props.course_type] || '';
         chronosSetField(modal, 'course_type', typeLabel);
-        const teacherContact = [props.teacher_email, props.teacher_phone].filter(Boolean).join(' • ');
-        let teacherText = props.teacher || '';
-        if (teacherContact) {
-          teacherText = teacherText ? `${teacherText} (${teacherContact})` : teacherContact;
+        const teacherField = modal.querySelector('[data-chronos-field="teacher"]');
+        const teacherEntries = Array.isArray(props.teachers) ? props.teachers : null;
+        let teacherText = '';
+        if (teacherEntries && teacherEntries.length > 0) {
+          const teacherLines = teacherEntries.map(function(entry) {
+            if (!entry || !entry.name) {
+              return '';
+            }
+            const contact = [entry.email, entry.phone].filter(Boolean).join(' • ');
+            return contact ? `${entry.name} (${contact})` : entry.name;
+          }).filter(function(line) { return line.length > 0; });
+          teacherText = teacherLines.join('\n');
+          if (teacherField) {
+            teacherField.style.whiteSpace = teacherText.indexOf('\n') !== -1 ? 'pre-line' : '';
+          }
+        } else {
+          const teacherContact = [props.teacher_email, props.teacher_phone].filter(Boolean).join(' • ');
+          teacherText = props.teacher || '';
+          if (teacherContact) {
+            teacherText = teacherText ? `${teacherText} (${teacherContact})` : teacherContact;
+          }
+          if (teacherField) {
+            teacherField.style.whiteSpace = '';
+          }
         }
         chronosSetField(modal, 'teacher', teacherText);
         chronosSetField(modal, 'class_group', props.class_group || '');

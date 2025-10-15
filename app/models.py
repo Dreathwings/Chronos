@@ -450,15 +450,66 @@ class Session(db.Model, TimeStampedModel):
             if software.id not in room_software_ids
         )
         class_names = self.attendee_names()
+
+        teacher_entries: list[dict[str, object]] = []
+        seen_teacher_ids: set[int] = set()
+        primary_teacher = self.teacher
+        if primary_teacher is not None:
+            seen_teacher_ids.add(primary_teacher.id)
+            teacher_entries.append(
+                {
+                    "id": primary_teacher.id,
+                    "name": primary_teacher.name,
+                    "email": primary_teacher.email,
+                    "phone": primary_teacher.phone,
+                }
+            )
+
+        related_class_ids: set[int] = set()
+        if self.class_group_id:
+            related_class_ids.add(self.class_group_id)
+        for attendee in self.attendees or []:
+            if attendee.id:
+                related_class_ids.add(attendee.id)
+
+        if self.course is not None and related_class_ids:
+            for link in self.course.class_links:
+                if link.class_group_id not in related_class_ids:
+                    continue
+                for teacher in link.assigned_teachers():
+                    if teacher is None or teacher.id in seen_teacher_ids:
+                        continue
+                    seen_teacher_ids.add(teacher.id)
+                    teacher_entries.append(
+                        {
+                            "id": teacher.id,
+                            "name": teacher.name,
+                            "email": teacher.email,
+                            "phone": teacher.phone,
+                        }
+                    )
+
+        primary_entry: dict[str, object] | None = teacher_entries[0] if teacher_entries else None
+        primary_name = (
+            primary_entry.get("name") if isinstance(primary_entry, dict) else None
+        )
+        primary_email = (
+            primary_entry.get("email") if isinstance(primary_entry, dict) else None
+        )
+        primary_phone = (
+            primary_entry.get("phone") if isinstance(primary_entry, dict) else None
+        )
+
         return {
             "id": str(self.id),
             "title": title,
             "start": self.start_time.isoformat(),
             "end": self.end_time.isoformat(),
             "extendedProps": {
-                "teacher": self.teacher.name,
-                "teacher_email": self.teacher.email,
-                "teacher_phone": self.teacher.phone,
+                "teacher": primary_name,
+                "teacher_email": primary_email,
+                "teacher_phone": primary_phone,
+                "teachers": teacher_entries,
                 "course": self.course.name,
                 "course_type": self.course.course_type,
                 "course_type_label": COURSE_TYPE_LABELS.get(

@@ -664,6 +664,48 @@ def _existing_hours_by_day(
     return per_day
 
 
+def _preferred_slot_index_for_groups(
+    course: Course,
+    class_groups: Iterable[ClassGroup],
+    day: date,
+    *,
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+) -> int | None:
+    groups = [group for group in class_groups if group is not None]
+    if not groups:
+        return None
+    target_weekday = day.weekday()
+    target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
+    slot_counter: Counter[int] = Counter()
+    seen: set[int] = set()
+    candidates = list(course.sessions) + list(pending_sessions)
+    for session in candidates:
+        marker = id(session)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if session.course_id != course.id:
+            continue
+        if session.start_time.weekday() != target_weekday:
+            continue
+        if target_label is not None:
+            session_label = _normalise_label(session.subgroup_label)
+            if session_label and session_label != target_label:
+                continue
+        if not any(_session_involves_class(session, group) for group in groups):
+            continue
+        try:
+            slot_index = START_TIMES.index(session.start_time.time())
+        except ValueError:
+            continue
+        slot_counter[slot_index] += 1
+    if not slot_counter:
+        return None
+    ordered = sorted(slot_counter.items(), key=lambda item: (-item[1], item[0]))
+    return ordered[0][0]
+
+
 def _collect_contiguous_slots(start_index: int, length: int) -> list[tuple[time, time]] | None:
     slots: list[tuple[time, time]] = []
     previous_end: time | None = None
@@ -1330,7 +1372,17 @@ def generate_schedule(
                     week_start, _ = _week_bounds(day)
                     chronology_weeks.add(week_start)
                     continue
-                base_offset = int(per_day_hours[day])
+                preferred_offset = _preferred_slot_index_for_groups(
+                    course,
+                    class_groups,
+                    day,
+                    pending_sessions=created_sessions,
+                )
+                base_offset = (
+                    preferred_offset
+                    if preferred_offset is not None
+                    else int(per_day_hours[day])
+                )
                 block_sessions = _cm_schedule_block_for_day(
                     course=course,
                     class_groups=class_groups,
@@ -1431,7 +1483,18 @@ def generate_schedule(
                         week_start, _ = _week_bounds(day)
                         chronology_weeks.add(week_start)
                         continue
-                    base_offset = int(per_day_hours[day])
+                    preferred_offset = _preferred_slot_index_for_groups(
+                        course,
+                        [class_group],
+                        day,
+                        pending_sessions=created_sessions,
+                        subgroup_label=subgroup_label,
+                    )
+                    base_offset = (
+                        preferred_offset
+                        if preferred_offset is not None
+                        else int(per_day_hours[day])
+                    )
                     block_sessions = _schedule_block_for_day(
                         course=course,
                         class_group=class_group,
