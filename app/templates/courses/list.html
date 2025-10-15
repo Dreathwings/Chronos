@@ -19,14 +19,27 @@
           <input type="hidden" name="form" value="create">
           <div>
             <label class="form-label">Nom</label>
-            <input type="text" class="form-control" name="name" required>
+            {% if course_names %}
+            <select class="form-select" name="course_name_id" required>
+              <option value="" disabled selected>Choisissez un nom configuré…</option>
+              {% for course_name in course_names %}
+              <option value="{{ course_name.id }}">{{ course_name.name }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Le nom final suivra le format TYPE - NOM - SEMESTRE.</div>
+            <div class="form-text">Modifiez la liste dans la page Configuration.</div>
+            {% else %}
+            <div class="alert alert-warning mb-0" role="alert">
+              Aucun nom n'est disponible. Ajoutez-en depuis la configuration pour créer un cours.
+            </div>
+            {% endif %}
           </div>
           <div>
             <label class="form-label">Description</label>
             <textarea name="description" class="form-control" rows="3"></textarea>
           </div>
           <div class="row g-2">
-            <div class="col">
+            <div class="col-md-4">
               <label class="form-label">Type de cours</label>
               <select class="form-select" name="course_type">
                 <option value="CM">Cours magistral</option>
@@ -35,7 +48,15 @@
                 <option value="SAE">Situation d'apprentissage et d'évaluation</option>
               </select>
             </div>
-            <div class="col">
+            <div class="col-md-4">
+              <label class="form-label">Semestre</label>
+              <select class="form-select" name="semester">
+                {% for semester in semester_choices %}
+                <option value="{{ semester }}" {% if semester == default_semester %}selected{% endif %}>{{ semester }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
               <label class="form-label">Durée séance (h)</label>
               <input type="number" class="form-control" name="session_length_hours" value="2" min="1">
             </div>
@@ -60,9 +81,25 @@
               <input type="date" class="form-control" name="end_date">
             </div>
           </div>
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="requires_computers" id="requires_computers">
-            <label class="form-check-label" for="requires_computers">Ordinateurs requis</label>
+          <div class="row g-2 align-items-center">
+            <div class="col-sm-auto">
+              <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" name="requires_computers" id="requires_computers">
+                <label class="form-check-label" for="requires_computers">Ordinateurs requis</label>
+              </div>
+            </div>
+            <div class="col">
+              <label class="form-label mb-0" for="new_computers_required">Postes informatiques requis</label>
+              <input
+                type="number"
+                class="form-control"
+                name="computers_required"
+                id="new_computers_required"
+                min="0"
+                value="0"
+              >
+              <div class="form-text">Laissez 0 si seul l'accès à des ordinateurs est requis.</div>
+            </div>
           </div>
           <div>
             <label class="form-label">Classes associées</label>
@@ -77,7 +114,7 @@
                   </label>
                 </div>
                 <div class="mt-2 ms-4 text-muted small">
-                  Les travaux pratiques seront automatiquement répartis en demi-groupes.
+                  Les travaux pratiques seront automatiquement répartis en deux sous-groupes utilisant les noms configurés.
                 </div>
               </div>
               {% endfor %}
@@ -104,7 +141,7 @@
             </div>
             {% endfor %}
           </div>
-          <button type="submit" class="btn btn-primary">Créer</button>
+          <button type="submit" class="btn btn-primary" {% if not course_names %}disabled{% endif %}>Créer</button>
         </form>
       </div>
     </div>
@@ -123,6 +160,7 @@
               <tr>
                 <th>Nom</th>
                 <th>Type</th>
+                <th>Semestre</th>
                 <th>Période</th>
                 <th>Heures planifiées</th>
                 <th>Priorité</th>
@@ -134,6 +172,7 @@
               <tr>
                 <td><a href="{{ url_for('main.course_detail', course_id=course.id) }}">{{ course.name }}</a></td>
                 <td>{{ course_type_labels.get(course.course_type, course.course_type) }}</td>
+                <td>{{ course.semester }}</td>
                 <td>{{ course.start_date or '—' }} → {{ course.end_date or '—' }}</td>
                 {% set group_total = course.class_links | map(attribute='group_count') | sum %}
                 {% set required_hours = course.total_required_hours %}
@@ -173,9 +212,9 @@
                         {% for label, teacher in link.teacher_labels() %}
                         <li>
                           {% if label %}
-                            {% if label == 'A/B' %}Groupes A et B{% else %}{{ label }}{% endif %}
+                            {{ label }}
                           {% else %}
-                          Classe entière
+                            Classe entière
                           {% endif %}
                           {% if teacher %}
                           — {{ teacher.name }}

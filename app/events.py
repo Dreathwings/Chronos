@@ -48,6 +48,7 @@ def _build_event_from_group(group: List[Session]) -> dict[str, object]:
     required_softwares = set(extended.get("course_softwares") or [])
     available_softwares = set(extended.get("room_softwares") or [])
     missing_softwares = set(extended.get("missing_softwares") or [])
+    room_computer_counts: list[int | None] = []
     class_names: set[str] = set()
     for session in group:
         room_name = session.room.name
@@ -69,6 +70,7 @@ def _build_event_from_group(group: List[Session]) -> dict[str, object]:
             for software in session.course.softwares
             if software.id not in room_software_ids
         )
+        room_computer_counts.append(session.room.computers)
         class_names.update(session.attendee_names())
     event["start"] = group[0].start_time.isoformat()
     event["end"] = group[-1].end_time.isoformat()
@@ -82,6 +84,14 @@ def _build_event_from_group(group: List[Session]) -> dict[str, object]:
     extended["course_softwares"] = sorted(required_softwares)
     extended["room_softwares"] = sorted(available_softwares)
     extended["missing_softwares"] = sorted(missing_softwares)
+    if room_computer_counts:
+        unique_counts = {
+            count if isinstance(count, int) else None for count in room_computer_counts
+        }
+        if len(unique_counts) == 1:
+            extended["room_computers"] = unique_counts.pop()
+        else:
+            extended["room_computers"] = None
     if class_names:
         class_list = sorted(class_names, key=str.lower)
         extended["class_group"] = ", ".join(class_list)

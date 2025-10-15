@@ -17,12 +17,14 @@ from .models import (
     Course,
     CourseClassLink,
     CourseScheduleLog,
+    CourseName,
     Equipment,
     Room,
     Session,
     Software,
     Teacher,
     TeacherAvailability,
+    SEMESTER_CHOICES,
 )
 from .scheduler import (
     SCHEDULE_SLOTS,
@@ -57,6 +59,7 @@ COURSE_TYPE_LABELS = {
     "TP": "Travaux pratiques",
     "SAE": "Situation d'apprentissage et d'évaluation",
 }
+DEFAULT_SEMESTER = SEMESTER_CHOICES[0]
 
 
 def _normalise_course_type(raw_value: str | None) -> str:
@@ -66,6 +69,25 @@ def _normalise_course_type(raw_value: str | None) -> str:
     if raw_value in COURSE_TYPE_CHOICES:
         return raw_value
     return "CM"
+
+
+def _normalise_semester(raw_value: str | None) -> str:
+    if not raw_value:
+        return DEFAULT_SEMESTER
+    value = raw_value.strip().upper()
+    if value in SEMESTER_CHOICES:
+        return value
+    return DEFAULT_SEMESTER
+
+
+def _parse_non_negative_int(raw_value: str | None, default: int = 0) -> int:
+    if not raw_value:
+        return default
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return max(value, 0)
 
 
 def _build_default_backgrounds() -> list[dict[str, object]]:
@@ -189,10 +211,12 @@ def _sync_course_class_links(
             continue
         group_count = 2 if course.is_tp else 1
         link = current_links.get(class_id)
+        preserved = existing_links.get(class_id)
+        preserved_teacher_a = preserved.teacher_a if preserved else None
+        preserved_teacher_b = preserved.teacher_b if preserved else None
+        preserved_name_a = preserved.subgroup_a_course_name if preserved else None
+        preserved_name_b = preserved.subgroup_b_course_name if preserved else None
         if link is None:
-            preserved = existing_links.get(class_id)
-            preserved_teacher_a = preserved.teacher_a if preserved else None
-            preserved_teacher_b = preserved.teacher_b if preserved else None
             if course.is_tp:
                 base_teacher = preserved_teacher_a or preserved_teacher_b
                 teacher_b = base_teacher if base_teacher else None
@@ -207,22 +231,28 @@ def _sync_course_class_links(
                 group_count=group_count,
                 teacher_a=base_teacher,
                 teacher_b=teacher_b,
+                subgroup_a_course_name=preserved_name_a,
+                subgroup_b_course_name=preserved_name_b,
             )
             course.class_links.append(link)
-            db.session.flush([link])
             current_links[class_id] = link
-            continue
 
         link.group_count = group_count
         if course.is_tp:
             base_teacher = link.teacher_a or link.teacher_b
             if base_teacher and link.teacher_b is None:
                 link.teacher_b = base_teacher
+            if link.subgroup_a_course_name is None:
+                link.subgroup_a_course_name = preserved_name_a
+            if link.subgroup_b_course_name is None:
+                link.subgroup_b_course_name = preserved_name_b
         elif course.is_sae:
             # Deux enseignants peuvent être définis, aucune action supplémentaire.
             pass
         else:
             link.teacher_b = None
+            link.subgroup_a_course_name = None
+            link.subgroup_b_course_name = None
         db.session.flush([link])
 
 
@@ -350,14 +380,27 @@ def _class_unavailability_backgrounds(class_group: ClassGroup) -> list[dict[str,
     return backgrounds
 
 
-def _parse_teacher_selection(raw_value: str | None) -> Teacher | None:
+def _parse_teacher_selection(
+    raw_value: str | None, *, allowed_ids: set[int] | None = None
+) -> Teacher | None:
     if not raw_value:
         return None
     try:
         teacher_id = int(raw_value)
     except (TypeError, ValueError):
         return None
+    if allowed_ids is not None and teacher_id not in allowed_ids:
+        return None
     return Teacher.query.get(teacher_id)
+
+
+def _infer_course_base_label(course: Course) -> str:
+    if course.configured_name:
+        return course.configured_name.name
+    base = course.base_display_name
+    if base:
+        return base
+    return course.name
 
 
 def _parse_class_group_choice(raw_value: str | None) -> tuple[int, str | None] | None:
@@ -420,8 +463,14 @@ def _validate_session_constraints(
             "La salle ne peut pas accueillir la taille cumulée des classes "
             f"({required_capacity} étudiants)."
         )
-    if course.requires_computers and room.computers <= 0:
-        return "La salle ne dispose pas d'ordinateurs alors que le cours en requiert."
+    required_posts = course.required_computer_posts()
+    if required_posts and (room.computers or 0) < required_posts:
+        if required_posts == 1:
+            return "La salle ne dispose pas d'ordinateur alors que le cours en requiert."
+        return (
+            "La salle ne propose pas suffisamment de postes informatiques "
+            f"({required_posts} requis)."
+        )
     if any(eq not in room.equipments for eq in course.equipments):
         return "La salle ne possède pas l'équipement requis pour ce cours."
     return None
@@ -725,14 +774,55 @@ def dashboard():
 
 @bp.route("/config", methods=["GET", "POST"])
 def configuration():
+    course_names = CourseName.query.order_by(CourseName.name).all()
+    equipments = Equipment.query.order_by(Equipment.name).all()
+    softwares = Software.query.order_by(Software.name).all()
+
     if request.method == "POST":
-        if request.form.get("form") == "closing-periods":
+        form_name = request.form.get("form")
+        if form_name == "closing-periods":
             ranges = parse_unavailability_ranges(request.form.get("closing_periods"))
             ClosingPeriod.query.delete()
             for start, end in ranges:
                 db.session.add(ClosingPeriod(start_date=start, end_date=end))
             db.session.commit()
             flash("Périodes de fermeture mises à jour", "success")
+        elif form_name == "course-name-create":
+            name = (request.form.get("name") or "").strip()
+            if not name:
+                flash("Indiquez un nom de cours valide", "danger")
+            else:
+                db.session.add(CourseName(name=name))
+                try:
+                    db.session.commit()
+                    flash("Nom de cours ajouté", "success")
+                except IntegrityError:
+                    db.session.rollback()
+                    flash("Ce nom de cours existe déjà", "danger")
+        elif form_name == "equipment-create":
+            name = (request.form.get("name") or "").strip()
+            if not name:
+                flash("Indiquez un nom d'équipement", "danger")
+            else:
+                db.session.add(Equipment(name=name))
+                try:
+                    db.session.commit()
+                    flash("Équipement ajouté", "success")
+                except IntegrityError:
+                    db.session.rollback()
+                    flash("Équipement déjà existant", "danger")
+        elif form_name == "software-create":
+            name = (request.form.get("name") or "").strip()
+            if not name:
+                flash("Indiquez un nom de logiciel", "danger")
+            else:
+                db.session.add(Software(name=name))
+                try:
+                    db.session.commit()
+                    flash("Logiciel ajouté", "success")
+                except IntegrityError:
+                    db.session.rollback()
+                    flash("Logiciel déjà existant", "danger")
         return redirect(url_for("main.configuration"))
 
     periods = ClosingPeriod.ordered_periods()
@@ -742,6 +832,9 @@ def configuration():
         "config/index.html",
         closing_periods=closing_ranges,
         closing_period_records=periods,
+        course_names=course_names,
+        equipments=equipments,
+        softwares=softwares,
     )
 
 
@@ -1077,13 +1170,31 @@ def courses_list():
     softwares = Software.query.order_by(Software.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
     teachers = Teacher.query.order_by(Teacher.name).all()
+    course_names = CourseName.query.order_by(CourseName.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "create":
+            course_name_id = request.form.get("course_name_id")
+            try:
+                course_name = (
+                    CourseName.query.get(int(course_name_id)) if course_name_id else None
+                )
+            except (TypeError, ValueError):
+                course_name = None
+            if course_name is None:
+                flash(
+                    "Sélectionnez un nom de cours depuis la configuration.",
+                    "danger",
+                )
+                return redirect(url_for("main.courses_list"))
             course_type = _normalise_course_type(request.form.get("course_type"))
+            semester = _normalise_semester(request.form.get("semester"))
+            computers_required = _parse_non_negative_int(
+                request.form.get("computers_required"), 0
+            )
             course = Course(
-                name=request.form["name"],
+                name=Course.compose_name(course_type, course_name.name, semester),
                 description=request.form.get("description"),
                 session_length_hours=int(request.form.get("session_length_hours", 2)),
                 sessions_required=int(request.form.get("sessions_required", 1)),
@@ -1091,7 +1202,10 @@ def courses_list():
                 end_date=_parse_date(request.form.get("end_date")),
                 priority=int(request.form.get("priority", 1)),
                 course_type=course_type,
+                semester=semester,
+                configured_name=course_name,
                 requires_computers=bool(request.form.get("requires_computers")),
+                computers_required=computers_required,
             )
             selected_equipments = [
                 equipment
@@ -1130,6 +1244,9 @@ def courses_list():
         class_groups=class_groups,
         teachers=teachers,
         course_type_labels=COURSE_TYPE_LABELS,
+        course_names=course_names,
+        semester_choices=SEMESTER_CHOICES,
+        default_semester=DEFAULT_SEMESTER,
     )
 
 
@@ -1144,14 +1261,33 @@ def course_detail(course_id: int):
     teachers = Teacher.query.order_by(Teacher.name).all()
     rooms = Room.query.order_by(Room.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    course_names = CourseName.query.order_by(CourseName.name).all()
     class_links_map = {link.class_group_id: link for link in course.class_links}
 
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "update":
-            new_name = request.form.get("name", "").strip()
-            if new_name:
-                course.name = new_name
+            selected_course_name = None
+            course_name_id = request.form.get("course_name_id")
+            if course_name_id:
+                try:
+                    selected_course_name = CourseName.query.get(int(course_name_id))
+                except (TypeError, ValueError):
+                    selected_course_name = None
+            custom_name = (request.form.get("name") or "").strip()
+            if not selected_course_name and not custom_name and course_names:
+                flash(
+                    "Sélectionnez un nom de cours configuré ou saisissez un libellé personnalisé.",
+                    "danger",
+                )
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            base_label = (
+                selected_course_name.name
+                if selected_course_name
+                else custom_name
+                or course.base_display_name
+                or course.name
+            )
             course.description = request.form.get("description")
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.sessions_required = int(request.form.get("sessions_required", course.sessions_required))
@@ -1159,7 +1295,17 @@ def course_detail(course_id: int):
             course.end_date = _parse_date(request.form.get("end_date"))
             course.priority = int(request.form.get("priority", course.priority))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
+            course.semester = _normalise_semester(request.form.get("semester"))
+            course.configured_name = selected_course_name
+            course.name = Course.compose_name(
+                course.course_type,
+                base_label,
+                course.semester,
+            )
             course.requires_computers = bool(request.form.get("requires_computers"))
+            course.computers_required = _parse_non_negative_int(
+                request.form.get("computers_required"), course.computers_required
+            )
             selected_equipments = [
                 equipment
                 for equipment in (
@@ -1206,9 +1352,11 @@ def course_detail(course_id: int):
                 db.session.commit()
                 flash(str(exc), "danger")
         elif form_name == "update-class-teachers":
+            allowed_teacher_ids = {teacher.id for teacher in course.teachers if teacher.id}
             if course.is_cm:
                 teacher = _parse_teacher_selection(
-                    request.form.get("course_teacher_all")
+                    request.form.get("course_teacher_all"),
+                    allowed_ids=allowed_teacher_ids,
                 )
                 for link in course.class_links:
                     link.teacher_a = teacher
@@ -1218,24 +1366,60 @@ def course_detail(course_id: int):
                     teacher_a = _parse_teacher_selection(
                         request.form.get(
                             f"class_link_teacher_a_{link.class_group_id}"
-                        )
+                        ),
+                        allowed_ids=allowed_teacher_ids,
                     )
                     teacher_b = _parse_teacher_selection(
                         request.form.get(
                             f"class_link_teacher_b_{link.class_group_id}"
-                        )
+                        ),
+                        allowed_ids=allowed_teacher_ids,
                     )
                     link.teacher_a = teacher_a
                     link.teacher_b = teacher_b
             else:
                 for link in course.class_links:
                     teacher = _parse_teacher_selection(
-                        request.form.get(f"class_link_teacher_{link.class_group_id}")
+                        request.form.get(f"class_link_teacher_{link.class_group_id}"),
+                        allowed_ids=allowed_teacher_ids,
                     )
                     link.teacher_a = teacher
                     link.teacher_b = teacher if link.group_count == 2 and teacher else None
             db.session.commit()
             flash("Enseignants par classe mis à jour", "success")
+        elif form_name == "update-subgroups":
+            if not course.is_tp:
+                flash("Les sous-groupes ne concernent que les travaux pratiques.", "info")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            lookup = {str(name.id): name for name in course_names}
+            pending_updates: list[tuple[CourseClassLink, CourseName, CourseName]] = []
+            missing_for: list[str] = []
+            for link in course.class_links:
+                if not link.is_half_group:
+                    link.subgroup_a_course_name = None
+                    link.subgroup_b_course_name = None
+                    continue
+                key_a = request.form.get(f"subgroup_{link.class_group_id}_A") or ""
+                key_b = request.form.get(f"subgroup_{link.class_group_id}_B") or ""
+                name_a = lookup.get(key_a)
+                name_b = lookup.get(key_b)
+                if not name_a or not name_b:
+                    missing_for.append(link.class_group.name)
+                    continue
+                pending_updates.append((link, name_a, name_b))
+            if missing_for:
+                missing_list = ", ".join(sorted(missing_for))
+                flash(
+                    "Sélectionnez un nom de cours pour chaque sous-groupe (manquant : "
+                    f"{missing_list}).",
+                    "danger",
+                )
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            for link, name_a, name_b in pending_updates:
+                link.subgroup_a_course_name = name_a
+                link.subgroup_b_course_name = name_b
+            db.session.commit()
+            flash("Sous-groupes mis à jour", "success")
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
@@ -1272,7 +1456,7 @@ def course_detail(course_id: int):
                     return redirect(url_for("main.course_detail", course_id=course_id))
                 valid_labels = {label or None for label in link.group_labels()}
                 if subgroup_label not in valid_labels:
-                    flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
+                    flash("Choisissez un sous-groupe correspondant à la configuration", "danger")
                     return redirect(url_for("main.course_detail", course_id=course_id))
                 class_groups = [class_group]
                 primary_class = class_group
@@ -1330,6 +1514,12 @@ def course_detail(course_id: int):
         "error": "bg-danger",
     }
 
+    available_teachers = sorted(
+        course.teachers,
+        key=lambda teacher: (teacher.name or "").lower(),
+    )
+    course_base_name = _infer_course_base_label(course)
+
     return render_template(
         "courses/detail.html",
         course=course,
@@ -1339,6 +1529,11 @@ def course_detail(course_id: int):
         rooms=rooms,
         class_groups=class_groups,
         class_links_map=class_links_map,
+        course_names=course_names,
+        semester_choices=SEMESTER_CHOICES,
+        default_semester=DEFAULT_SEMESTER,
+        available_teachers=available_teachers,
+        course_base_name=course_base_name,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
@@ -1350,38 +1545,14 @@ def course_detail(course_id: int):
 
 @bp.route("/equipement", methods=["GET", "POST"])
 def equipment_list():
-    if request.method == "POST":
-        name = request.form["name"]
-        equipment = Equipment(name=name)
-        db.session.add(equipment)
-        try:
-            db.session.commit()
-            flash("Équipement ajouté", "success")
-        except IntegrityError:
-            db.session.rollback()
-            flash("Équipement déjà existant", "danger")
-        return redirect(url_for("main.equipment_list"))
-
-    equipments = Equipment.query.order_by(Equipment.name).all()
-    return render_template("equipment/list.html", equipments=equipments)
+    target = url_for("main.configuration") + "#config-equipments"
+    return redirect(target)
 
 
 @bp.route("/logiciel", methods=["GET", "POST"])
 def software_list():
-    if request.method == "POST":
-        name = request.form["name"]
-        software = Software(name=name)
-        db.session.add(software)
-        try:
-            db.session.commit()
-            flash("Logiciel ajouté", "success")
-        except IntegrityError:
-            db.session.rollback()
-            flash("Logiciel déjà existant", "danger")
-        return redirect(url_for("main.software_list"))
-
-    softwares = Software.query.order_by(Software.name).all()
-    return render_template("software/list.html", softwares=softwares)
+    target = url_for("main.configuration") + "#config-softwares"
+    return redirect(target)
 
 
 def _parse_iso_datetime(value: str) -> datetime:

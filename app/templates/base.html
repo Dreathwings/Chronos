@@ -267,12 +267,27 @@
             node.textContent = classCount > 1 ? 'Classes' : 'Classe';
           }
         });
-        const subgroupText = props.subgroup ? `Groupe ${props.subgroup}` : '';
+        const subgroupText = props.subgroup_name || (props.subgroup ? `Groupe ${props.subgroup}` : '');
         chronosSetField(modal, 'subgroup', subgroupText);
         chronosSetField(modal, 'room', props.room || '');
         let computersText = '';
-        if (typeof props.requires_computers === 'boolean') {
-          computersText = props.requires_computers ? 'Oui' : 'Non';
+        if (props.requires_computers) {
+          const normaliseCount = (value) => {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric : NaN;
+          };
+          const requiredCount = normaliseCount(props.computers_required);
+          const roomCount = normaliseCount(props.room_computers);
+          const parts = ['Oui'];
+          if (!Number.isNaN(requiredCount) && requiredCount > 0) {
+            parts.push(`${requiredCount} poste${requiredCount > 1 ? 's' : ''} requis`);
+          }
+          if (!Number.isNaN(roomCount) && roomCount >= 0) {
+            parts.push(`Salle : ${roomCount}`);
+          }
+          computersText = parts.join(' — ');
+        } else if (props.requires_computers === false) {
+          computersText = 'Non';
         }
         chronosSetField(modal, 'computers', computersText);
         const requiredSoftwares = Array.isArray(props.course_softwares) ? props.course_softwares : [];
@@ -462,8 +477,6 @@
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.classes_list') }}">Classes</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.rooms_list') }}">Salles</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.courses_list') }}">Cours</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.equipment_list') }}">Équipements</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('main.software_list') }}">Logiciels</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.configuration') }}">Configuration</a></li>
           </ul>
         </div>
