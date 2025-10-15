@@ -664,6 +664,37 @@ def _existing_hours_by_day(
     return per_day
 
 
+def _weekday_frequency_for_groups(
+    course: Course,
+    class_groups: Iterable[ClassGroup],
+    *,
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+) -> Counter[int]:
+    groups = [group for group in class_groups if group is not None]
+    if not groups:
+        return Counter()
+    target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
+    weekday_counter: Counter[int] = Counter()
+    seen: set[int] = set()
+    candidates = list(course.sessions) + list(pending_sessions)
+    for session in candidates:
+        marker = id(session)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if session.course_id != course.id:
+            continue
+        if target_label is not None:
+            session_label = _normalise_label(session.subgroup_label)
+            if session_label and session_label != target_label:
+                continue
+        if not any(_session_involves_class(session, group) for group in groups):
+            continue
+        weekday_counter[session.start_time.weekday()] += 1
+    return weekday_counter
+
+
 def _preferred_slot_index_for_groups(
     course: Course,
     class_groups: Iterable[ClassGroup],
@@ -1441,6 +1472,12 @@ def generate_schedule(
             per_day_hours = {
                 day: existing_day_hours.get(day, 0) for day in available_days
             }
+            weekday_frequencies = _weekday_frequency_for_groups(
+                course,
+                [class_group],
+                pending_sessions=created_sessions,
+                subgroup_label=subgroup_label,
+            )
             blocks_total = max(
                 (hours_needed + slot_length_hours - 1) // slot_length_hours,
                 1,
@@ -1464,6 +1501,7 @@ def generate_schedule(
                 ordered_days = sorted(
                     available_days,
                     key=lambda d: (
+                        -weekday_frequencies.get(d.weekday(), 0),
                         per_day_hours[d],
                         abs(day_indices[d] - anchor_index),
                         day_indices[d],
