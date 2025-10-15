@@ -78,6 +78,8 @@ CREATE TABLE `course` (
   `end_date` date DEFAULT NULL,
   `priority` int(11) NOT NULL,
   `course_type` varchar(3) NOT NULL,
+  `semester` varchar(2) NOT NULL,
+  `course_name_id` int(11) DEFAULT NULL,
   `requires_computers` tinyint(1) NOT NULL,
   `computers_required` int(11) NOT NULL,
   `created_at` datetime NOT NULL,
@@ -88,11 +90,11 @@ CREATE TABLE `course` (
 -- Déchargement des données de la table `course`
 --
 
-INSERT INTO `course` (`id`, `name`, `description`, `session_length_hours`, `sessions_required`, `start_date`, `end_date`, `priority`, `course_type`, `requires_computers`, `computers_required`, `created_at`, `updated_at`) VALUES
-(1, 'CM Elec', '', 2, 2, '2025-09-15', '2025-11-15', 1, 'CM', 0, 0, '2025-10-15 09:11:48', '2025-10-15 09:13:43'),
-(3, 'TD Elec', '', 2, 8, '2025-09-15', '2025-11-15', 1, 'TD', 1, 0, '2025-10-15 09:13:09', '2025-10-15 09:13:23'),
-(4, 'TP Elec', '', 2, 8, '2025-09-15', '2025-11-15', 1, 'TP', 1, 0, '2025-10-15 09:16:09', '2025-10-15 09:16:16'),
-(5, 'ppp', '', 2, 2, '2025-09-01', '2025-09-14', 1, 'TP', 0, 0, '2025-10-15 09:44:56', '2025-10-15 09:53:46');
+INSERT INTO `course` (`id`, `name`, `description`, `session_length_hours`, `sessions_required`, `start_date`, `end_date`, `priority`, `course_type`, `semester`, `course_name_id`, `requires_computers`, `computers_required`, `created_at`, `updated_at`) VALUES
+(1, 'CM Elec', '', 2, 2, '2025-09-15', '2025-11-15', 1, 'CM', 'S1', NULL, 0, 0, '2025-10-15 09:11:48', '2025-10-15 09:13:43'),
+(3, 'TD Elec', '', 2, 8, '2025-09-15', '2025-11-15', 1, 'TD', 'S1', NULL, 1, 0, '2025-10-15 09:13:09', '2025-10-15 09:13:23'),
+(4, 'TP Elec', '', 2, 8, '2025-09-15', '2025-11-15', 1, 'TP', 'S1', NULL, 1, 0, '2025-10-15 09:16:09', '2025-10-15 09:16:16'),
+(5, 'ppp', '', 2, 2, '2025-09-01', '2025-09-14', 1, 'TP', 'S1', NULL, 0, 0, '2025-10-15 09:44:56', '2025-10-15 09:53:46');
 
 -- --------------------------------------------------------
 
@@ -637,7 +639,8 @@ ALTER TABLE `closing_period`
 --
 ALTER TABLE `course`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `name` (`name`);
+  ADD UNIQUE KEY `name` (`name`),
+  ADD KEY `course_name_id` (`course_name_id`);
 
 --
 -- Index pour la table `course_class`
@@ -822,6 +825,12 @@ ALTER TABLE `teacher_availability`
 --
 -- Contraintes pour les tables déchargées
 --
+
+--
+-- Contraintes pour la table `course`
+--
+ALTER TABLE `course`
+  ADD CONSTRAINT `course_ibfk_1` FOREIGN KEY (`course_name_id`) REFERENCES `course_name` (`id`);
 
 --
 -- Contraintes pour la table `course_class`

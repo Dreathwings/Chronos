@@ -32,12 +32,15 @@
             <form method="post" class="vstack gap-3">
               <input type="hidden" name="form" value="update">
               <div>
-                <label class="form-label">Nom</label>
+                <label class="form-label">Nom du cours</label>
                 {% if course_names %}
                 <select class="form-select" name="course_name_id">
                   <option value="">— Nom personnalisé —</option>
                   {% for course_name in course_names %}
-                  <option value="{{ course_name.id }}" {% if course_name.name == course.name %}selected{% endif %}>{{ course_name.name }}</option>
+                  <option
+                    value="{{ course_name.id }}"
+                    {% if course.configured_name and course.configured_name.id == course_name.id %}selected{% endif %}
+                  >{{ course_name.name }}</option>
                   {% endfor %}
                 </select>
                 <div class="form-text">Sélectionnez un nom configuré ou conservez l'option personnalisée pour saisir librement.</div>
@@ -46,14 +49,22 @@
                   Aucun nom de cours n'est encore configuré. Saisissez un nom personnalisé ci-dessous.
                 </div>
                 {% endif %}
-                <input type="text" class="form-control mt-2" name="name" value="{{ course.name }}" placeholder="Nom personnalisé">
+                <input
+                  type="text"
+                  class="form-control mt-2"
+                  name="name"
+                  value="{{ course_base_name }}"
+                  placeholder="Nom personnalisé"
+                >
+                <div class="form-text">Nom de base utilisé pour composer le libellé final.</div>
+                <div class="form-text">Nom généré : <strong>{{ course.name }}</strong></div>
               </div>
           <div>
             <label class="form-label">Description</label>
             <textarea name="description" class="form-control" rows="3">{{ course.description }}</textarea>
           </div>
           <div class="row g-2">
-            <div class="col">
+            <div class="col-md-4">
               <label class="form-label">Type de cours</label>
               <select class="form-select" name="course_type">
                 <option value="CM" {% if course.course_type == 'CM' %}selected{% endif %}>Cours magistral</option>
@@ -62,7 +73,15 @@
                 <option value="SAE" {% if course.course_type == 'SAE' %}selected{% endif %}>Situation d'apprentissage et d'évaluation</option>
               </select>
             </div>
-            <div class="col">
+            <div class="col-md-4">
+              <label class="form-label">Semestre</label>
+              <select class="form-select" name="semester">
+                {% for semester in semester_choices %}
+                <option value="{{ semester }}" {% if course.semester == semester %}selected{% endif %}>{{ semester }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
               <label class="form-label">Durée séance (h)</label>
               <input type="number" class="form-control" name="session_length_hours" value="{{ course.session_length_hours }}" min="1">
             </div>
@@ -115,13 +134,13 @@
               placeholder="Rechercher un enseignant..."
               data-filter-target="#course-teachers-list"
             >
-            <div id="course-teachers-list" class="vstack gap-1">
-              {% for teacher in teachers %}
-              <div class="form-check" data-filter-item data-filter-text="{{ teacher.name|lower|e }}">
-                <input class="form-check-input" type="checkbox" name="teachers" value="{{ teacher.id }}" id="teacher-{{ teacher.id }}" {% if teacher in course.teachers %}checked{% endif %}>
-                <label class="form-check-label" for="teacher-{{ teacher.id }}">{{ teacher.name }}</label>
-              </div>
-              {% endfor %}
+              <div id="course-teachers-list" class="vstack gap-1">
+                {% for teacher in teachers %}
+                <div class="form-check" data-filter-item data-filter-text="{{ teacher.name|lower|e }}">
+                  <input class="form-check-input" type="checkbox" name="teachers" value="{{ teacher.id }}" id="teacher-{{ teacher.id }}" {% if teacher in course.teachers %}checked{% endif %}>
+                  <label class="form-check-label" for="teacher-{{ teacher.id }}">{{ teacher.name }}</label>
+                </div>
+                {% endfor %}
             </div>
           </div>
           <div>
@@ -248,7 +267,7 @@
           {% endif %}
         </form>
         {% endif %}
-        {% if teachers %}
+        {% if available_teachers %}
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="update-class-teachers">
           {% if course.course_type == 'CM' %}
@@ -266,7 +285,7 @@
             </div>
             <select class="form-select form-select-sm" name="course_teacher_all">
               <option value="" {% if not ns.shared_teacher %}selected{% endif %}>— Aucun enseignant —</option>
-              {% for teacher in teachers %}
+              {% for teacher in available_teachers %}
               <option value="{{ teacher.id }}" {% if ns.shared_teacher and teacher.id == ns.shared_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
               {% endfor %}
             </select>
@@ -281,7 +300,7 @@
                 <label class="form-label small mb-1">Enseignant 1</label>
                 <select class="form-select form-select-sm" name="class_link_teacher_a_{{ link.class_group_id }}">
                   <option value="" {% if not link.teacher_a %}selected{% endif %}>— Aucun enseignant —</option>
-                  {% for teacher in teachers %}
+                  {% for teacher in available_teachers %}
                   <option value="{{ teacher.id }}" {% if link.teacher_a and teacher.id == link.teacher_a.id %}selected{% endif %}>{{ teacher.name }}</option>
                   {% endfor %}
                 </select>
@@ -290,7 +309,7 @@
                 <label class="form-label small mb-1">Enseignant 2</label>
                 <select class="form-select form-select-sm" name="class_link_teacher_b_{{ link.class_group_id }}">
                   <option value="" {% if not link.teacher_b %}selected{% endif %}>— Aucun enseignant —</option>
-                  {% for teacher in teachers %}
+                  {% for teacher in available_teachers %}
                   <option value="{{ teacher.id }}" {% if link.teacher_b and teacher.id == link.teacher_b.id %}selected{% endif %}>{{ teacher.name }}</option>
                   {% endfor %}
                 </select>
@@ -330,7 +349,7 @@
             {% endif %}
             <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}">
               <option value="" {% if not assigned_teacher %}selected{% endif %}>— Aucun enseignant —</option>
-              {% for teacher in teachers %}
+              {% for teacher in available_teachers %}
               <option value="{{ teacher.id }}" {% if assigned_teacher and teacher.id == assigned_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
               {% endfor %}
             </select>
@@ -340,7 +359,7 @@
           <button type="submit" class="btn btn-outline-secondary">Mettre à jour</button>
         </form>
         {% else %}
-        <p class="text-muted mb-0 small">Ajoutez des enseignants dans la liste ci-dessus pour les associer aux classes.</p>
+        <p class="text-muted mb-0 small">Ajoutez des enseignants dans la section Contraintes pour les associer aux classes.</p>
         {% endif %}
           </div>
         </div>
