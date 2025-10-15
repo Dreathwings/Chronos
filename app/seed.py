@@ -21,8 +21,9 @@ def seed_data() -> None:
 
     today = date.today()
 
+    python_course_name = CourseName(name="Python Avancé")
     python = Course(
-        name="Python Avancé",
+        name=Course.compose_name("TD", python_course_name.name, "S1"),
         description="Programmation avancée en Python",
         session_length_hours=2,
         sessions_required=4,
@@ -30,6 +31,8 @@ def seed_data() -> None:
         end_date=today + timedelta(days=10),
         priority=1,
         course_type="TD",
+        semester="S1",
+        configured_name=python_course_name,
         requires_computers=True,
         computers_required=20,
     )
@@ -72,6 +75,7 @@ def seed_data() -> None:
 
     db.session.add_all([
         python,
+        python_course_name,
         teacher,
         room,
         projector,

@@ -196,6 +196,7 @@ COURSE_TYPE_LABELS = {
     "TP": "Travaux pratiques",
     "SAE": "Situation d'apprentissage et d'évaluation",
 }
+SEMESTER_CHOICES = ("S1", "S2", "S3", "S4", "S5", "S6")
 
 
 class Course(db.Model, TimeStampedModel):
@@ -208,10 +209,17 @@ class Course(db.Model, TimeStampedModel):
     end_date: Mapped[Optional[date]] = mapped_column(Date)
     priority: Mapped[int] = mapped_column(Integer, default=1)
     course_type: Mapped[str] = mapped_column(String(3), default="CM")
+    semester: Mapped[str] = mapped_column(String(2), default="S1")
+    course_name_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("course_name.id"), nullable=True
+    )
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
     computers_required: Mapped[int] = mapped_column(Integer, default=0)
 
+    configured_name: Mapped[Optional["CourseName"]] = relationship(
+        "CourseName", back_populates="courses"
+    )
     teachers: Mapped[List[Teacher]] = relationship(secondary=course_teacher, back_populates="courses")
     softwares: Mapped[List["Software"]] = relationship(secondary=course_software, back_populates="courses")
     equipments: Mapped[List["Equipment"]] = relationship(secondary=course_equipment, back_populates="courses")
@@ -242,10 +250,39 @@ class Course(db.Model, TimeStampedModel):
             "course_type IN ('CM','TD','TP','SAE')",
             name="chk_course_type_valid",
         ),
+        CheckConstraint(
+            "semester IN ('S1','S2','S3','S4','S5','S6')",
+            name="chk_course_semester_valid",
+        ),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Course<{self.id} {self.name}>"
+
+    @staticmethod
+    def compose_name(course_type: str, base_label: str, semester: str) -> str:
+        parts: list[str] = []
+        course_type = (course_type or "").strip().upper()
+        base_label = (base_label or "").strip()
+        semester = (semester or "").strip().upper()
+        if course_type:
+            parts.append(course_type)
+        if base_label:
+            parts.append(base_label)
+        if semester:
+            parts.append(semester)
+        return " - ".join(parts)
+
+    @property
+    def base_display_name(self) -> str:
+        name = self.name or ""
+        prefix = f"{self.course_type} - " if self.course_type else ""
+        suffix = f" - {self.semester}" if self.semester else ""
+        if prefix and name.startswith(prefix):
+            name = name[len(prefix) :]
+        if suffix and name.endswith(suffix):
+            name = name[: len(name) - len(suffix)]
+        return name.strip()
 
     @property
     def is_tp(self) -> bool:
@@ -523,6 +560,10 @@ class CourseName(db.Model, TimeStampedModel):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+
+    courses: Mapped[List[Course]] = relationship(
+        "Course", back_populates="configured_name"
+    )
 
     subgroup_links_a: Mapped[List["CourseClassLink"]] = relationship(
         "CourseClassLink",

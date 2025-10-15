@@ -24,6 +24,7 @@ from .models import (
     Software,
     Teacher,
     TeacherAvailability,
+    SEMESTER_CHOICES,
 )
 from .scheduler import (
     SCHEDULE_SLOTS,
@@ -58,6 +59,7 @@ COURSE_TYPE_LABELS = {
     "TP": "Travaux pratiques",
     "SAE": "Situation d'apprentissage et d'évaluation",
 }
+DEFAULT_SEMESTER = SEMESTER_CHOICES[0]
 
 
 def _normalise_course_type(raw_value: str | None) -> str:
@@ -67,6 +69,15 @@ def _normalise_course_type(raw_value: str | None) -> str:
     if raw_value in COURSE_TYPE_CHOICES:
         return raw_value
     return "CM"
+
+
+def _normalise_semester(raw_value: str | None) -> str:
+    if not raw_value:
+        return DEFAULT_SEMESTER
+    value = raw_value.strip().upper()
+    if value in SEMESTER_CHOICES:
+        return value
+    return DEFAULT_SEMESTER
 
 
 def _parse_non_negative_int(raw_value: str | None, default: int = 0) -> int:
@@ -369,14 +380,27 @@ def _class_unavailability_backgrounds(class_group: ClassGroup) -> list[dict[str,
     return backgrounds
 
 
-def _parse_teacher_selection(raw_value: str | None) -> Teacher | None:
+def _parse_teacher_selection(
+    raw_value: str | None, *, allowed_ids: set[int] | None = None
+) -> Teacher | None:
     if not raw_value:
         return None
     try:
         teacher_id = int(raw_value)
     except (TypeError, ValueError):
         return None
+    if allowed_ids is not None and teacher_id not in allowed_ids:
+        return None
     return Teacher.query.get(teacher_id)
+
+
+def _infer_course_base_label(course: Course) -> str:
+    if course.configured_name:
+        return course.configured_name.name
+    base = course.base_display_name
+    if base:
+        return base
+    return course.name
 
 
 def _parse_class_group_choice(raw_value: str | None) -> tuple[int, str | None] | None:
@@ -1165,11 +1189,12 @@ def courses_list():
                 )
                 return redirect(url_for("main.courses_list"))
             course_type = _normalise_course_type(request.form.get("course_type"))
+            semester = _normalise_semester(request.form.get("semester"))
             computers_required = _parse_non_negative_int(
                 request.form.get("computers_required"), 0
             )
             course = Course(
-                name=course_name.name,
+                name=Course.compose_name(course_type, course_name.name, semester),
                 description=request.form.get("description"),
                 session_length_hours=int(request.form.get("session_length_hours", 2)),
                 sessions_required=int(request.form.get("sessions_required", 1)),
@@ -1177,6 +1202,8 @@ def courses_list():
                 end_date=_parse_date(request.form.get("end_date")),
                 priority=int(request.form.get("priority", 1)),
                 course_type=course_type,
+                semester=semester,
+                configured_name=course_name,
                 requires_computers=bool(request.form.get("requires_computers")),
                 computers_required=computers_required,
             )
@@ -1218,6 +1245,8 @@ def courses_list():
         teachers=teachers,
         course_type_labels=COURSE_TYPE_LABELS,
         course_names=course_names,
+        semester_choices=SEMESTER_CHOICES,
+        default_semester=DEFAULT_SEMESTER,
     )
 
 
@@ -1245,11 +1274,20 @@ def course_detail(course_id: int):
                     selected_course_name = CourseName.query.get(int(course_name_id))
                 except (TypeError, ValueError):
                     selected_course_name = None
-            new_name = (request.form.get("name", "") or "").strip()
-            if selected_course_name:
-                course.name = selected_course_name.name
-            elif new_name:
-                course.name = new_name
+            custom_name = (request.form.get("name") or "").strip()
+            if not selected_course_name and not custom_name and course_names:
+                flash(
+                    "Sélectionnez un nom de cours configuré ou saisissez un libellé personnalisé.",
+                    "danger",
+                )
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            base_label = (
+                selected_course_name.name
+                if selected_course_name
+                else custom_name
+                or course.base_display_name
+                or course.name
+            )
             course.description = request.form.get("description")
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.sessions_required = int(request.form.get("sessions_required", course.sessions_required))
@@ -1257,6 +1295,13 @@ def course_detail(course_id: int):
             course.end_date = _parse_date(request.form.get("end_date"))
             course.priority = int(request.form.get("priority", course.priority))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
+            course.semester = _normalise_semester(request.form.get("semester"))
+            course.configured_name = selected_course_name
+            course.name = Course.compose_name(
+                course.course_type,
+                base_label,
+                course.semester,
+            )
             course.requires_computers = bool(request.form.get("requires_computers"))
             course.computers_required = _parse_non_negative_int(
                 request.form.get("computers_required"), course.computers_required
@@ -1307,9 +1352,11 @@ def course_detail(course_id: int):
                 db.session.commit()
                 flash(str(exc), "danger")
         elif form_name == "update-class-teachers":
+            allowed_teacher_ids = {teacher.id for teacher in course.teachers if teacher.id}
             if course.is_cm:
                 teacher = _parse_teacher_selection(
-                    request.form.get("course_teacher_all")
+                    request.form.get("course_teacher_all"),
+                    allowed_ids=allowed_teacher_ids,
                 )
                 for link in course.class_links:
                     link.teacher_a = teacher
@@ -1319,19 +1366,22 @@ def course_detail(course_id: int):
                     teacher_a = _parse_teacher_selection(
                         request.form.get(
                             f"class_link_teacher_a_{link.class_group_id}"
-                        )
+                        ),
+                        allowed_ids=allowed_teacher_ids,
                     )
                     teacher_b = _parse_teacher_selection(
                         request.form.get(
                             f"class_link_teacher_b_{link.class_group_id}"
-                        )
+                        ),
+                        allowed_ids=allowed_teacher_ids,
                     )
                     link.teacher_a = teacher_a
                     link.teacher_b = teacher_b
             else:
                 for link in course.class_links:
                     teacher = _parse_teacher_selection(
-                        request.form.get(f"class_link_teacher_{link.class_group_id}")
+                        request.form.get(f"class_link_teacher_{link.class_group_id}"),
+                        allowed_ids=allowed_teacher_ids,
                     )
                     link.teacher_a = teacher
                     link.teacher_b = teacher if link.group_count == 2 and teacher else None
@@ -1464,6 +1514,12 @@ def course_detail(course_id: int):
         "error": "bg-danger",
     }
 
+    available_teachers = sorted(
+        course.teachers,
+        key=lambda teacher: (teacher.name or "").lower(),
+    )
+    course_base_name = _infer_course_base_label(course)
+
     return render_template(
         "courses/detail.html",
         course=course,
@@ -1474,6 +1530,10 @@ def course_detail(course_id: int):
         class_groups=class_groups,
         class_links_map=class_links_map,
         course_names=course_names,
+        semester_choices=SEMESTER_CHOICES,
+        default_semester=DEFAULT_SEMESTER,
+        available_teachers=available_teachers,
+        course_base_name=course_base_name,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
