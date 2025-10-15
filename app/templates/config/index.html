@@ -56,9 +56,6 @@
         <h2 class="h5 mb-0">Noms de cours</h2>
       </div>
       <div class="card-body">
-        <p class="text-muted">
-          Les sous-groupes de travaux pratiques utilisent cette liste pour correspondre aux cours réels planifiés.
-        </p>
         <form method="post" class="vstack gap-2">
           <input type="hidden" name="form" value="course-name-create">
           <label class="form-label" for="new-course-name">Nouveau nom</label>
@@ -135,7 +132,7 @@
           </li>
           {% else %}
           <li class="list-group-item">Aucun logiciel pour le moment.</li>
-          {% endif %}
+          {% endfor %}
         </ul>
       </div>
     </div>
