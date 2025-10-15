@@ -276,6 +276,14 @@ class Course(db.Model, TimeStampedModel):
             return [None]
         return link.group_labels()
 
+    def subgroup_name_for(
+        self, class_group: "ClassGroup" | int, subgroup_label: str | None
+    ) -> str | None:
+        link = self.class_link_for(class_group)
+        if link is None:
+            return None
+        return link.subgroup_name_for(subgroup_label)
+
     def capacity_needed_for(self, class_group: "ClassGroup" | int) -> int:
         link = self.class_link_for(class_group)
         if isinstance(class_group, int):
@@ -358,8 +366,22 @@ class Session(db.Model, TimeStampedModel):
     def title_with_room(self, room_label: str | None = None) -> str:
         room_name = room_label or self.room.name
         class_label = " + ".join(self.attendee_names()) or self.class_group.name
-        group_suffix = f" — groupe {self.subgroup_label}" if self.subgroup_label else ""
+        subgroup_name = self.subgroup_display_name()
+        if subgroup_name:
+            group_suffix = f" — {subgroup_name}"
+        elif self.subgroup_label:
+            group_suffix = f" — groupe {self.subgroup_label}"
+        else:
+            group_suffix = ""
         return f"{self.course.name} — {class_label}{group_suffix} ({room_name})"
+
+    def subgroup_display_name(self) -> Optional[str]:
+        if not self.subgroup_label:
+            return None
+        course = getattr(self, "course", None)
+        if course is None:
+            return None
+        return course.subgroup_name_for(self.class_group_id, self.subgroup_label)
 
     def as_event(self) -> dict[str, object]:
         title = self.title_with_room()
@@ -398,6 +420,7 @@ class Session(db.Model, TimeStampedModel):
                 "class_group": ", ".join(class_names),
                 "class_groups": class_names,
                 "subgroup": self.subgroup_label,
+                "subgroup_name": self.subgroup_display_name(),
                 "segments": [
                     {
                         "id": str(self.id),
@@ -493,6 +516,31 @@ class Software(db.Model):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"Software<{self.name}>"
+
+
+class CourseName(db.Model, TimeStampedModel):
+    __tablename__ = "course_name"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+
+    subgroup_links_a: Mapped[List["CourseClassLink"]] = relationship(
+        "CourseClassLink",
+        foreign_keys="CourseClassLink.subgroup_a_course_name_id",
+        back_populates="subgroup_a_course_name",
+    )
+    subgroup_links_b: Mapped[List["CourseClassLink"]] = relationship(
+        "CourseClassLink",
+        foreign_keys="CourseClassLink.subgroup_b_course_name_id",
+        back_populates="subgroup_b_course_name",
+    )
+
+    @property
+    def usage_count(self) -> int:
+        return len(self.subgroup_links_a) + len(self.subgroup_links_b)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"CourseName<{self.name}>"
 
 
 class TeacherAvailability(db.Model, TimeStampedModel):
@@ -608,11 +656,23 @@ class CourseClassLink(db.Model):
     group_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     teacher_a_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teacher.id"))
     teacher_b_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teacher.id"))
+    subgroup_a_course_name_id: Mapped[Optional[int]] = mapped_column(ForeignKey("course_name.id"))
+    subgroup_b_course_name_id: Mapped[Optional[int]] = mapped_column(ForeignKey("course_name.id"))
 
     course: Mapped[Course] = relationship(back_populates="class_links")
     class_group: Mapped[ClassGroup] = relationship(back_populates="course_links")
     teacher_a: Mapped[Optional[Teacher]] = relationship("Teacher", foreign_keys=[teacher_a_id])
     teacher_b: Mapped[Optional[Teacher]] = relationship("Teacher", foreign_keys=[teacher_b_id])
+    subgroup_a_course_name: Mapped[Optional[CourseName]] = relationship(
+        "CourseName",
+        foreign_keys=[subgroup_a_course_name_id],
+        back_populates="subgroup_links_a",
+    )
+    subgroup_b_course_name: Mapped[Optional[CourseName]] = relationship(
+        "CourseName",
+        foreign_keys=[subgroup_b_course_name_id],
+        back_populates="subgroup_links_b",
+    )
 
     __table_args__ = (
         CheckConstraint("group_count >= 1 AND group_count <= 2", name="chk_course_class_group_count"),
@@ -629,6 +689,36 @@ class CourseClassLink(db.Model):
         if self.group_count == 2:
             return ["A", "B"]
         return [None]
+
+    def subgroup_course_name_for(self, subgroup_label: str | None) -> CourseName | None:
+        if not subgroup_label or self.group_count != 2:
+            return None
+        label = (subgroup_label or "").strip().upper()
+        if label == "A":
+            return self.subgroup_a_course_name
+        if label == "B":
+            return self.subgroup_b_course_name
+        return None
+
+    def subgroup_name_for(self, subgroup_label: str | None) -> str:
+        if self.group_count != 2 or not subgroup_label:
+            return self.course.name
+        name = self.subgroup_course_name_for(subgroup_label)
+        if name is not None:
+            return name.name
+        return f"Groupe {(subgroup_label or '').strip().upper()}"
+
+    def labeled_subgroups(self) -> list[tuple[str | None, str]]:
+        return [
+            (label, self.subgroup_name_for(label))
+            for label in self.group_labels()
+        ]
+
+    @property
+    def has_named_subgroups(self) -> bool:
+        if self.group_count != 2:
+            return True
+        return bool(self.subgroup_a_course_name and self.subgroup_b_course_name)
 
     def assigned_teachers(self) -> list[Teacher]:
         teachers: list[Teacher] = []
@@ -674,8 +764,8 @@ class CourseClassLink(db.Model):
         teacher = self.teacher_a or self.teacher_b
         if self.group_count == 2:
             return [
-                ("Groupe A", self.teacher_for_label("A")),
-                ("Groupe B", self.teacher_for_label("B")),
+                (self.subgroup_name_for("A"), self.teacher_for_label("A")),
+                (self.subgroup_name_for("B"), self.teacher_for_label("B")),
             ]
         return [("", teacher)]
 

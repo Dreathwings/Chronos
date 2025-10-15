@@ -5,6 +5,7 @@ from .models import (
     ClassGroup,
     Course,
     CourseClassLink,
+    CourseName,
     Equipment,
     Room,
     Session,
@@ -63,10 +64,22 @@ def seed_data() -> None:
 
     python.teachers.append(teacher)
 
+    python_group_a = CourseName(name="Python Avancé — Groupe A")
+    python_group_b = CourseName(name="Python Avancé — Groupe B")
+
     class_a = ClassGroup(name="Classe A", size=20)
     python.class_links.append(CourseClassLink(class_group=class_a))
 
-    db.session.add_all([python, teacher, room, projector, vscode, class_a])
+    db.session.add_all([
+        python,
+        teacher,
+        room,
+        projector,
+        vscode,
+        class_a,
+        python_group_a,
+        python_group_b,
+    ])
     db.session.flush()
 
     sample_start = datetime.combine(today, time(8, 0))

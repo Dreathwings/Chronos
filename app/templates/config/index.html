@@ -48,6 +48,99 @@
     </div>
   </div>
 </form>
+
+<div class="row row-cols-1 row-cols-lg-3 g-4">
+  <div class="col">
+    <div class="card h-100" id="config-course-names">
+      <div class="card-header">
+        <h2 class="h5 mb-0">Noms de cours</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted">
+          Les sous-groupes de travaux pratiques utilisent cette liste pour correspondre aux cours réels planifiés.
+        </p>
+        <form method="post" class="vstack gap-2">
+          <input type="hidden" name="form" value="course-name-create">
+          <label class="form-label" for="new-course-name">Nouveau nom</label>
+          <input type="text" class="form-control" name="name" id="new-course-name" placeholder="Ex. Mathématiques A" required>
+          <div class="text-end">
+            <button type="submit" class="btn btn-outline-primary btn-sm">Ajouter</button>
+          </div>
+        </form>
+        <hr>
+        <h3 class="h6">Noms disponibles</h3>
+        <ul class="list-group list-group-flush">
+          {% for name in course_names %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span>{{ name.name }}</span>
+            <span class="badge bg-light text-dark">{{ name.usage_count }} sous-groupe{% if name.usage_count > 1 %}s{% endif %}</span>
+          </li>
+          {% else %}
+          <li class="list-group-item">Ajoutez un premier nom pour commencer.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="card h-100" id="config-equipments">
+      <div class="card-header">
+        <h2 class="h5 mb-0">Équipements</h2>
+      </div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-2">
+          <input type="hidden" name="form" value="equipment-create">
+          <label class="form-label" for="new-equipment-name">Nouvel équipement</label>
+          <input type="text" class="form-control" name="name" id="new-equipment-name" required>
+          <div class="text-end">
+            <button type="submit" class="btn btn-outline-primary btn-sm">Ajouter</button>
+          </div>
+        </form>
+        <hr>
+        <h3 class="h6">Référentiel équipements</h3>
+        <ul class="list-group list-group-flush">
+          {% for equipment in equipments %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ equipment.name }}
+            <span class="badge bg-light text-dark">{{ equipment.rooms|length }} salles • {{ equipment.courses|length }} cours</span>
+          </li>
+          {% else %}
+          <li class="list-group-item">Aucun équipement pour le moment.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="card h-100" id="config-softwares">
+      <div class="card-header">
+        <h2 class="h5 mb-0">Logiciels</h2>
+      </div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-2">
+          <input type="hidden" name="form" value="software-create">
+          <label class="form-label" for="new-software-name">Nouveau logiciel</label>
+          <input type="text" class="form-control" name="name" id="new-software-name" required>
+          <div class="text-end">
+            <button type="submit" class="btn btn-outline-primary btn-sm">Ajouter</button>
+          </div>
+        </form>
+        <hr>
+        <h3 class="h6">Référentiel logiciels</h3>
+        <ul class="list-group list-group-flush">
+          {% for software in softwares %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ software.name }}
+            <span class="badge bg-light text-dark">{{ software.rooms|length }} salles • {{ software.courses|length }} cours</span>
+          </li>
+          {% else %}
+          <li class="list-group-item">Aucun logiciel pour le moment.</li>
+          {% endif %}
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

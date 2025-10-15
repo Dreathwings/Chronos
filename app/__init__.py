@@ -47,6 +47,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_session_class_group_column()
         _ensure_session_subgroup_column()
         _ensure_course_class_group_count_column()
+        _ensure_course_class_subgroup_name_columns()
         _ensure_course_class_teacher_columns()
         _ensure_course_type_column()
         _ensure_session_attendance_backfill()
@@ -197,6 +198,32 @@ def _ensure_course_class_teacher_columns() -> None:
                 connection.execute(text(statement))
     except SQLAlchemyError as exc:  # pragma: no cover
         current_app.logger.warning("Unable to add teacher columns to course_class: %s", exc)
+
+
+def _ensure_course_class_subgroup_name_columns() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course_class" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course_class")}
+    statements: list[str] = []
+    if "subgroup_a_course_name_id" not in existing_columns:
+        statements.append("ALTER TABLE course_class ADD COLUMN subgroup_a_course_name_id INTEGER")
+    if "subgroup_b_course_name_id" not in existing_columns:
+        statements.append("ALTER TABLE course_class ADD COLUMN subgroup_b_course_name_id INTEGER")
+
+    if not statements:
+        return
+
+    try:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+    except SQLAlchemyError as exc:  # pragma: no cover
+        current_app.logger.warning(
+            "Unable to add subgroup name columns to course_class: %s", exc
+        )
 
 
 def _ensure_course_type_column() -> None:

@@ -33,8 +33,21 @@
               <input type="hidden" name="form" value="update">
               <div>
                 <label class="form-label">Nom</label>
-                <input type="text" class="form-control" name="name" value="{{ course.name }}" required>
-          </div>
+                {% if course_names %}
+                <select class="form-select" name="course_name_id">
+                  <option value="">— Nom personnalisé —</option>
+                  {% for course_name in course_names %}
+                  <option value="{{ course_name.id }}" {% if course_name.name == course.name %}selected{% endif %}>{{ course_name.name }}</option>
+                  {% endfor %}
+                </select>
+                <div class="form-text">Sélectionnez un nom configuré ou conservez l'option personnalisée pour saisir librement.</div>
+                {% else %}
+                <div class="alert alert-warning mb-2" role="alert">
+                  Aucun nom de cours n'est encore configuré. Saisissez un nom personnalisé ci-dessous.
+                </div>
+                {% endif %}
+                <input type="text" class="form-control mt-2" name="name" value="{{ course.name }}" placeholder="Nom personnalisé">
+              </div>
           <div>
             <label class="form-label">Description</label>
             <textarea name="description" class="form-control" rows="3">{{ course.description }}</textarea>
@@ -131,7 +144,7 @@
                 </div>
                 <div class="mt-2 ms-4 text-muted small">
                   {% if course.course_type == 'TP' %}
-                  Ce cours sera planifié en deux demi-groupes A et B. Les sous-groupes sont identifiés par leur lettre dans les formulaires et le calendrier.
+                  Ce cours sera planifié en deux sous-groupes qui utilisent les noms définis dans la page Configuration.
                   {% elif course.course_type == 'SAE' %}
                   Deux enseignants peuvent être assignés simultanément pour cette classe.
                   {% elif course.course_type == 'CM' %}
@@ -191,6 +204,50 @@
           data-bs-parent="#courseDetailsAccordion"
         >
           <div class="accordion-body">
+        {% if course.course_type == 'TP' and course.class_links %}
+        <form method="post" class="vstack gap-3 mb-4">
+          <input type="hidden" name="form" value="update-subgroups">
+          <div class="text-muted small">
+            Sélectionnez le nom correspondant à chaque demi-groupe pour refléter les cours suivis par la classe.
+          </div>
+          {% for link in course.class_links %}
+          {% if link.group_count == 2 %}
+          <div class="border rounded p-2">
+            <div class="fw-semibold mb-2">{{ link.class_group.name }}</div>
+            <div class="row g-2 align-items-end">
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Sous-groupe A</label>
+                <select class="form-select form-select-sm" name="subgroup_{{ link.class_group_id }}_A" {% if not course_names %}disabled{% endif %} required>
+                  <option value="" disabled {% if not link.subgroup_course_name_for('A') %}selected{% endif %}>Choisir…</option>
+                  {% for course_name in course_names %}
+                  <option value="{{ course_name.id }}" {% if link.subgroup_course_name_for('A') and course_name.id == link.subgroup_course_name_for('A').id %}selected{% endif %}>{{ course_name.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Sous-groupe B</label>
+                <select class="form-select form-select-sm" name="subgroup_{{ link.class_group_id }}_B" {% if not course_names %}disabled{% endif %} required>
+                  <option value="" disabled {% if not link.subgroup_course_name_for('B') %}selected{% endif %}>Choisir…</option>
+                  {% for course_name in course_names %}
+                  <option value="{{ course_name.id }}" {% if link.subgroup_course_name_for('B') and course_name.id == link.subgroup_course_name_for('B').id %}selected{% endif %}>{{ course_name.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            {% if not link.has_named_subgroups %}
+            <div class="text-warning small mt-2">Aucun nom sélectionné pour ce demi-groupe.</div>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% endfor %}
+          <div class="text-end">
+            <button type="submit" class="btn btn-outline-primary btn-sm" {% if not course_names %}disabled{% endif %}>Mettre à jour les sous-groupes</button>
+          </div>
+          {% if not course_names %}
+          <div class="form-text text-danger">Ajoutez des noms de cours dans la configuration pour activer cette section.</div>
+          {% endif %}
+        </form>
+        {% endif %}
         {% if teachers %}
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="update-class-teachers">
@@ -248,7 +305,7 @@
             <div class="fw-semibold">{{ link.class_group.name }}</div>
             <div class="text-muted small mb-2">
               {% if course.course_type == 'TP' %}
-              Travaux pratiques — groupes A/B
+              Travaux pratiques — sous-groupes nommés
               {% else %}
               Classe entière
               {% endif %}
@@ -258,7 +315,10 @@
               {% for subgroup_label in link.group_labels() %}
               {% set assigned_teacher = link.teacher_for_label(subgroup_label) %}
               <li>
-                Groupe {{ subgroup_label|upper }}
+                {{ link.subgroup_name_for(subgroup_label) }}
+                {% if not link.subgroup_course_name_for(subgroup_label) %}
+                <span class="badge bg-warning text-dark ms-1">Nom à définir</span>
+                {% endif %}
                 {% if assigned_teacher %}
                 — {{ assigned_teacher.name }}
                 {% else %}
@@ -464,8 +524,9 @@
                   {% for subgroup_label in link.group_labels() %}
                   {% set value = link.class_group.id ~ ':' ~ (subgroup_label if subgroup_label else '') %}
                   {% set assigned_teacher = link.teacher_for_label(subgroup_label) %}
+                  {% set subgroup_display = link.subgroup_name_for(subgroup_label) %}
                   <option value="{{ value }}">
-                    {{ link.class_group.name }} — {% if subgroup_label %}groupe {{ subgroup_label|upper }}{% else %}classe entière{% endif %}
+                    {{ link.class_group.name }} — {% if subgroup_label %}{{ subgroup_display }}{% else %}classe entière{% endif %}
                     {% if assigned_teacher %}( {{ assigned_teacher.name }} ){% else %}( Aucun enseignant ){% endif %}
                   </option>
                   {% endfor %}

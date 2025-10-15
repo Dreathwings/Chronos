@@ -79,6 +79,27 @@ INSERT INTO `course` (`id`, `name`, `description`, `session_length_hours`, `sess
 -- --------------------------------------------------------
 
 --
+-- Structure de la table `course_name`
+--
+
+CREATE TABLE `course_name` (
+  `id` int(11) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Déchargement des données de la table `course_name`
+--
+
+INSERT INTO `course_name` (`id`, `name`, `created_at`, `updated_at`) VALUES
+(1, 'Python Avancé — Groupe A', '2025-10-12 19:45:00', '2025-10-12 19:45:00'),
+(2, 'Python Avancé — Groupe B', '2025-10-12 19:45:00', '2025-10-12 19:45:00');
+
+-- --------------------------------------------------------
+
+--
 -- Structure de la table `course_class`
 --
 
@@ -87,16 +108,18 @@ CREATE TABLE `course_class` (
   `class_group_id` int(11) NOT NULL,
   `group_count` int(11) NOT NULL DEFAULT 1,
   `teacher_a_id` int(11) DEFAULT NULL,
-  `teacher_b_id` int(11) DEFAULT NULL
+  `teacher_b_id` int(11) DEFAULT NULL,
+  `subgroup_a_course_name_id` int(11) DEFAULT NULL,
+  `subgroup_b_course_name_id` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Déchargement des données de la table `course_class`
 --
 
-INSERT INTO `course_class` (`course_id`, `class_group_id`, `group_count`, `teacher_a_id`, `teacher_b_id`) VALUES
-(1, 3, 2, 3, 3),
-(1, 5, 1, 1, NULL);
+INSERT INTO `course_class` (`course_id`, `class_group_id`, `group_count`, `teacher_a_id`, `teacher_b_id`, `subgroup_a_course_name_id`, `subgroup_b_course_name_id`) VALUES
+(1, 3, 2, 3, 3, 1, 2),
+(1, 5, 1, 1, NULL, NULL, NULL);
 
 -- --------------------------------------------------------
 

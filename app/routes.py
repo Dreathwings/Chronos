@@ -17,6 +17,7 @@ from .models import (
     Course,
     CourseClassLink,
     CourseScheduleLog,
+    CourseName,
     Equipment,
     Room,
     Session,
@@ -199,10 +200,12 @@ def _sync_course_class_links(
             continue
         group_count = 2 if course.is_tp else 1
         link = current_links.get(class_id)
+        preserved = existing_links.get(class_id)
+        preserved_teacher_a = preserved.teacher_a if preserved else None
+        preserved_teacher_b = preserved.teacher_b if preserved else None
+        preserved_name_a = preserved.subgroup_a_course_name if preserved else None
+        preserved_name_b = preserved.subgroup_b_course_name if preserved else None
         if link is None:
-            preserved = existing_links.get(class_id)
-            preserved_teacher_a = preserved.teacher_a if preserved else None
-            preserved_teacher_b = preserved.teacher_b if preserved else None
             if course.is_tp:
                 base_teacher = preserved_teacher_a or preserved_teacher_b
                 teacher_b = base_teacher if base_teacher else None
@@ -217,22 +220,28 @@ def _sync_course_class_links(
                 group_count=group_count,
                 teacher_a=base_teacher,
                 teacher_b=teacher_b,
+                subgroup_a_course_name=preserved_name_a,
+                subgroup_b_course_name=preserved_name_b,
             )
             course.class_links.append(link)
-            db.session.flush([link])
             current_links[class_id] = link
-            continue
 
         link.group_count = group_count
         if course.is_tp:
             base_teacher = link.teacher_a or link.teacher_b
             if base_teacher and link.teacher_b is None:
                 link.teacher_b = base_teacher
+            if link.subgroup_a_course_name is None:
+                link.subgroup_a_course_name = preserved_name_a
+            if link.subgroup_b_course_name is None:
+                link.subgroup_b_course_name = preserved_name_b
         elif course.is_sae:
             # Deux enseignants peuvent être définis, aucune action supplémentaire.
             pass
         else:
             link.teacher_b = None
+            link.subgroup_a_course_name = None
+            link.subgroup_b_course_name = None
         db.session.flush([link])
 
 
@@ -741,14 +750,55 @@ def dashboard():
 
 @bp.route("/config", methods=["GET", "POST"])
 def configuration():
+    course_names = CourseName.query.order_by(CourseName.name).all()
+    equipments = Equipment.query.order_by(Equipment.name).all()
+    softwares = Software.query.order_by(Software.name).all()
+
     if request.method == "POST":
-        if request.form.get("form") == "closing-periods":
+        form_name = request.form.get("form")
+        if form_name == "closing-periods":
             ranges = parse_unavailability_ranges(request.form.get("closing_periods"))
             ClosingPeriod.query.delete()
             for start, end in ranges:
                 db.session.add(ClosingPeriod(start_date=start, end_date=end))
             db.session.commit()
             flash("Périodes de fermeture mises à jour", "success")
+        elif form_name == "course-name-create":
+            name = (request.form.get("name") or "").strip()
+            if not name:
+                flash("Indiquez un nom de cours valide", "danger")
+            else:
+                db.session.add(CourseName(name=name))
+                try:
+                    db.session.commit()
+                    flash("Nom de cours ajouté", "success")
+                except IntegrityError:
+                    db.session.rollback()
+                    flash("Ce nom de cours existe déjà", "danger")
+        elif form_name == "equipment-create":
+            name = (request.form.get("name") or "").strip()
+            if not name:
+                flash("Indiquez un nom d'équipement", "danger")
+            else:
+                db.session.add(Equipment(name=name))
+                try:
+                    db.session.commit()
+                    flash("Équipement ajouté", "success")
+                except IntegrityError:
+                    db.session.rollback()
+                    flash("Équipement déjà existant", "danger")
+        elif form_name == "software-create":
+            name = (request.form.get("name") or "").strip()
+            if not name:
+                flash("Indiquez un nom de logiciel", "danger")
+            else:
+                db.session.add(Software(name=name))
+                try:
+                    db.session.commit()
+                    flash("Logiciel ajouté", "success")
+                except IntegrityError:
+                    db.session.rollback()
+                    flash("Logiciel déjà existant", "danger")
         return redirect(url_for("main.configuration"))
 
     periods = ClosingPeriod.ordered_periods()
@@ -758,6 +808,9 @@ def configuration():
         "config/index.html",
         closing_periods=closing_ranges,
         closing_period_records=periods,
+        course_names=course_names,
+        equipments=equipments,
+        softwares=softwares,
     )
 
 
@@ -1093,16 +1146,30 @@ def courses_list():
     softwares = Software.query.order_by(Software.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
     teachers = Teacher.query.order_by(Teacher.name).all()
+    course_names = CourseName.query.order_by(CourseName.name).all()
 
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "create":
+            course_name_id = request.form.get("course_name_id")
+            try:
+                course_name = (
+                    CourseName.query.get(int(course_name_id)) if course_name_id else None
+                )
+            except (TypeError, ValueError):
+                course_name = None
+            if course_name is None:
+                flash(
+                    "Sélectionnez un nom de cours depuis la configuration.",
+                    "danger",
+                )
+                return redirect(url_for("main.courses_list"))
             course_type = _normalise_course_type(request.form.get("course_type"))
             computers_required = _parse_non_negative_int(
                 request.form.get("computers_required"), 0
             )
             course = Course(
-                name=request.form["name"],
+                name=course_name.name,
                 description=request.form.get("description"),
                 session_length_hours=int(request.form.get("session_length_hours", 2)),
                 sessions_required=int(request.form.get("sessions_required", 1)),
@@ -1150,6 +1217,7 @@ def courses_list():
         class_groups=class_groups,
         teachers=teachers,
         course_type_labels=COURSE_TYPE_LABELS,
+        course_names=course_names,
     )
 
 
@@ -1164,13 +1232,23 @@ def course_detail(course_id: int):
     teachers = Teacher.query.order_by(Teacher.name).all()
     rooms = Room.query.order_by(Room.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    course_names = CourseName.query.order_by(CourseName.name).all()
     class_links_map = {link.class_group_id: link for link in course.class_links}
 
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "update":
-            new_name = request.form.get("name", "").strip()
-            if new_name:
+            selected_course_name = None
+            course_name_id = request.form.get("course_name_id")
+            if course_name_id:
+                try:
+                    selected_course_name = CourseName.query.get(int(course_name_id))
+                except (TypeError, ValueError):
+                    selected_course_name = None
+            new_name = (request.form.get("name", "") or "").strip()
+            if selected_course_name:
+                course.name = selected_course_name.name
+            elif new_name:
                 course.name = new_name
             course.description = request.form.get("description")
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
@@ -1259,6 +1337,39 @@ def course_detail(course_id: int):
                     link.teacher_b = teacher if link.group_count == 2 and teacher else None
             db.session.commit()
             flash("Enseignants par classe mis à jour", "success")
+        elif form_name == "update-subgroups":
+            if not course.is_tp:
+                flash("Les sous-groupes ne concernent que les travaux pratiques.", "info")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            lookup = {str(name.id): name for name in course_names}
+            pending_updates: list[tuple[CourseClassLink, CourseName, CourseName]] = []
+            missing_for: list[str] = []
+            for link in course.class_links:
+                if not link.is_half_group:
+                    link.subgroup_a_course_name = None
+                    link.subgroup_b_course_name = None
+                    continue
+                key_a = request.form.get(f"subgroup_{link.class_group_id}_A") or ""
+                key_b = request.form.get(f"subgroup_{link.class_group_id}_B") or ""
+                name_a = lookup.get(key_a)
+                name_b = lookup.get(key_b)
+                if not name_a or not name_b:
+                    missing_for.append(link.class_group.name)
+                    continue
+                pending_updates.append((link, name_a, name_b))
+            if missing_for:
+                missing_list = ", ".join(sorted(missing_for))
+                flash(
+                    "Sélectionnez un nom de cours pour chaque sous-groupe (manquant : "
+                    f"{missing_list}).",
+                    "danger",
+                )
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            for link, name_a, name_b in pending_updates:
+                link.subgroup_a_course_name = name_a
+                link.subgroup_b_course_name = name_b
+            db.session.commit()
+            flash("Sous-groupes mis à jour", "success")
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
@@ -1295,7 +1406,7 @@ def course_detail(course_id: int):
                     return redirect(url_for("main.course_detail", course_id=course_id))
                 valid_labels = {label or None for label in link.group_labels()}
                 if subgroup_label not in valid_labels:
-                    flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
+                    flash("Choisissez un sous-groupe correspondant à la configuration", "danger")
                     return redirect(url_for("main.course_detail", course_id=course_id))
                 class_groups = [class_group]
                 primary_class = class_group
@@ -1362,6 +1473,7 @@ def course_detail(course_id: int):
         rooms=rooms,
         class_groups=class_groups,
         class_links_map=class_links_map,
+        course_names=course_names,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
@@ -1373,38 +1485,14 @@ def course_detail(course_id: int):
 
 @bp.route("/equipement", methods=["GET", "POST"])
 def equipment_list():
-    if request.method == "POST":
-        name = request.form["name"]
-        equipment = Equipment(name=name)
-        db.session.add(equipment)
-        try:
-            db.session.commit()
-            flash("Équipement ajouté", "success")
-        except IntegrityError:
-            db.session.rollback()
-            flash("Équipement déjà existant", "danger")
-        return redirect(url_for("main.equipment_list"))
-
-    equipments = Equipment.query.order_by(Equipment.name).all()
-    return render_template("equipment/list.html", equipments=equipments)
+    target = url_for("main.configuration") + "#config-equipments"
+    return redirect(target)
 
 
 @bp.route("/logiciel", methods=["GET", "POST"])
 def software_list():
-    if request.method == "POST":
-        name = request.form["name"]
-        software = Software(name=name)
-        db.session.add(software)
-        try:
-            db.session.commit()
-            flash("Logiciel ajouté", "success")
-        except IntegrityError:
-            db.session.rollback()
-            flash("Logiciel déjà existant", "danger")
-        return redirect(url_for("main.software_list"))
-
-    softwares = Software.query.order_by(Software.name).all()
-    return render_template("software/list.html", softwares=softwares)
+    target = url_for("main.configuration") + "#config-softwares"
+    return redirect(target)
 
 
 def _parse_iso_datetime(value: str) -> datetime:
