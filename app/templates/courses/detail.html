@@ -157,7 +157,7 @@
                   {% if course.course_type == 'TP' %}
                   Ce cours sera planifié en deux sous-groupes qui utilisent les noms définis dans la page Configuration.
                   {% elif course.course_type == 'SAE' %}
-                  Deux enseignants peuvent être assignés simultanément pour cette classe.
+                  Deux enseignants doivent être assignés simultanément pour cette classe.
                   {% elif course.course_type == 'CM' %}
                   Toutes les classes inscrites suivent le cours ensemble.
                   {% else %}
@@ -242,7 +242,7 @@
           {% for link in course.class_links %}
           <div class="border rounded p-2">
             <div class="fw-semibold">{{ link.class_group.name }}</div>
-            <div class="text-muted small mb-2">Deux enseignants peuvent encadrer cette classe.</div>
+            <div class="text-muted small mb-2">Deux enseignants doivent encadrer cette classe.</div>
             <div class="row g-2">
               <div class="col-md-6">
                 <label class="form-label small mb-1">Enseignant 1</label>

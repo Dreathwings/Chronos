@@ -247,7 +247,7 @@ def _sync_course_class_links(
             if link.subgroup_b_course_name is None:
                 link.subgroup_b_course_name = preserved_name_b
         elif course.is_sae:
-            # Deux enseignants peuvent être définis, aucune action supplémentaire.
+            # Deux enseignants obligatoires sont gérés lors de la mise à jour dédiée.
             pass
         else:
             link.teacher_b = None
@@ -1366,6 +1366,7 @@ def course_detail(course_id: int):
                     link.teacher_a = teacher
                     link.teacher_b = None
             elif course.is_sae:
+                assignments: list[tuple[CourseClassLink, Teacher, Teacher]] = []
                 for link in course.class_links:
                     teacher_a = _parse_teacher_selection(
                         request.form.get(
@@ -1379,6 +1380,26 @@ def course_detail(course_id: int):
                         ),
                         allowed_ids=allowed_teacher_ids,
                     )
+                    if teacher_a is None or teacher_b is None:
+                        db.session.rollback()
+                        flash(
+                            "Pour les SAE, deux enseignants doivent être attribués à chaque classe.",
+                            "danger",
+                        )
+                        return redirect(
+                            url_for("main.course_detail", course_id=course_id)
+                        )
+                    if teacher_a.id == teacher_b.id:
+                        db.session.rollback()
+                        flash(
+                            "Pour les SAE, les deux enseignants doivent être distincts.",
+                            "danger",
+                        )
+                        return redirect(
+                            url_for("main.course_detail", course_id=course_id)
+                        )
+                    assignments.append((link, teacher_a, teacher_b))
+                for link, teacher_a, teacher_b in assignments:
                     link.teacher_a = teacher_a
                     link.teacher_b = teacher_b
             else:
