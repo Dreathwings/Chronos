@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, List, MutableSequence
@@ -186,6 +187,28 @@ def _format_hours(value: float) -> str:
     if abs(value - rounded) < 1e-6:
         return str(int(rounded))
     return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def _effective_generation_status(
+    course: Course,
+    latest_log: CourseScheduleLog | None,
+    *,
+    remaining_hours: float | None = None,
+) -> str:
+    if latest_log is None:
+        return "none"
+    status = latest_log.status
+    if status not in {"warning", "error"}:
+        return status
+
+    required_total = float(course.total_required_hours or 0)
+    scheduled_total = float(course.scheduled_hours or 0)
+    if remaining_hours is None:
+        remaining_hours = max(required_total - scheduled_total, 0.0)
+
+    if scheduled_total > 0 and math.isclose(remaining_hours, 0.0, abs_tol=1e-6):
+        return "success"
+    return status
 
 
 def _closing_period_backgrounds() -> list[dict[str, object]]:
@@ -881,6 +904,11 @@ def dashboard():
         scheduled_total = course.scheduled_hours
         remaining = max(required_total - scheduled_total, 0)
         latest_log = course.latest_generation_log
+        display_status = _effective_generation_status(
+            course,
+            latest_log,
+            remaining_hours=remaining,
+        )
         course_summaries.append(
             {
                 "course": course,
@@ -890,6 +918,7 @@ def dashboard():
                 "remaining": remaining,
                 "priority": course.priority,
                 "latest_status": latest_log.status if latest_log else "none",
+                "display_status": display_status,
                 "latest_summary": latest_log.summary if latest_log and latest_log.summary else None,
                 "latest_timestamp": latest_log.created_at if latest_log else None,
             }
@@ -1779,6 +1808,11 @@ def course_detail(course_id: int):
     ]
 
     remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
+    generation_display_status = _effective_generation_status(
+        course,
+        latest_generation_log,
+        remaining_hours=remaining_hours,
+    )
 
     return render_template(
         "courses/detail.html",
@@ -1803,6 +1837,7 @@ def course_detail(course_id: int):
         selected_course_week_values=selected_course_week_values,
         selected_course_week_labels=selected_course_week_labels,
         course_remaining_hours=remaining_hours,
+        generation_display_status=generation_display_status,
     )
 
 

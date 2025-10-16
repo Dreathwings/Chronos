@@ -51,7 +51,7 @@
             data-course-summary-item
             data-course-name="{{ item.course.name|lower|e }}"
             data-course-summary="{{ (item.latest_summary or '')|lower|e }}"
-            data-generation-status="{{ item.latest_status }}"
+            data-generation-status="{{ item.display_status }}"
           >
             <div class="d-flex justify-content-between align-items-start">
               <div>
@@ -65,8 +65,8 @@
               </div>
               <div class="text-end d-flex flex-column align-items-end gap-1">
                 <span class="badge bg-light text-dark">Priorité {{ item.priority }}</span>
-                {% if item.latest_status != 'none' %}
-                <span class="badge {{ status_badge_classes.get(item.latest_status, 'bg-secondary') }}">{{ status_labels.get(item.latest_status, item.latest_status|title) }}</span>
+                {% if item.display_status != 'none' %}
+                <span class="badge {{ status_badge_classes.get(item.display_status, 'bg-secondary') }}">{{ status_labels.get(item.display_status, item.display_status|title) }}</span>
                 {% else %}
                 <span class="badge {{ status_badge_classes.get('none') }}">Jamais généré</span>
                 {% endif %}
@@ -89,7 +89,7 @@
             </div>
             {% if item.latest_summary %}
             <div class="text-muted small mt-2">{{ item.latest_summary }}</div>
-            {% elif item.latest_status == 'none' %}
+            {% elif item.display_status == 'none' %}
             <div class="text-muted small mt-2">Jamais généré automatiquement.</div>
             {% endif %}
             {% if item.latest_timestamp %}
