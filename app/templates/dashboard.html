@@ -58,8 +58,8 @@
                 <div class="fw-semibold">{{ item.course.name }}</div>
                 <div class="text-muted small">
                   {{ item.type_label }}
-                  {% if item.course.start_date and item.course.end_date %}
-                  — {{ item.course.start_date }} → {{ item.course.end_date }}
+                  {% if item.course.semester_start and item.course.semester_end %}
+                  — {{ item.course.semester_start }} → {{ item.course.semester_end }}
                   {% endif %}
                 </div>
               </div>
@@ -126,13 +126,9 @@
       <div class="accordion-body">
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="bulk-auto-schedule">
-          <div>
-            <label class="form-label">Début de période</label>
-            <input type="date" class="form-control" name="period_start" required>
-          </div>
-          <div>
-            <label class="form-label">Fin de période</label>
-            <input type="date" class="form-control" name="period_end" required>
+          <div class="alert alert-info mb-0">
+            Configurez les semaines autorisées directement dans les contraintes de chaque cours. Sans sélection, la
+            période définie sur le cours sera utilisée pour la génération.
           </div>
           <div class="form-text">Les cours sont traités selon leur priorité décroissante.</div>
           <button type="submit" class="btn btn-primary">Générer l'ensemble des cours</button>

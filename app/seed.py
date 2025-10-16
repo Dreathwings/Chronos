@@ -27,8 +27,6 @@ def seed_data() -> None:
         description="Programmation avancée en Python",
         session_length_hours=2,
         sessions_required=4,
-        start_date=today,
-        end_date=today + timedelta(days=10),
         priority=1,
         course_type="TD",
         semester="S1",

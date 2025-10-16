@@ -72,6 +72,7 @@
                 <option value="{{ semester }}" {% if course.semester == semester %}selected{% endif %}>{{ semester }}</option>
                 {% endfor %}
               </select>
+              <div class="form-text">La période est déterminée automatiquement selon le semestre.</div>
             </div>
             <div class="col-md-4">
               <label class="form-label">Durée séance (h)</label>
@@ -88,15 +89,39 @@
               <input type="number" class="form-control" name="priority" value="{{ course.priority }}" min="1">
             </div>
           </div>
-          <div class="row g-2">
-            <div class="col">
-              <label class="form-label">Début</label>
-              <input type="date" class="form-control" name="start_date" value="{{ course.start_date }}">
+          <div class="text-muted small">
+            {% if course.semester_start and course.semester_end %}
+            Période du semestre : {{ course.semester_start.strftime('%d/%m/%Y') }} → {{ course.semester_end.strftime('%d/%m/%Y') }}
+            {% else %}
+            Aucune période n'est définie pour ce semestre.
+            {% endif %}
+          </div>
+          <div>
+            <label class="form-label">Semaines autorisées pour la planification</label>
+            {% if course_week_options %}
+            <div class="course-week-grid border rounded">
+              <div class="row row-cols-1 row-cols-sm-2 g-2">
+                {% for option in course_week_options %}
+                <div class="col">
+                  <div class="form-check">
+                    <input
+                      class="form-check-input"
+                      type="checkbox"
+                      name="allowed_week_starts"
+                      value="{{ option.value }}"
+                      id="allowed-week-{{ option.value }}"
+                      {% if option.value in selected_course_week_values %}checked{% endif %}
+                    >
+                    <label class="form-check-label" for="allowed-week-{{ option.value }}">{{ option.label }}</label>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
             </div>
-            <div class="col">
-              <label class="form-label">Fin</label>
-              <input type="date" class="form-control" name="end_date" value="{{ course.end_date }}">
-            </div>
+            <div class="form-text">Cochez les semaines autorisées pour la génération automatique. Laissez vide pour autoriser l'ensemble du semestre.</div>
+            {% else %}
+            <div class="alert alert-info mb-0">Aucune semaine n'est disponible pour le semestre sélectionné.</div>
+            {% endif %}
           </div>
           <div class="row g-2 align-items-center">
             <div class="col-sm-auto">
@@ -342,8 +367,21 @@
         >
           <div class="accordion-body">
             <div class="d-grid gap-2">
-              <form method="post">
+              <form method="post" class="vstack gap-2">
                 <input type="hidden" name="form" value="auto-schedule">
+                <div class="small text-muted">
+                  <div class="text-uppercase fw-semibold mb-1">Semaines de planification</div>
+                  {% if selected_course_week_labels %}
+                  <ul class="mb-2 ps-3">
+                    {% for label in selected_course_week_labels %}
+                    <li>{{ label }}</li>
+                    {% endfor %}
+                  </ul>
+                  {% else %}
+                  <div class="mb-2">Aucune semaine spécifique : toute la période du semestre sera utilisée.</div>
+                  {% endif %}
+                  <div>Modifiez cette sélection dans l'onglet « Contraintes du cours ».</div>
+                </div>
                 <button class="btn btn-success" type="submit">Générer automatiquement</button>
               </form>
               <form method="post">

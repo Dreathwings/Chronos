@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from math import ceil
 from typing import List, Optional, Set
 
@@ -210,6 +210,20 @@ COURSE_TYPE_LABELS = {
     "SAE": "Situation d'apprentissage et d'évaluation",
 }
 SEMESTER_CHOICES = ("S1", "S2", "S3", "S4", "S5", "S6")
+SEMESTER_PLANNING_WINDOWS: dict[str, tuple[date, date]] = {
+    "S1": (date(2025, 9, 1), date(2026, 1, 11)),
+    "S3": (date(2025, 9, 1), date(2026, 1, 11)),
+    "S5": (date(2025, 9, 1), date(2026, 1, 11)),
+    "S2": (date(2026, 1, 12), date(2026, 7, 4)),
+    "S4": (date(2026, 1, 12), date(2026, 7, 4)),
+    "S6": (date(2026, 1, 12), date(2026, 7, 4)),
+}
+
+
+def semester_date_window(semester: str | None) -> tuple[date, date] | None:
+    if not semester:
+        return None
+    return SEMESTER_PLANNING_WINDOWS.get(semester.strip().upper())
 
 
 class Course(db.Model, TimeStampedModel):
@@ -218,8 +232,6 @@ class Course(db.Model, TimeStampedModel):
     description: Mapped[Optional[str]] = mapped_column(Text)
     session_length_hours: Mapped[int] = mapped_column(Integer, default=2)
     sessions_required: Mapped[int] = mapped_column(Integer, default=1)
-    start_date: Mapped[Optional[date]] = mapped_column(Date)
-    end_date: Mapped[Optional[date]] = mapped_column(Date)
     priority: Mapped[int] = mapped_column(Integer, default=1)
     course_type: Mapped[str] = mapped_column(String(3), default="CM")
     semester: Mapped[str] = mapped_column(String(2), default="S1")
@@ -253,6 +265,12 @@ class Course(db.Model, TimeStampedModel):
         back_populates="course",
         cascade="all, delete-orphan",
         order_by="CourseScheduleLog.created_at.desc()",
+    )
+    allowed_weeks: Mapped[List["CourseAllowedWeek"]] = relationship(
+        "CourseAllowedWeek",
+        back_populates="course",
+        cascade="all, delete-orphan",
+        order_by="CourseAllowedWeek.week_start",
     )
 
     __table_args__ = (
@@ -309,6 +327,24 @@ class Course(db.Model, TimeStampedModel):
     def is_sae(self) -> bool:
         return self.course_type == "SAE"
 
+    @property
+    def semester_window(self) -> tuple[date, date] | None:
+        return semester_date_window(self.semester)
+
+    @property
+    def semester_start(self) -> date | None:
+        window = self.semester_window
+        if window is None:
+            return None
+        return window[0]
+
+    @property
+    def semester_end(self) -> date | None:
+        window = self.semester_window
+        if window is None:
+            return None
+        return window[1]
+
     def class_link_for(self, class_group: "ClassGroup" | int) -> "CourseClassLink" | None:
         class_id = class_group if isinstance(class_group, int) else class_group.id
         for link in self.class_links:
@@ -331,6 +367,10 @@ class Course(db.Model, TimeStampedModel):
         if self.configured_name and self.configured_name.preferred_rooms:
             return list(self.configured_name.preferred_rooms)
         return []
+
+    @property
+    def allowed_week_ranges(self) -> list[tuple[date, date]]:
+        return [entry.week_span for entry in self.allowed_weeks]
 
     def subgroup_name_for(
         self, class_group: "ClassGroup" | int, subgroup_label: str | None
@@ -450,15 +490,66 @@ class Session(db.Model, TimeStampedModel):
             if software.id not in room_software_ids
         )
         class_names = self.attendee_names()
+
+        teacher_entries: list[dict[str, object]] = []
+        seen_teacher_ids: set[int] = set()
+        primary_teacher = self.teacher
+        if primary_teacher is not None:
+            seen_teacher_ids.add(primary_teacher.id)
+            teacher_entries.append(
+                {
+                    "id": primary_teacher.id,
+                    "name": primary_teacher.name,
+                    "email": primary_teacher.email,
+                    "phone": primary_teacher.phone,
+                }
+            )
+
+        related_class_ids: set[int] = set()
+        if self.class_group_id:
+            related_class_ids.add(self.class_group_id)
+        for attendee in self.attendees or []:
+            if attendee.id:
+                related_class_ids.add(attendee.id)
+
+        if self.course is not None and related_class_ids:
+            for link in self.course.class_links:
+                if link.class_group_id not in related_class_ids:
+                    continue
+                for teacher in link.assigned_teachers():
+                    if teacher is None or teacher.id in seen_teacher_ids:
+                        continue
+                    seen_teacher_ids.add(teacher.id)
+                    teacher_entries.append(
+                        {
+                            "id": teacher.id,
+                            "name": teacher.name,
+                            "email": teacher.email,
+                            "phone": teacher.phone,
+                        }
+                    )
+
+        primary_entry: dict[str, object] | None = teacher_entries[0] if teacher_entries else None
+        primary_name = (
+            primary_entry.get("name") if isinstance(primary_entry, dict) else None
+        )
+        primary_email = (
+            primary_entry.get("email") if isinstance(primary_entry, dict) else None
+        )
+        primary_phone = (
+            primary_entry.get("phone") if isinstance(primary_entry, dict) else None
+        )
+
         return {
             "id": str(self.id),
             "title": title,
             "start": self.start_time.isoformat(),
             "end": self.end_time.isoformat(),
             "extendedProps": {
-                "teacher": self.teacher.name,
-                "teacher_email": self.teacher.email,
-                "teacher_phone": self.teacher.phone,
+                "teacher": primary_name,
+                "teacher_email": primary_email,
+                "teacher_phone": primary_phone,
+                "teachers": teacher_entries,
                 "course": self.course.name,
                 "course_type": self.course.course_type,
                 "course_type_label": COURSE_TYPE_LABELS.get(
@@ -550,6 +641,30 @@ class CourseScheduleLog(db.Model, TimeStampedModel):
 
     def level_label(self, level: str) -> str:
         return self.LEVEL_LABELS.get(level, level.title())
+
+
+class CourseAllowedWeek(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), nullable=False)
+    week_start: Mapped[date] = mapped_column(Date, nullable=False)
+
+    course: Mapped["Course"] = relationship("Course", back_populates="allowed_weeks")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id",
+            "week_start",
+            name="uq_course_allowed_week_unique",
+        ),
+    )
+
+    @property
+    def week_end(self) -> date:
+        return self.week_start + timedelta(days=6)
+
+    @property
+    def week_span(self) -> tuple[date, date]:
+        return self.week_start, self.week_end
 
 
 class Equipment(db.Model):

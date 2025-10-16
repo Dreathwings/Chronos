@@ -58,7 +58,7 @@ EXTENDED_BREAKS = _build_extended_breaks()
 
 START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
 
-COURSE_TYPE_CHRONOLOGY: dict[str, int] = {"CM": 0, "TD": 1, "TP": 2}
+COURSE_TYPE_CHRONOLOGY: dict[str, int] = {"CM": 0, "TD": 1, "TP": 2, "TEST": 3}
 
 
 class ScheduleReporter:
@@ -664,6 +664,116 @@ def _existing_hours_by_day(
     return per_day
 
 
+def _weekday_frequency_for_groups(
+    course: Course,
+    class_groups: Iterable[ClassGroup],
+    *,
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+) -> Counter[int]:
+    groups = [group for group in class_groups if group is not None]
+    if not groups:
+        return Counter()
+    target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
+    weekday_counter: Counter[int] = Counter()
+    seen: set[int] = set()
+    candidates = list(course.sessions) + list(pending_sessions)
+    for session in candidates:
+        marker = id(session)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if session.course_id != course.id:
+            continue
+        if target_label is not None:
+            session_label = _normalise_label(session.subgroup_label)
+            if session_label and session_label != target_label:
+                continue
+        if not any(_session_involves_class(session, group) for group in groups):
+            continue
+        weekday_counter[session.start_time.weekday()] += 1
+    return weekday_counter
+
+
+def _preferred_slot_index_for_groups(
+    course: Course,
+    class_groups: Iterable[ClassGroup],
+    day: date,
+    *,
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+) -> int | None:
+    groups = [group for group in class_groups if group is not None]
+    if not groups:
+        return None
+    target_weekday = day.weekday()
+    target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
+    slot_counter: Counter[int] = Counter()
+    seen: set[int] = set()
+    candidates = list(course.sessions) + list(pending_sessions)
+    for session in candidates:
+        marker = id(session)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if session.course_id != course.id:
+            continue
+        if session.start_time.weekday() != target_weekday:
+            continue
+        if target_label is not None:
+            session_label = _normalise_label(session.subgroup_label)
+            if session_label and session_label != target_label:
+                continue
+        if not any(_session_involves_class(session, group) for group in groups):
+            continue
+        try:
+            slot_index = START_TIMES.index(session.start_time.time())
+        except ValueError:
+            continue
+        slot_counter[slot_index] += 1
+    if not slot_counter:
+        return None
+    ordered = sorted(slot_counter.items(), key=lambda item: (-item[1], item[0]))
+    return ordered[0][0]
+
+
+def _latest_session_for_groups(
+    course: Course,
+    class_groups: Iterable[ClassGroup],
+    *,
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+    require_exact_attendees: bool = False,
+) -> Session | None:
+    groups = [group for group in class_groups if group is not None]
+    if not groups:
+        return None
+    target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
+    target_ids = {group.id for group in groups}
+    seen: set[int] = set()
+    latest: Session | None = None
+    candidates = list(course.sessions) + list(pending_sessions)
+    for session in candidates:
+        marker = id(session)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if session.course_id != course.id:
+            continue
+        if require_exact_attendees:
+            if session.attendee_ids() != target_ids:
+                continue
+        elif not any(_session_involves_class(session, group) for group in groups):
+            continue
+        if target_label is not None:
+            session_label = _normalise_label(session.subgroup_label)
+            if session_label and session_label != target_label:
+                continue
+        if latest is None or session.start_time > latest.start_time:
+            latest = session
+    return latest
+
+
 def _collect_contiguous_slots(start_index: int, length: int) -> list[tuple[time, time]] | None:
     slots: list[tuple[time, time]] = []
     previous_end: time | None = None
@@ -1201,17 +1311,25 @@ def _cm_try_split_block(
 def _resolve_schedule_window(
     course: Course, window_start: date | None, window_end: date | None
 ) -> tuple[date, date]:
-    start_candidates = [value for value in (course.start_date, window_start) if value]
-    end_candidates = [value for value in (course.end_date, window_end) if value]
+    semester_window = course.semester_window
+    start_candidates: list[date] = []
+    end_candidates: list[date] = []
+    if semester_window is not None:
+        start_candidates.append(semester_window[0])
+        end_candidates.append(semester_window[1])
+    if window_start is not None:
+        start_candidates.append(window_start)
+    if window_end is not None:
+        end_candidates.append(window_end)
     if not start_candidates or not end_candidates:
         raise ValueError(
-            "Définissez des dates de début et de fin pour le cours ou indiquez une période de planification."
+            "Aucune période de planification n'est définie pour ce semestre."
         )
     start = max(start_candidates)
     end = min(end_candidates)
     if start > end:
         raise ValueError(
-            "La période choisie n'intersecte pas la fenêtre du cours."
+            "La période choisie n'intersecte pas la fenêtre du semestre."
         )
     return start, end
 
@@ -1221,6 +1339,7 @@ def generate_schedule(
     *,
     window_start: date | None = None,
     window_end: date | None = None,
+    allowed_weeks: Iterable[tuple[date, date]] | None = None,
 ) -> list[Session]:
     reporter = ScheduleReporter(course)
     created_sessions: list[Session] = []
@@ -1229,12 +1348,51 @@ def generate_schedule(
         schedule_start, schedule_end = _resolve_schedule_window(
             course, window_start, window_end
         )
-        reporter.set_window(schedule_start, schedule_end)
     except ValueError as exc:
         reporter.error(str(exc))
         reporter.summary = str(exc)
         reporter.finalise(len(created_sessions))
         raise
+
+    normalised_weeks: list[tuple[date, date]] = []
+    if allowed_weeks:
+        for week_start, week_end in allowed_weeks:
+            if week_start is None or week_end is None:
+                continue
+            if week_end < week_start:
+                week_start, week_end = week_end, week_start
+            normalised_weeks.append((week_start, week_end))
+        normalised_weeks.sort(key=lambda span: span[0])
+        truncated_weeks: list[tuple[date, date]] = []
+        for week_start, week_end in normalised_weeks:
+            if week_end < schedule_start or week_start > schedule_end:
+                continue
+            span_start = max(week_start, schedule_start)
+            span_end = min(week_end, schedule_end)
+            if span_start > span_end:
+                continue
+            truncated_weeks.append((span_start, span_end))
+        normalised_weeks = truncated_weeks
+        if not normalised_weeks:
+            message = (
+                "Les semaines sélectionnées ne recoupent pas la fenêtre du cours."
+            )
+            reporter.error(message)
+            reporter.summary = message
+            reporter.finalise(0)
+            raise ValueError(message)
+        schedule_start = normalised_weeks[0][0]
+        schedule_end = normalised_weeks[-1][1]
+        reporter.set_window(schedule_start, schedule_end)
+    else:
+        reporter.set_window(schedule_start, schedule_end)
+
+    allowed_days: set[date] | None = None
+    if normalised_weeks:
+        allowed_days = set()
+        for span_start, span_end in normalised_weeks:
+            for day in daterange(span_start, span_end):
+                allowed_days.add(day)
 
     if not course.classes:
         message = "Associez au moins une classe au cours avant de planifier."
@@ -1282,7 +1440,9 @@ def generate_schedule(
         available_days = [
             day
             for day in sorted(daterange(schedule_start, schedule_end))
-            if day.weekday() < 5 and all(group.is_available_on(day) for group in class_groups)
+            if day.weekday() < 5
+            and all(group.is_available_on(day) for group in class_groups)
+            and (allowed_days is None or day in allowed_days)
         ]
         if not available_days:
             reporter.warning(
@@ -1292,6 +1452,11 @@ def generate_schedule(
             return created_sessions
         per_day_hours = {day: existing_day_hours.get(day, 0) for day in available_days}
         day_indices = {day: index for index, day in enumerate(available_days)}
+        weekday_frequencies = _weekday_frequency_for_groups(
+            course,
+            class_groups,
+            pending_sessions=created_sessions,
+        )
         slot_length_hours = max(int(course.session_length_hours), 1)
         blocks_total = max((hours_remaining + slot_length_hours - 1) // slot_length_hours, 1)
         block_index = 0
@@ -1309,14 +1474,52 @@ def generate_schedule(
                 anchor_index = round(anchor_position)
             anchor_index = max(0, min(anchor_index, len(available_days) - 1))
 
-            ordered_days = sorted(
-                available_days,
-                key=lambda d: (
-                    per_day_hours[d],
-                    abs(day_indices[d] - anchor_index),
-                    day_indices[d],
-                ),
+            last_session = _latest_session_for_groups(
+                course,
+                class_groups,
+                pending_sessions=created_sessions,
+                require_exact_attendees=True,
             )
+            continuity_weekday = (
+                last_session.start_time.weekday() if last_session is not None else None
+            )
+            continuity_target_date = (
+                last_session.start_time.date() + timedelta(days=7)
+                if last_session is not None
+                else None
+            )
+            continuity_slot_index: int | None = None
+            if last_session is not None:
+                try:
+                    continuity_slot_index = START_TIMES.index(
+                        last_session.start_time.time()
+                    )
+                except ValueError:
+                    continuity_slot_index = None
+
+            def _cm_day_sort_key(d: date) -> tuple[int, int, int, int, int, int, int]:
+                anchor_distance = abs(day_indices[d] - anchor_index)
+                continuity_flag = 1
+                future_bias = 0
+                continuity_distance = anchor_distance
+                if continuity_weekday is not None and d.weekday() == continuity_weekday:
+                    continuity_flag = 0
+                    if continuity_target_date is not None:
+                        future_bias = 0 if d >= continuity_target_date else 1
+                        continuity_distance = abs((d - continuity_target_date).days)
+                    else:
+                        continuity_distance = 0
+                return (
+                    continuity_flag,
+                    future_bias,
+                    continuity_distance,
+                    -weekday_frequencies.get(d.weekday(), 0),
+                    per_day_hours[d],
+                    anchor_distance,
+                    day_indices[d],
+                )
+
+            ordered_days = sorted(available_days, key=_cm_day_sort_key)
 
             placed = False
             chronology_weeks: set[date] = set()
@@ -1330,21 +1533,44 @@ def generate_schedule(
                     week_start, _ = _week_bounds(day)
                     chronology_weeks.add(week_start)
                     continue
-                base_offset = int(per_day_hours[day])
-                block_sessions = _cm_schedule_block_for_day(
-                    course=course,
-                    class_groups=class_groups,
-                    primary_link=primary_link,
-                    day=day,
-                    desired_hours=desired_hours,
-                    base_offset=base_offset,
-                    reporter=reporter,
+                preferred_offsets: list[int] = []
+                if (
+                    continuity_slot_index is not None
+                    and continuity_weekday is not None
+                    and day.weekday() == continuity_weekday
+                ):
+                    preferred_offsets.append(continuity_slot_index)
+                preferred_slot = _preferred_slot_index_for_groups(
+                    course,
+                    class_groups,
+                    day,
+                    pending_sessions=created_sessions,
                 )
+                if preferred_slot is not None and preferred_slot not in preferred_offsets:
+                    preferred_offsets.append(preferred_slot)
+                fallback_offset = int(per_day_hours[day])
+                if fallback_offset not in preferred_offsets:
+                    preferred_offsets.append(fallback_offset)
+
+                block_sessions: list[Session] | None = None
+                for base_offset in preferred_offsets:
+                    block_sessions = _cm_schedule_block_for_day(
+                        course=course,
+                        class_groups=class_groups,
+                        primary_link=primary_link,
+                        day=day,
+                        desired_hours=desired_hours,
+                        base_offset=base_offset,
+                        reporter=reporter,
+                    )
+                    if block_sessions:
+                        break
                 if not block_sessions:
                     continue
                 created_sessions.extend(block_sessions)
                 for session in block_sessions:
                     reporter.session_created(session)
+                    weekday_frequencies[session.start_time.weekday()] += 1
                 block_hours = sum(session.duration_hours for session in block_sessions)
                 per_day_hours[day] += block_hours
                 hours_remaining = max(hours_remaining - block_hours, 0)
@@ -1376,7 +1602,9 @@ def generate_schedule(
             available_days = [
                 day
                 for day in sorted(daterange(schedule_start, schedule_end))
-                if day.weekday() < 5 and class_group.is_available_on(day)
+                if day.weekday() < 5
+                and class_group.is_available_on(day)
+                and (allowed_days is None or day in allowed_days)
             ]
             if not available_days:
                 reporter.warning(
@@ -1389,6 +1617,12 @@ def generate_schedule(
             per_day_hours = {
                 day: existing_day_hours.get(day, 0) for day in available_days
             }
+            weekday_frequencies = _weekday_frequency_for_groups(
+                course,
+                [class_group],
+                pending_sessions=created_sessions,
+                subgroup_label=subgroup_label,
+            )
             blocks_total = max(
                 (hours_needed + slot_length_hours - 1) // slot_length_hours,
                 1,
@@ -1409,14 +1643,52 @@ def generate_schedule(
                     anchor_index = round(anchor_position)
                 anchor_index = max(0, min(anchor_index, len(available_days) - 1))
 
-                ordered_days = sorted(
-                    available_days,
-                    key=lambda d: (
-                        per_day_hours[d],
-                        abs(day_indices[d] - anchor_index),
-                        day_indices[d],
-                    ),
+                last_session = _latest_session_for_groups(
+                    course,
+                    [class_group],
+                    pending_sessions=created_sessions,
+                    subgroup_label=subgroup_label,
                 )
+                continuity_weekday = (
+                    last_session.start_time.weekday() if last_session is not None else None
+                )
+                continuity_target_date = (
+                    last_session.start_time.date() + timedelta(days=7)
+                    if last_session is not None
+                    else None
+                )
+                continuity_slot_index: int | None = None
+                if last_session is not None:
+                    try:
+                        continuity_slot_index = START_TIMES.index(
+                            last_session.start_time.time()
+                        )
+                    except ValueError:
+                        continuity_slot_index = None
+
+                def _day_sort_key(d: date) -> tuple[int, int, int, int, int, int, int]:
+                    anchor_distance = abs(day_indices[d] - anchor_index)
+                    continuity_flag = 1
+                    future_bias = 0
+                    continuity_distance = anchor_distance
+                    if continuity_weekday is not None and d.weekday() == continuity_weekday:
+                        continuity_flag = 0
+                        if continuity_target_date is not None:
+                            future_bias = 0 if d >= continuity_target_date else 1
+                            continuity_distance = abs((d - continuity_target_date).days)
+                        else:
+                            continuity_distance = 0
+                    return (
+                        continuity_flag,
+                        future_bias,
+                        continuity_distance,
+                        -weekday_frequencies.get(d.weekday(), 0),
+                        per_day_hours[d],
+                        anchor_distance,
+                        day_indices[d],
+                    )
+
+                ordered_days = sorted(available_days, key=_day_sort_key)
 
                 placed = False
                 chronology_weeks: set[date] = set()
@@ -1431,22 +1703,46 @@ def generate_schedule(
                         week_start, _ = _week_bounds(day)
                         chronology_weeks.add(week_start)
                         continue
-                    base_offset = int(per_day_hours[day])
-                    block_sessions = _schedule_block_for_day(
-                        course=course,
-                        class_group=class_group,
-                        link=link,
+                    preferred_offsets: list[int] = []
+                    if (
+                        continuity_slot_index is not None
+                        and continuity_weekday is not None
+                        and day.weekday() == continuity_weekday
+                    ):
+                        preferred_offsets.append(continuity_slot_index)
+                    preferred_slot = _preferred_slot_index_for_groups(
+                        course,
+                        [class_group],
+                        day,
+                        pending_sessions=created_sessions,
                         subgroup_label=subgroup_label,
-                        day=day,
-                        desired_hours=desired_hours,
-                        base_offset=base_offset,
-                        reporter=reporter,
                     )
+                    if preferred_slot is not None and preferred_slot not in preferred_offsets:
+                        preferred_offsets.append(preferred_slot)
+                    fallback_offset = int(per_day_hours[day])
+                    if fallback_offset not in preferred_offsets:
+                        preferred_offsets.append(fallback_offset)
+
+                    block_sessions: list[Session] | None = None
+                    for base_offset in preferred_offsets:
+                        block_sessions = _schedule_block_for_day(
+                            course=course,
+                            class_group=class_group,
+                            link=link,
+                            subgroup_label=subgroup_label,
+                            day=day,
+                            desired_hours=desired_hours,
+                            base_offset=base_offset,
+                            reporter=reporter,
+                        )
+                        if block_sessions:
+                            break
                     if not block_sessions:
                         continue
                     created_sessions.extend(block_sessions)
                     for session in block_sessions:
                         reporter.session_created(session)
+                        weekday_frequencies[session.start_time.weekday()] += 1
                     block_hours = sum(
                         session.duration_hours for session in block_sessions
                     )
