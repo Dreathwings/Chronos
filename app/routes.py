@@ -1683,6 +1683,8 @@ def course_detail(course_id: int):
         for allowed in course.allowed_weeks
     ]
 
+    remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
+
     return render_template(
         "courses/detail.html",
         course=course,
@@ -1705,6 +1707,7 @@ def course_detail(course_id: int):
         course_week_options=course_week_options,
         selected_course_week_values=selected_course_week_values,
         selected_course_week_labels=selected_course_week_labels,
+        course_remaining_hours=remaining_hours,
     )
 
 
