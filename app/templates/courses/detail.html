@@ -101,14 +101,28 @@
           <div>
             <label class="form-label">Semaines autorisées pour la planification</label>
             {% if course_week_options %}
-            <select class="form-select" name="allowed_week_starts" multiple size="6">
-              {% for option in course_week_options %}
-              <option value="{{ option.value }}" {% if option.value in selected_course_week_values %}selected{% endif %}>{{ option.label }}</option>
-              {% endfor %}
-            </select>
-            <div class="form-text">Maintenez Ctrl (ou Cmd) pour sélectionner plusieurs semaines. Laissez vide pour autoriser toute la période du cours.</div>
+            <div class="course-week-grid border rounded">
+              <div class="row row-cols-1 row-cols-sm-2 g-2">
+                {% for option in course_week_options %}
+                <div class="col">
+                  <div class="form-check">
+                    <input
+                      class="form-check-input"
+                      type="checkbox"
+                      name="allowed_week_starts"
+                      value="{{ option.value }}"
+                      id="allowed-week-{{ option.value }}"
+                      {% if option.value in selected_course_week_values %}checked{% endif %}
+                    >
+                    <label class="form-check-label" for="allowed-week-{{ option.value }}">{{ option.label }}</label>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="form-text">Cochez les semaines autorisées pour la génération automatique. Laissez vide pour autoriser l'ensemble du semestre.</div>
             {% else %}
-            <div class="alert alert-info mb-0">Définissez une période pour ce cours afin de proposer des semaines disponibles.</div>
+            <div class="alert alert-info mb-0">Aucune semaine n'est encore définie pour ce semestre. Renseignez les périodes des cours du semestre pour proposer des options.</div>
             {% endif %}
           </div>
           <div class="row g-2 align-items-center">
