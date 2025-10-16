@@ -52,28 +52,36 @@
           {% for room in rooms %}
           <section class="card shadow-sm chronos-room-entry">
             <div class="card-body">
-              <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
-                <div>
-                  <h3 class="h5 mb-1"><a href="{{ url_for('main.room_detail', room_id=room.id) }}" class="link-dark text-decoration-none">{{ room.name }}</a></h3>
-                  <div class="small text-muted room-entry-meta">
-                    <span class="me-3"><strong>Capacité :</strong> {{ room.capacity }}</span>
-                    <span><strong>Postes informatiques :</strong> {{ room.computers }}</span>
+              <div class="row gy-4 gx-5 align-items-stretch chronos-room-content">
+                <div class="col-12 col-lg-4 chronos-room-details">
+                  <div class="d-flex flex-column h-100">
+                    <div class="mb-3">
+                      <h3 class="h5 mb-1"><a href="{{ url_for('main.room_detail', room_id=room.id) }}" class="link-dark text-decoration-none">{{ room.name }}</a></h3>
+                      <div class="small text-muted room-entry-meta">
+                        <span class="me-3"><strong>Capacité :</strong> {{ room.capacity }}</span>
+                        <span><strong>Postes informatiques :</strong> {{ room.computers }}</span>
+                      </div>
+                    </div>
+                    <div class="flex-grow-1">
+                      <p class="text-muted small mb-0">
+                        {% if room.notes %}
+                          {{ room.notes }}
+                        {% else %}
+                          Aucune note enregistrée
+                        {% endif %}
+                      </p>
+                    </div>
+                    <div class="pt-3">
+                      <a class="btn btn-outline-primary btn-sm w-100" href="{{ url_for('main.room_detail', room_id=room.id) }}">Voir la fiche</a>
+                    </div>
                   </div>
                 </div>
-                <div class="text-muted small">
-                  {% if room.notes %}
-                    {{ room.notes }}
-                  {% else %}
-                    Aucune note enregistrée
-                  {% endif %}
+                <div class="col-12 col-lg-8">
+                  <div class="chronos-room-calendar-wrapper h-100">
+                    <h4 class="h6 text-uppercase text-muted mb-3">Calendrier d'utilisation</h4>
+                    <div id="room-calendar-{{ room.id }}" class="chronos-room-calendar" data-room-calendar="{{ room.id }}"></div>
+                  </div>
                 </div>
-                <div class="ms-lg-auto">
-                  <a class="btn btn-outline-primary btn-sm" href="{{ url_for('main.room_detail', room_id=room.id) }}">Voir la fiche</a>
-                </div>
-              </div>
-              <div class="chronos-room-calendar-wrapper">
-                <h4 class="h6 text-uppercase text-muted mb-3">Calendrier d'utilisation</h4>
-                <div id="room-calendar-{{ room.id }}" class="chronos-room-calendar" data-room-calendar="{{ room.id }}"></div>
               </div>
             </div>
           </section>

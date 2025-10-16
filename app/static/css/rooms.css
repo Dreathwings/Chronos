@@ -43,6 +43,21 @@
   padding: 1.75rem;
 }
 
+.chronos-room-content {
+  min-height: 100%;
+}
+
+.chronos-room-details {
+  background-color: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+}
+
+.chronos-room-details .btn {
+  white-space: nowrap;
+}
+
 .room-entry-meta span + span {
   margin-left: 1.25rem;
 }
@@ -52,10 +67,13 @@
   border-radius: 0.75rem;
   background-color: #fff;
   padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .chronos-room-calendar {
   min-height: 420px;
+  flex-grow: 1;
 }
 
 @media (max-width: 767.98px) {
@@ -63,14 +81,15 @@
     padding: 1.25rem;
   }
 
+  .chronos-room-details,
+  .chronos-room-calendar-wrapper {
+    padding: 1rem;
+  }
+
   .room-entry-meta span + span {
     margin-left: 0;
     display: block;
     margin-top: 0.25rem;
-  }
-
-  .chronos-room-calendar-wrapper {
-    padding: 1rem;
   }
 }
 
