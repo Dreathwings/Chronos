@@ -1314,12 +1314,28 @@ def rooms_list():
                 flash("Nom de salle déjà utilisé", "danger")
         return redirect(url_for("main.rooms_list"))
 
-    rooms = Room.query.order_by(Room.name).all()
+    rooms = (
+        Room.query.options(
+            selectinload(Room.sessions)
+            .selectinload(Session.course)
+            .selectinload(Course.softwares),
+            selectinload(Room.sessions)
+            .selectinload(Session.room)
+            .selectinload(Room.softwares),
+            selectinload(Room.sessions).selectinload(Session.teacher),
+            selectinload(Room.sessions).selectinload(Session.attendees),
+            selectinload(Room.sessions).selectinload(Session.class_group),
+        )
+        .order_by(Room.name)
+        .all()
+    )
+    room_events = {room.id: sessions_to_grouped_events(room.sessions) for room in rooms}
     return render_template(
         "rooms/list.html",
         rooms=rooms,
         equipments=equipments,
         softwares=softwares,
+        room_events=room_events,
     )
 
 

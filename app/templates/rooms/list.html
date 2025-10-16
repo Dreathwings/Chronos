@@ -48,30 +48,65 @@
     </h2>
     <div id="roomsList" class="accordion-collapse collapse show" aria-labelledby="roomsListHeading" data-bs-parent="#roomsAccordion">
       <div class="accordion-body">
-        <div class="table-responsive">
-          <table class="table table-striped align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Nom</th>
-                <th>Capacité</th>
-                <th>PC</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for room in rooms %}
-              <tr>
-                <td><a href="{{ url_for('main.room_detail', room_id=room.id) }}">{{ room.name }}</a></td>
-                <td>{{ room.capacity }}</td>
-                <td>{{ room.computers }}</td>
-                <td>{{ room.notes or '—' }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+        <div class="vstack gap-4 chronos-room-list">
+          {% for room in rooms %}
+          <section class="card shadow-sm chronos-room-entry">
+            <div class="card-body">
+              <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
+                <div>
+                  <h3 class="h5 mb-1"><a href="{{ url_for('main.room_detail', room_id=room.id) }}" class="link-dark text-decoration-none">{{ room.name }}</a></h3>
+                  <div class="small text-muted room-entry-meta">
+                    <span class="me-3"><strong>Capacité :</strong> {{ room.capacity }}</span>
+                    <span><strong>Postes informatiques :</strong> {{ room.computers }}</span>
+                  </div>
+                </div>
+                <div class="text-muted small">
+                  {% if room.notes %}
+                    {{ room.notes }}
+                  {% else %}
+                    Aucune note enregistrée
+                  {% endif %}
+                </div>
+                <div class="ms-lg-auto">
+                  <a class="btn btn-outline-primary btn-sm" href="{{ url_for('main.room_detail', room_id=room.id) }}">Voir la fiche</a>
+                </div>
+              </div>
+              <div class="chronos-room-calendar-wrapper">
+                <h4 class="h6 text-uppercase text-muted mb-3">Calendrier d'utilisation</h4>
+                <div id="room-calendar-{{ room.id }}" class="chronos-room-calendar" data-room-calendar="{{ room.id }}"></div>
+              </div>
+            </div>
+          </section>
+          {% endfor %}
         </div>
       </div>
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var elements = document.querySelectorAll('[data-room-calendar]');
+      if (!elements.length || !window.createChronosCalendar) {
+        return;
+      }
+      var eventsByRoom = {{ room_events|tojson }};
+      elements.forEach(function(element) {
+        var roomId = element.dataset.roomCalendar;
+        var events = eventsByRoom[roomId] || [];
+        var calendar = window.createChronosCalendar(element, events, [], {
+          editable: false,
+          selectable: false,
+          droppable: false,
+          eventStartEditable: false,
+          eventDurationEditable: false,
+          height: 'auto'
+        });
+        calendar.render();
+      });
+    });
+  </script>
 {% endblock %}
