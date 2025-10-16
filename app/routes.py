@@ -75,6 +75,8 @@ COURSE_TYPE_LABELS = {
 }
 DEFAULT_SEMESTER = SEMESTER_CHOICES[0]
 
+GENERATION_STATUS_LABELS = {**CourseScheduleLog.STATUS_LABELS, "none": "Jamais généré"}
+
 
 def _normalise_course_type(raw_value: str | None) -> str:
     if not raw_value:
@@ -102,6 +104,18 @@ def _parse_non_negative_int(raw_value: str | None, default: int = 0) -> int:
     except (TypeError, ValueError):
         return default
     return max(value, 0)
+
+
+def _clear_course_schedule(course: Course) -> tuple[int, int]:
+    removed_sessions = len(course.sessions)
+    for session in list(course.sessions):
+        db.session.delete(session)
+
+    removed_logs = len(course.generation_logs)
+    for log in list(course.generation_logs):
+        db.session.delete(log)
+
+    return removed_sessions, removed_logs
 
 
 def _build_default_backgrounds() -> list[dict[str, object]]:
@@ -883,10 +897,7 @@ def dashboard():
                 flash("Cours introuvable", "danger")
                 return redirect(url_for("main.dashboard"))
 
-            removed = len(course.sessions)
-            for session in list(course.sessions):
-                db.session.delete(session)
-
+            removed, _ = _clear_course_schedule(course)
             db.session.commit()
             if removed:
                 flash(
@@ -939,7 +950,7 @@ def dashboard():
         start_times=START_TIMES,
         course_type_labels=COURSE_TYPE_LABELS,
         global_search_index_json=json.dumps(global_search_index, ensure_ascii=False),
-        status_labels=CourseScheduleLog.STATUS_LABELS,
+        status_labels=GENERATION_STATUS_LABELS,
     )
 
 
@@ -1750,9 +1761,7 @@ def course_detail(course_id: int):
             db.session.commit()
             flash("Séance ajoutée", "success")
         elif form_name == "clear-sessions":
-            removed = len(course.sessions)
-            for session in list(course.sessions):
-                db.session.delete(session)
+            removed, _ = _clear_course_schedule(course)
             db.session.commit()
             if removed:
                 flash("Toutes les séances de ce cours ont été supprimées.", "success")
@@ -1830,7 +1839,7 @@ def course_detail(course_id: int):
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
-        status_labels=CourseScheduleLog.STATUS_LABELS,
+        status_labels=GENERATION_STATUS_LABELS,
         status_badges=status_badges,
         level_badges=level_badges,
         course_week_options=course_week_options,
