@@ -342,9 +342,22 @@
         >
           <div class="accordion-body">
             <div class="d-grid gap-2">
-              <form method="post">
+              <form method="post" class="vstack gap-2">
                 <input type="hidden" name="form" value="auto-schedule">
-                <button class="btn btn-success" type="submit">Générer automatiquement</button>
+                <div>
+                  <label class="form-label small text-uppercase fw-semibold">Semaines de planification</label>
+                  {% if course_week_options %}
+                  <select class="form-select form-select-sm" name="weeks" multiple required size="6">
+                    {% for option in course_week_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                  <div class="form-text">Maintenez Ctrl (ou Cmd) pour sélectionner plusieurs semaines.</div>
+                  {% else %}
+                  <div class="alert alert-info mb-0">Définissez une période pour ce cours afin de proposer des semaines disponibles.</div>
+                  {% endif %}
+                </div>
+                <button class="btn btn-success" type="submit" {% if not course_week_options %}disabled{% endif %}>Générer automatiquement</button>
               </form>
               <form method="post">
                 <input type="hidden" name="form" value="clear-sessions">

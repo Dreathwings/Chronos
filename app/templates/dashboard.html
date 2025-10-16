@@ -127,15 +127,22 @@
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="bulk-auto-schedule">
           <div>
-            <label class="form-label">Début de période</label>
-            <input type="date" class="form-control" name="period_start" required>
-          </div>
-          <div>
-            <label class="form-label">Fin de période</label>
-            <input type="date" class="form-control" name="period_end" required>
+            <label class="form-label">Semaines de génération</label>
+            {% if available_week_options %}
+            <select class="form-select" name="week_starts" multiple required size="8">
+              {% for option in available_week_options %}
+              <option value="{{ option.value }}">{{ option.label }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Maintenez Ctrl (ou Cmd) pour sélectionner plusieurs semaines.</div>
+            {% else %}
+            <div class="alert alert-info mb-0">
+              Définissez des dates de début et de fin sur vos cours pour proposer des semaines de génération.
+            </div>
+            {% endif %}
           </div>
           <div class="form-text">Les cours sont traités selon leur priorité décroissante.</div>
-          <button type="submit" class="btn btn-primary">Générer l'ensemble des cours</button>
+          <button type="submit" class="btn btn-primary" {% if not available_week_options %}disabled{% endif %}>Générer l'ensemble des cours</button>
         </form>
       </div>
     </div>

@@ -1331,6 +1331,7 @@ def generate_schedule(
     *,
     window_start: date | None = None,
     window_end: date | None = None,
+    allowed_weeks: Iterable[tuple[date, date]] | None = None,
 ) -> list[Session]:
     reporter = ScheduleReporter(course)
     created_sessions: list[Session] = []
@@ -1339,12 +1340,51 @@ def generate_schedule(
         schedule_start, schedule_end = _resolve_schedule_window(
             course, window_start, window_end
         )
-        reporter.set_window(schedule_start, schedule_end)
     except ValueError as exc:
         reporter.error(str(exc))
         reporter.summary = str(exc)
         reporter.finalise(len(created_sessions))
         raise
+
+    normalised_weeks: list[tuple[date, date]] = []
+    if allowed_weeks:
+        for week_start, week_end in allowed_weeks:
+            if week_start is None or week_end is None:
+                continue
+            if week_end < week_start:
+                week_start, week_end = week_end, week_start
+            normalised_weeks.append((week_start, week_end))
+        normalised_weeks.sort(key=lambda span: span[0])
+        truncated_weeks: list[tuple[date, date]] = []
+        for week_start, week_end in normalised_weeks:
+            if week_end < schedule_start or week_start > schedule_end:
+                continue
+            span_start = max(week_start, schedule_start)
+            span_end = min(week_end, schedule_end)
+            if span_start > span_end:
+                continue
+            truncated_weeks.append((span_start, span_end))
+        normalised_weeks = truncated_weeks
+        if not normalised_weeks:
+            message = (
+                "Les semaines sélectionnées ne recoupent pas la fenêtre du cours."
+            )
+            reporter.error(message)
+            reporter.summary = message
+            reporter.finalise(0)
+            raise ValueError(message)
+        schedule_start = normalised_weeks[0][0]
+        schedule_end = normalised_weeks[-1][1]
+        reporter.set_window(schedule_start, schedule_end)
+    else:
+        reporter.set_window(schedule_start, schedule_end)
+
+    allowed_days: set[date] | None = None
+    if normalised_weeks:
+        allowed_days = set()
+        for span_start, span_end in normalised_weeks:
+            for day in daterange(span_start, span_end):
+                allowed_days.add(day)
 
     if not course.classes:
         message = "Associez au moins une classe au cours avant de planifier."
@@ -1392,7 +1432,9 @@ def generate_schedule(
         available_days = [
             day
             for day in sorted(daterange(schedule_start, schedule_end))
-            if day.weekday() < 5 and all(group.is_available_on(day) for group in class_groups)
+            if day.weekday() < 5
+            and all(group.is_available_on(day) for group in class_groups)
+            and (allowed_days is None or day in allowed_days)
         ]
         if not available_days:
             reporter.warning(
@@ -1552,7 +1594,9 @@ def generate_schedule(
             available_days = [
                 day
                 for day in sorted(daterange(schedule_start, schedule_end))
-                if day.weekday() < 5 and class_group.is_available_on(day)
+                if day.weekday() < 5
+                and class_group.is_available_on(day)
+                and (allowed_days is None or day in allowed_days)
             ]
             if not available_days:
                 reporter.warning(
