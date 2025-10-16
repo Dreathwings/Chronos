@@ -349,7 +349,7 @@
         if (!startIso || !endIso) {
           throw new Error('Impossible de déterminer les horaires du déplacement');
         }
-        const response = await fetch(`/sessions/${segmentIds[0]}/move`, {
+        const response = await fetch(`/chronos/sessions/${segmentIds[0]}/move`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
