@@ -55,6 +55,7 @@
                 <option value="{{ semester }}" {% if semester == default_semester %}selected{% endif %}>{{ semester }}</option>
                 {% endfor %}
               </select>
+              <div class="form-text">La période est déterminée automatiquement selon le semestre.</div>
             </div>
             <div class="col-md-4">
               <label class="form-label">Durée séance (h)</label>
@@ -69,16 +70,6 @@
             <div class="col">
               <label class="form-label">Priorité</label>
               <input type="number" class="form-control" name="priority" value="1" min="1">
-            </div>
-          </div>
-          <div class="row g-2">
-            <div class="col">
-              <label class="form-label">Début</label>
-              <input type="date" class="form-control" name="start_date">
-            </div>
-            <div class="col">
-              <label class="form-label">Fin</label>
-              <input type="date" class="form-control" name="end_date">
             </div>
           </div>
           <div class="row g-2 align-items-center">
@@ -173,7 +164,13 @@
                 <td><a href="{{ url_for('main.course_detail', course_id=course.id) }}">{{ course.name }}</a></td>
                 <td>{{ course_type_labels.get(course.course_type, course.course_type) }}</td>
                 <td>{{ course.semester }}</td>
-                <td>{{ course.start_date or '—' }} → {{ course.end_date or '—' }}</td>
+                <td>
+                  {% if course.semester_start and course.semester_end %}
+                  {{ course.semester_start }} → {{ course.semester_end }}
+                  {% else %}
+                  —
+                  {% endif %}
+                </td>
                 {% set group_total = course.class_links | map(attribute='group_count') | sum %}
                 {% set required_hours = course.total_required_hours %}
                 <td>{{ course.scheduled_hours }}h/{{ required_hours }}h</td>

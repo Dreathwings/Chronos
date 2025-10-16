@@ -72,6 +72,7 @@
                 <option value="{{ semester }}" {% if course.semester == semester %}selected{% endif %}>{{ semester }}</option>
                 {% endfor %}
               </select>
+              <div class="form-text">La période est déterminée automatiquement selon le semestre.</div>
             </div>
             <div class="col-md-4">
               <label class="form-label">Durée séance (h)</label>
@@ -88,15 +89,12 @@
               <input type="number" class="form-control" name="priority" value="{{ course.priority }}" min="1">
             </div>
           </div>
-          <div class="row g-2">
-            <div class="col">
-              <label class="form-label">Début</label>
-              <input type="date" class="form-control" name="start_date" value="{{ course.start_date }}">
-            </div>
-            <div class="col">
-              <label class="form-label">Fin</label>
-              <input type="date" class="form-control" name="end_date" value="{{ course.end_date }}">
-            </div>
+          <div class="text-muted small">
+            {% if course.semester_start and course.semester_end %}
+            Période du semestre : {{ course.semester_start.strftime('%d/%m/%Y') }} → {{ course.semester_end.strftime('%d/%m/%Y') }}
+            {% else %}
+            Aucune période n'est définie pour ce semestre.
+            {% endif %}
           </div>
           <div>
             <label class="form-label">Semaines autorisées pour la planification</label>
@@ -122,7 +120,7 @@
             </div>
             <div class="form-text">Cochez les semaines autorisées pour la génération automatique. Laissez vide pour autoriser l'ensemble du semestre.</div>
             {% else %}
-            <div class="alert alert-info mb-0">Aucune semaine n'est encore définie pour ce semestre. Renseignez les périodes des cours du semestre pour proposer des options.</div>
+            <div class="alert alert-info mb-0">Aucune semaine n'est disponible pour le semestre sélectionné.</div>
             {% endif %}
           </div>
           <div class="row g-2 align-items-center">
@@ -380,7 +378,7 @@
                     {% endfor %}
                   </ul>
                   {% else %}
-                  <div class="mb-2">Aucune semaine spécifique : toute la période du cours sera utilisée.</div>
+                  <div class="mb-2">Aucune semaine spécifique : toute la période du semestre sera utilisée.</div>
                   {% endif %}
                   <div>Modifiez cette sélection dans l'onglet « Contraintes du cours ».</div>
                 </div>

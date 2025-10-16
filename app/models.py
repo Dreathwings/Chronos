@@ -210,6 +210,20 @@ COURSE_TYPE_LABELS = {
     "SAE": "Situation d'apprentissage et d'évaluation",
 }
 SEMESTER_CHOICES = ("S1", "S2", "S3", "S4", "S5", "S6")
+SEMESTER_PLANNING_WINDOWS: dict[str, tuple[date, date]] = {
+    "S1": (date(2025, 9, 1), date(2026, 1, 11)),
+    "S3": (date(2025, 9, 1), date(2026, 1, 11)),
+    "S5": (date(2025, 9, 1), date(2026, 1, 11)),
+    "S2": (date(2026, 1, 12), date(2026, 7, 4)),
+    "S4": (date(2026, 1, 12), date(2026, 7, 4)),
+    "S6": (date(2026, 1, 12), date(2026, 7, 4)),
+}
+
+
+def semester_date_window(semester: str | None) -> tuple[date, date] | None:
+    if not semester:
+        return None
+    return SEMESTER_PLANNING_WINDOWS.get(semester.strip().upper())
 
 
 class Course(db.Model, TimeStampedModel):
@@ -218,8 +232,6 @@ class Course(db.Model, TimeStampedModel):
     description: Mapped[Optional[str]] = mapped_column(Text)
     session_length_hours: Mapped[int] = mapped_column(Integer, default=2)
     sessions_required: Mapped[int] = mapped_column(Integer, default=1)
-    start_date: Mapped[Optional[date]] = mapped_column(Date)
-    end_date: Mapped[Optional[date]] = mapped_column(Date)
     priority: Mapped[int] = mapped_column(Integer, default=1)
     course_type: Mapped[str] = mapped_column(String(3), default="CM")
     semester: Mapped[str] = mapped_column(String(2), default="S1")
@@ -314,6 +326,24 @@ class Course(db.Model, TimeStampedModel):
     @property
     def is_sae(self) -> bool:
         return self.course_type == "SAE"
+
+    @property
+    def semester_window(self) -> tuple[date, date] | None:
+        return semester_date_window(self.semester)
+
+    @property
+    def semester_start(self) -> date | None:
+        window = self.semester_window
+        if window is None:
+            return None
+        return window[0]
+
+    @property
+    def semester_end(self) -> date | None:
+        window = self.semester_window
+        if window is None:
+            return None
+        return window[1]
 
     def class_link_for(self, class_group: "ClassGroup" | int) -> "CourseClassLink" | None:
         class_id = class_group if isinstance(class_group, int) else class_group.id

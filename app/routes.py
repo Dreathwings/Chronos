@@ -5,7 +5,6 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, MutableSequence
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
-from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -27,6 +26,7 @@ from .models import (
     Teacher,
     TeacherAvailability,
     SEMESTER_CHOICES,
+    semester_date_window,
 )
 from .scheduler import (
     SCHEDULE_SLOTS,
@@ -145,46 +145,12 @@ def _week_bounds_for(day: date) -> tuple[date, date]:
     return start, end
 
 
-def _course_week_ranges(course: Course) -> list[tuple[date, date]]:
-    if not course.start_date or not course.end_date:
-        return []
-    start, _ = _week_bounds_for(course.start_date)
-    _, end = _week_bounds_for(course.end_date)
-    ranges: list[tuple[date, date]] = []
-    current = start
-    while current <= end:
-        ranges.append((current, current + timedelta(days=6)))
-        current += timedelta(days=7)
-    return ranges
-
-
-def _semester_week_ranges(semester: str, course: Course | None = None) -> list[tuple[date, date]]:
-    if not semester:
-        return []
-    value = semester.strip().upper()
-    if value not in SEMESTER_CHOICES:
+def _semester_week_ranges(semester: str) -> list[tuple[date, date]]:
+    window = semester_date_window(semester)
+    if window is None:
         return []
 
-    min_start: date | None = None
-    max_end: date | None = None
-
-    result = (
-        db.session.query(func.min(Course.start_date), func.max(Course.end_date))
-        .filter(Course.semester == value)
-        .first()
-    )
-    if result:
-        min_start, max_end = result
-
-    if course is not None:
-        if course.start_date and (min_start is None or course.start_date < min_start):
-            min_start = course.start_date
-        if course.end_date and (max_end is None or course.end_date > max_end):
-            max_end = course.end_date
-
-    if min_start is None or max_end is None:
-        return []
-
+    min_start, max_end = window
     start, _ = _week_bounds_for(min_start)
     _, end = _week_bounds_for(max_end)
 
@@ -1319,8 +1285,6 @@ def courses_list():
                 description=request.form.get("description"),
                 session_length_hours=int(request.form.get("session_length_hours", 2)),
                 sessions_required=int(request.form.get("sessions_required", 1)),
-                start_date=_parse_date(request.form.get("start_date")),
-                end_date=_parse_date(request.form.get("end_date")),
                 priority=int(request.form.get("priority", 1)),
                 course_type=course_type,
                 semester=semester,
@@ -1404,8 +1368,6 @@ def course_detail(course_id: int):
             course.description = request.form.get("description")
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.sessions_required = int(request.form.get("sessions_required", course.sessions_required))
-            course.start_date = _parse_date(request.form.get("start_date"))
-            course.end_date = _parse_date(request.form.get("end_date"))
             course.priority = int(request.form.get("priority", course.priority))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
@@ -1650,11 +1612,7 @@ def course_detail(course_id: int):
         key=lambda teacher: (teacher.name or "").lower(),
     )
 
-    semester_week_ranges = _semester_week_ranges(course.semester, course)
-    week_ranges = list(semester_week_ranges)
-
-    if not week_ranges:
-        week_ranges = _course_week_ranges(course)
+    week_ranges = _semester_week_ranges(course.semester)
 
     selected_course_week_values = {
         allowed.week_start.isoformat() for allowed in course.allowed_weeks

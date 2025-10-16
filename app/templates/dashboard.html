@@ -58,8 +58,8 @@
                 <div class="fw-semibold">{{ item.course.name }}</div>
                 <div class="text-muted small">
                   {{ item.type_label }}
-                  {% if item.course.start_date and item.course.end_date %}
-                  — {{ item.course.start_date }} → {{ item.course.end_date }}
+                  {% if item.course.semester_start and item.course.semester_end %}
+                  — {{ item.course.semester_start }} → {{ item.course.semester_end }}
                   {% endif %}
                 </div>
               </div>

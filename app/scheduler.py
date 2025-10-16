@@ -1311,17 +1311,25 @@ def _cm_try_split_block(
 def _resolve_schedule_window(
     course: Course, window_start: date | None, window_end: date | None
 ) -> tuple[date, date]:
-    start_candidates = [value for value in (course.start_date, window_start) if value]
-    end_candidates = [value for value in (course.end_date, window_end) if value]
+    semester_window = course.semester_window
+    start_candidates: list[date] = []
+    end_candidates: list[date] = []
+    if semester_window is not None:
+        start_candidates.append(semester_window[0])
+        end_candidates.append(semester_window[1])
+    if window_start is not None:
+        start_candidates.append(window_start)
+    if window_end is not None:
+        end_candidates.append(window_end)
     if not start_candidates or not end_candidates:
         raise ValueError(
-            "Définissez des dates de début et de fin pour le cours ou indiquez une période de planification."
+            "Aucune période de planification n'est définie pour ce semestre."
         )
     start = max(start_candidates)
     end = min(end_candidates)
     if start > end:
         raise ValueError(
-            "La période choisie n'intersecte pas la fenêtre du cours."
+            "La période choisie n'intersecte pas la fenêtre du semestre."
         )
     return start, end
 
