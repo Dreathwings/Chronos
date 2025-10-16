@@ -171,7 +171,8 @@ class ScheduleReporter:
         logger = getattr(current_app, "logger", None)
         if logger is not None:
             log_level = self.LEVELS.get(level, logging.INFO)
-            logger.log(log_level, "[%s] %s", self.course.name, text)
+            if log_level >= logging.WARNING:
+                logger.log(log_level, "[%s] %s", self.course.name, text)
 
     def _serialise_entries(self) -> list[dict[str, str]]:
         if not self.entries:
