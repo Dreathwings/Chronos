@@ -98,6 +98,19 @@
               <input type="date" class="form-control" name="end_date" value="{{ course.end_date }}">
             </div>
           </div>
+          <div>
+            <label class="form-label">Semaines autorisées pour la planification</label>
+            {% if course_week_options %}
+            <select class="form-select" name="allowed_week_starts" multiple size="6">
+              {% for option in course_week_options %}
+              <option value="{{ option.value }}" {% if option.value in selected_course_week_values %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Maintenez Ctrl (ou Cmd) pour sélectionner plusieurs semaines. Laissez vide pour autoriser toute la période du cours.</div>
+            {% else %}
+            <div class="alert alert-info mb-0">Définissez une période pour ce cours afin de proposer des semaines disponibles.</div>
+            {% endif %}
+          </div>
           <div class="row g-2 align-items-center">
             <div class="col-sm-auto">
               <div class="form-check mb-0">
@@ -344,20 +357,20 @@
             <div class="d-grid gap-2">
               <form method="post" class="vstack gap-2">
                 <input type="hidden" name="form" value="auto-schedule">
-                <div>
-                  <label class="form-label small text-uppercase fw-semibold">Semaines de planification</label>
-                  {% if course_week_options %}
-                  <select class="form-select form-select-sm" name="weeks" multiple required size="6">
-                    {% for option in course_week_options %}
-                    <option value="{{ option.value }}">{{ option.label }}</option>
+                <div class="small text-muted">
+                  <div class="text-uppercase fw-semibold mb-1">Semaines de planification</div>
+                  {% if selected_course_week_labels %}
+                  <ul class="mb-2 ps-3">
+                    {% for label in selected_course_week_labels %}
+                    <li>{{ label }}</li>
                     {% endfor %}
-                  </select>
-                  <div class="form-text">Maintenez Ctrl (ou Cmd) pour sélectionner plusieurs semaines.</div>
+                  </ul>
                   {% else %}
-                  <div class="alert alert-info mb-0">Définissez une période pour ce cours afin de proposer des semaines disponibles.</div>
+                  <div class="mb-2">Aucune semaine spécifique : toute la période du cours sera utilisée.</div>
                   {% endif %}
+                  <div>Modifiez cette sélection dans l'onglet « Contraintes du cours ».</div>
                 </div>
-                <button class="btn btn-success" type="submit" {% if not course_week_options %}disabled{% endif %}>Générer automatiquement</button>
+                <button class="btn btn-success" type="submit">Générer automatiquement</button>
               </form>
               <form method="post">
                 <input type="hidden" name="form" value="clear-sessions">

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from math import ceil
 from typing import List, Optional, Set
 
@@ -254,6 +254,12 @@ class Course(db.Model, TimeStampedModel):
         cascade="all, delete-orphan",
         order_by="CourseScheduleLog.created_at.desc()",
     )
+    allowed_weeks: Mapped[List["CourseAllowedWeek"]] = relationship(
+        "CourseAllowedWeek",
+        back_populates="course",
+        cascade="all, delete-orphan",
+        order_by="CourseAllowedWeek.week_start",
+    )
 
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
@@ -331,6 +337,10 @@ class Course(db.Model, TimeStampedModel):
         if self.configured_name and self.configured_name.preferred_rooms:
             return list(self.configured_name.preferred_rooms)
         return []
+
+    @property
+    def allowed_week_ranges(self) -> list[tuple[date, date]]:
+        return [entry.week_span for entry in self.allowed_weeks]
 
     def subgroup_name_for(
         self, class_group: "ClassGroup" | int, subgroup_label: str | None
@@ -601,6 +611,30 @@ class CourseScheduleLog(db.Model, TimeStampedModel):
 
     def level_label(self, level: str) -> str:
         return self.LEVEL_LABELS.get(level, level.title())
+
+
+class CourseAllowedWeek(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), nullable=False)
+    week_start: Mapped[date] = mapped_column(Date, nullable=False)
+
+    course: Mapped["Course"] = relationship("Course", back_populates="allowed_weeks")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id",
+            "week_start",
+            name="uq_course_allowed_week_unique",
+        ),
+    )
+
+    @property
+    def week_end(self) -> date:
+        return self.week_start + timedelta(days=6)
+
+    @property
+    def week_span(self) -> tuple[date, date]:
+        return self.week_start, self.week_end
 
 
 class Equipment(db.Model):

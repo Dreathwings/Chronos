@@ -15,6 +15,7 @@ from .models import (
     ClassGroup,
     ClosingPeriod,
     Course,
+    CourseAllowedWeek,
     CourseClassLink,
     CourseScheduleLog,
     CourseName,
@@ -156,21 +157,6 @@ def _course_week_ranges(course: Course) -> list[tuple[date, date]]:
     return ranges
 
 
-def _global_week_ranges(courses: Iterable[Course]) -> list[tuple[date, date]]:
-    start_candidates = [course.start_date for course in courses if course.start_date]
-    end_candidates = [course.end_date for course in courses if course.end_date]
-    if not start_candidates or not end_candidates:
-        return []
-    start, _ = _week_bounds_for(min(start_candidates))
-    _, end = _week_bounds_for(max(end_candidates))
-    ranges: list[tuple[date, date]] = []
-    current = start
-    while current <= end:
-        ranges.append((current, current + timedelta(days=6)))
-        current += timedelta(days=7)
-    return ranges
-
-
 def _week_label(start: date, end: date) -> str:
     iso_year, iso_week, _ = start.isocalendar()
     return (
@@ -242,6 +228,34 @@ def _sync_simple_relationship(collection: MutableSequence, desired: Iterable[obj
         db.session.flush()
         if entity_id is not None:
             existing_ids.add(entity_id)
+
+
+def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> None:
+    desired: list[date] = []
+    seen: set[date] = set()
+    for raw_start in week_starts:
+        if raw_start is None:
+            continue
+        week_start, _ = _week_bounds_for(raw_start)
+        if week_start in seen:
+            continue
+        seen.add(week_start)
+        desired.append(week_start)
+    desired.sort()
+    desired_set = set(desired)
+
+    for entry in list(course.allowed_weeks):
+        if entry.week_start not in desired_set:
+            course.allowed_weeks.remove(entry)
+            db.session.flush()
+
+    existing_starts = {entry.week_start for entry in course.allowed_weeks}
+    for week_start in desired:
+        if week_start in existing_starts:
+            continue
+        course.allowed_weeks.append(CourseAllowedWeek(week_start=week_start))
+        db.session.flush()
+        existing_starts.add(week_start)
 
 
 def _sync_course_class_links(
@@ -720,24 +734,18 @@ def dashboard():
             flash("Séance créée", "success")
             return redirect(url_for("main.dashboard"))
         elif request.form.get("form") == "bulk-auto-schedule":
-            selected_weeks = _parse_week_selection(request.form.getlist("week_starts"))
-            if not selected_weeks:
-                flash(
-                    "Sélectionnez au moins une semaine pour la génération automatique.",
-                    "danger",
-                )
-                return redirect(url_for("main.dashboard"))
-            window_start = selected_weeks[0][0]
-            window_end = selected_weeks[-1][1]
             total_created = 0
             error_messages: list[str] = []
             for course in courses:
+                allowed_ranges = course.allowed_week_ranges
+                window_start = allowed_ranges[0][0] if allowed_ranges else None
+                window_end = allowed_ranges[-1][1] if allowed_ranges else None
                 try:
                     created = generate_schedule(
                         course,
                         window_start=window_start,
                         window_end=window_end,
-                        allowed_weeks=selected_weeks,
+                        allowed_weeks=allowed_ranges if allowed_ranges else None,
                     )
                 except ValueError as exc:
                     error_messages.append(f"{course.name} : {exc}")
@@ -750,7 +758,7 @@ def dashboard():
             else:
                 db.session.commit()
                 flash(
-                    "Aucune séance n'a pu être générée sur les semaines sélectionnées.",
+                    "Aucune séance n'a pu être générée avec les contraintes actuelles.",
                     "info",
                 )
 
@@ -805,11 +813,6 @@ def dashboard():
             }
         )
 
-    available_week_options = [
-        {"value": start.isoformat(), "label": _week_label(start, end)}
-        for start, end in _global_week_ranges(courses)
-    ]
-
     return render_template(
         "dashboard.html",
         courses=courses,
@@ -826,7 +829,6 @@ def dashboard():
         course_type_labels=COURSE_TYPE_LABELS,
         global_search_index_json=json.dumps(global_search_index, ensure_ascii=False),
         status_labels=CourseScheduleLog.STATUS_LABELS,
-        available_week_options=available_week_options,
     )
 
 
@@ -1400,11 +1402,15 @@ def course_detail(course_id: int):
                 )
                 if teacher is not None
             ]
+            selected_weeks = _parse_week_selection(
+                request.form.getlist("allowed_week_starts")
+            )
 
             _sync_simple_relationship(course.equipments, selected_equipments)
             _sync_simple_relationship(course.softwares, selected_softwares)
             _sync_course_class_links(course, class_ids, existing_links=class_links_map)
             _sync_simple_relationship(course.teachers, selected_teachers)
+            _sync_course_allowed_weeks(course, (start for start, _ in selected_weeks))
             try:
                 db.session.commit()
                 flash("Cours mis à jour", "success")
@@ -1413,21 +1419,15 @@ def course_detail(course_id: int):
                 db.session.refresh(course)
                 flash("Nom de cours déjà utilisé", "danger")
         elif form_name == "auto-schedule":
-            selected_weeks = _parse_week_selection(request.form.getlist("weeks"))
-            if not selected_weeks:
-                flash(
-                    "Sélectionnez au moins une semaine pour générer ce cours.",
-                    "danger",
-                )
-                return redirect(url_for("main.course_detail", course_id=course_id))
-            window_start = selected_weeks[0][0]
-            window_end = selected_weeks[-1][1]
+            allowed_ranges = course.allowed_week_ranges
+            window_start = allowed_ranges[0][0] if allowed_ranges else None
+            window_end = allowed_ranges[-1][1] if allowed_ranges else None
             try:
                 created_sessions = generate_schedule(
                     course,
                     window_start=window_start,
                     window_end=window_end,
-                    allowed_weeks=selected_weeks,
+                    allowed_weeks=allowed_ranges if allowed_ranges else None,
                 )
                 db.session.commit()
                 if created_sessions:
@@ -1615,6 +1615,13 @@ def course_detail(course_id: int):
         {"value": start.isoformat(), "label": _week_label(start, end)}
         for start, end in _course_week_ranges(course)
     ]
+    selected_course_week_values = {
+        allowed.week_start.isoformat() for allowed in course.allowed_weeks
+    }
+    selected_course_week_labels = [
+        _week_label(allowed.week_start, allowed.week_end)
+        for allowed in course.allowed_weeks
+    ]
 
     return render_template(
         "courses/detail.html",
@@ -1636,6 +1643,8 @@ def course_detail(course_id: int):
         status_badges=status_badges,
         level_badges=level_badges,
         course_week_options=course_week_options,
+        selected_course_week_values=selected_course_week_values,
+        selected_course_week_labels=selected_course_week_labels,
     )
 
 
