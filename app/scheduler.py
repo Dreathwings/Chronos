@@ -351,7 +351,14 @@ def _describe_teacher_unavailability(
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
 
-    if course.teachers:
+    if link is not None:
+        fallback_pool = link.assigned_teachers()
+        if not fallback_pool:
+            if course.teachers:
+                fallback_pool = list(course.teachers)
+            else:
+                fallback_pool = Teacher.query.all()
+    elif course.teachers:
         fallback_pool = list(course.teachers)
     else:
         fallback_pool = Teacher.query.all()
@@ -609,7 +616,14 @@ def find_available_teacher(
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
 
-    if course.teachers:
+    if link is not None:
+        fallback_pool = link.assigned_teachers()
+        if not fallback_pool:
+            if course.teachers:
+                fallback_pool = list(course.teachers)
+            else:
+                fallback_pool = Teacher.query.all()
+    elif course.teachers:
         fallback_pool = list(course.teachers)
     else:
         fallback_pool = Teacher.query.all()
@@ -651,13 +665,14 @@ def find_available_teacher(
         _append_unique(candidates, existing_teachers)
 
     _append_unique(candidates, preferred)
-    _append_unique(
-        candidates,
-        sorted(
-            [teacher for teacher in fallback_pool if teacher not in preferred],
-            key=lambda t: t.name.lower(),
-        ),
-    )
+    if not candidates:
+        _append_unique(
+            candidates,
+            sorted(
+                [teacher for teacher in fallback_pool if teacher not in preferred],
+                key=lambda t: t.name.lower(),
+            ),
+        )
 
     for teacher in candidates:
         segments_to_check = segments or [(start, end)]
