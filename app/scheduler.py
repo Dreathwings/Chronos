@@ -601,6 +601,7 @@ def find_available_teacher(
     link: CourseClassLink | None = None,
     subgroup_label: str | None = None,
     segments: Optional[list[tuple[datetime, datetime]]] = None,
+    target_class_ids: Set[int] | None = None,
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
     if link is not None:
@@ -613,8 +614,52 @@ def find_available_teacher(
     else:
         fallback_pool = Teacher.query.all()
 
-    candidates = preferred + [teacher for teacher in fallback_pool if teacher not in preferred]
-    for teacher in sorted(candidates, key=lambda t: t.name.lower()):
+    def _append_unique(target: list[Teacher], items: Iterable[Teacher]) -> None:
+        seen = {teacher.id for teacher in target if teacher.id is not None}
+        for teacher in items:
+            if teacher is None:
+                continue
+            teacher_id = teacher.id
+            if teacher_id is not None and teacher_id in seen:
+                continue
+            target.append(teacher)
+            if teacher_id is not None:
+                seen.add(teacher_id)
+
+    candidates: list[Teacher] = []
+    if target_class_ids:
+        target_label = _normalise_label(subgroup_label)
+        existing_teachers: list[Teacher] = []
+        seen_existing: set[int] = set()
+        for session in sorted(
+            course.sessions,
+            key=lambda s: (s.start_time, s.id or 0),
+        ):
+            if session.teacher is None:
+                continue
+            if _session_attendee_ids(session) != target_class_ids:
+                continue
+            if _normalise_label(session.subgroup_label) != target_label:
+                continue
+            teacher = session.teacher
+            if teacher.id is None:
+                continue
+            if teacher.id in seen_existing:
+                continue
+            existing_teachers.append(teacher)
+            seen_existing.add(teacher.id)
+        _append_unique(candidates, existing_teachers)
+
+    _append_unique(candidates, preferred)
+    _append_unique(
+        candidates,
+        sorted(
+            [teacher for teacher in fallback_pool if teacher not in preferred],
+            key=lambda t: t.name.lower(),
+        ),
+    )
+
+    for teacher in candidates:
         segments_to_check = segments or [(start, end)]
         if not all(
             teacher.is_available_during(segment_start, segment_end)
@@ -861,6 +906,9 @@ def _try_full_block(
     diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     required_capacity = course.capacity_needed_for(class_group)
+    target_class_ids = (
+        {class_group.id} if class_group.id is not None else set()
+    )
     for offset in range(len(START_TIMES)):
         slot_index = (base_offset + offset) % len(START_TIMES)
         slot_start_time = START_TIMES[slot_index]
@@ -880,6 +928,7 @@ def _try_full_block(
             end_dt,
             link=link,
             subgroup_label=subgroup_label,
+            target_class_ids=target_class_ids or None,
         )
         if not teacher:
             if diagnostics is not None:
@@ -941,8 +990,12 @@ def _try_split_block(
     base_offset: int,
     diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
-    segment_count = desired_hours
+    segment_lengths = [2, 2] if desired_hours == 4 else [1] * desired_hours
+    segment_count = sum(segment_lengths)
     required_capacity = course.capacity_needed_for(class_group)
+    target_class_ids = (
+        {class_group.id} if class_group.id is not None else set()
+    )
     slot_count = len(SCHEDULE_SLOTS)
     for offset in range(slot_count):
         start_index = (base_offset + offset) % slot_count
@@ -951,10 +1004,18 @@ def _try_split_block(
             continue
         if not all(fits_in_windows(start, end) for start, end in contiguous):
             continue
-        segment_datetimes = [
-            (datetime.combine(day, slot_start), datetime.combine(day, slot_end))
-            for slot_start, slot_end in contiguous
-        ]
+        segment_datetimes: list[tuple[datetime, datetime]] = []
+        index = 0
+        for length in segment_lengths:
+            segment_start = contiguous[index][0]
+            segment_end = contiguous[index + length - 1][1]
+            segment_datetimes.append(
+                (
+                    datetime.combine(day, segment_start),
+                    datetime.combine(day, segment_end),
+                )
+            )
+            index += length
         start_dt = segment_datetimes[0][0]
         end_dt = segment_datetimes[-1][1]
         if not all(
@@ -979,6 +1040,7 @@ def _try_split_block(
             link=link,
             subgroup_label=subgroup_label,
             segments=segment_datetimes,
+            target_class_ids=target_class_ids or None,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1128,6 +1190,9 @@ def _cm_try_full_block(
         return None
     required_capacity = sum(course.capacity_needed_for(group) for group in class_groups)
     primary_class = class_groups[0]
+    target_class_ids = {
+        group.id for group in class_groups if group is not None and group.id is not None
+    }
     for offset in range(len(START_TIMES)):
         slot_index = (base_offset + offset) % len(START_TIMES)
         slot_start_time = START_TIMES[slot_index]
@@ -1153,6 +1218,7 @@ def _cm_try_full_block(
             end_dt,
             link=primary_link,
             subgroup_label=None,
+            target_class_ids=target_class_ids or None,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1210,10 +1276,14 @@ def _cm_try_split_block(
 ) -> list[Session] | None:
     if not class_groups:
         return None
-    segment_count = desired_hours
+    segment_lengths = [2, 2] if desired_hours == 4 else [1] * desired_hours
+    segment_count = sum(segment_lengths)
     required_capacity = sum(course.capacity_needed_for(group) for group in class_groups)
     slot_count = len(SCHEDULE_SLOTS)
     primary_class = class_groups[0]
+    target_class_ids = {
+        group.id for group in class_groups if group is not None and group.id is not None
+    }
     for offset in range(slot_count):
         start_index = (base_offset + offset) % slot_count
         contiguous = _collect_contiguous_slots(start_index, segment_count)
@@ -1221,10 +1291,18 @@ def _cm_try_split_block(
             continue
         if not all(fits_in_windows(start, end) for start, end in contiguous):
             continue
-        segment_datetimes = [
-            (datetime.combine(day, slot_start), datetime.combine(day, slot_end))
-            for slot_start, slot_end in contiguous
-        ]
+        segment_datetimes: list[tuple[datetime, datetime]] = []
+        index = 0
+        for length in segment_lengths:
+            segment_start = contiguous[index][0]
+            segment_end = contiguous[index + length - 1][1]
+            segment_datetimes.append(
+                (
+                    datetime.combine(day, segment_start),
+                    datetime.combine(day, segment_end),
+                )
+            )
+            index += length
         availability_blocks = []
         for class_group in class_groups:
             for segment_start, segment_end in segment_datetimes:
@@ -1244,6 +1322,7 @@ def _cm_try_split_block(
             link=primary_link,
             subgroup_label=None,
             segments=segment_datetimes,
+            target_class_ids=target_class_ids or None,
         )
         if not teacher:
             if diagnostics is not None:
