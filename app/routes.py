@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Iterable, MutableSequence
+from typing import Iterable, List, MutableSequence
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -28,6 +38,7 @@ from .models import (
     SEMESTER_CHOICES,
     semester_date_window,
 )
+from .progress import progress_registry, ScheduleProgressTracker
 from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
@@ -93,25 +104,41 @@ def _parse_non_negative_int(raw_value: str | None, default: int = 0) -> int:
 
 
 def _build_default_backgrounds() -> list[dict[str, object]]:
-    spans: list[tuple[time, time]] = []
-    pointer = WORKDAY_START
-    for slot_start, slot_end in SCHEDULE_SLOTS:
-        slot_start = max(slot_start, WORKDAY_START)
-        slot_end = min(slot_end, WORKDAY_END)
-        if slot_start > pointer:
-            spans.append((pointer, slot_start))
-        if slot_end > pointer:
-            pointer = slot_end
-    if pointer < WORKDAY_END:
-        spans.append((pointer, WORKDAY_END))
-
     backgrounds: list[dict[str, object]] = []
-    for span_start, span_end in spans:
+    if not SCHEDULE_SLOTS:
         backgrounds.append(
             {
                 "daysOfWeek": [1, 2, 3, 4, 5],
-                "startTime": span_start.strftime("%H:%M:%S"),
-                "endTime": span_end.strftime("%H:%M:%S"),
+                "startTime": WORKDAY_START.strftime("%H:%M:%S"),
+                "endTime": WORKDAY_END.strftime("%H:%M:%S"),
+                "display": "background",
+                "overlap": False,
+                "color": BACKGROUND_BLOCK_COLOR,
+            }
+        )
+        return backgrounds
+
+    ordered_slots = sorted(SCHEDULE_SLOTS, key=lambda entry: entry[0])
+    first_start = max(ordered_slots[0][0], WORKDAY_START)
+    last_end = min(ordered_slots[-1][1], WORKDAY_END)
+
+    if first_start > WORKDAY_START:
+        backgrounds.append(
+            {
+                "daysOfWeek": [1, 2, 3, 4, 5],
+                "startTime": WORKDAY_START.strftime("%H:%M:%S"),
+                "endTime": first_start.strftime("%H:%M:%S"),
+                "display": "background",
+                "overlap": False,
+                "color": BACKGROUND_BLOCK_COLOR,
+            }
+        )
+    if last_end < WORKDAY_END:
+        backgrounds.append(
+            {
+                "daysOfWeek": [1, 2, 3, 4, 5],
+                "startTime": last_end.strftime("%H:%M:%S"),
+                "endTime": WORKDAY_END.strftime("%H:%M:%S"),
                 "display": "background",
                 "overlap": False,
                 "color": BACKGROUND_BLOCK_COLOR,
@@ -121,6 +148,44 @@ def _build_default_backgrounds() -> list[dict[str, object]]:
 
 
 DEFAULT_WORKDAY_BACKGROUNDS = _build_default_backgrounds()
+
+
+def _build_pause_backgrounds() -> list[dict[str, object]]:
+    backgrounds: list[dict[str, object]] = []
+    ordered_slots = sorted(SCHEDULE_SLOTS, key=lambda entry: entry[0])
+    pointer: time | None = None
+    for raw_start, raw_end in ordered_slots:
+        slot_start = max(raw_start, WORKDAY_START)
+        slot_end = min(raw_end, WORKDAY_END)
+        if slot_end <= WORKDAY_START or slot_start >= WORKDAY_END:
+            continue
+        if pointer is None:
+            pointer = slot_end
+            continue
+        if slot_start > pointer:
+            backgrounds.append(
+                {
+                    "daysOfWeek": [1, 2, 3, 4, 5],
+                    "startTime": pointer.strftime("%H:%M:%S"),
+                    "endTime": slot_start.strftime("%H:%M:%S"),
+                    "display": "background",
+                    "overlap": False,
+                    "color": BACKGROUND_BLOCK_COLOR,
+                }
+            )
+        if slot_end > pointer:
+            pointer = slot_end
+    return backgrounds
+
+
+PAUSE_BACKGROUNDS = _build_pause_backgrounds()
+
+
+def _format_hours(value: float) -> str:
+    rounded = round(value)
+    if abs(value - rounded) < 1e-6:
+        return str(int(rounded))
+    return f"{value:.1f}".rstrip("0").rstrip(".")
 
 
 def _closing_period_backgrounds() -> list[dict[str, object]]:
@@ -346,6 +411,7 @@ def inject_calendar_defaults() -> dict[str, object]:
     return {
         "default_backgrounds_json": json.dumps(DEFAULT_WORKDAY_BACKGROUNDS),
         "background_block_color": BACKGROUND_BLOCK_COLOR,
+        "pause_backgrounds_json": json.dumps(PAUSE_BACKGROUNDS),
         "closing_backgrounds_json": json.dumps(_closing_period_backgrounds()),
         "schedule_slot_starts_json": json.dumps(slot_starts),
     }
@@ -739,6 +805,17 @@ def dashboard():
             flash("Séance créée", "success")
             return redirect(url_for("main.dashboard"))
         elif request.form.get("form") == "bulk-auto-schedule":
+            if _wants_json_response():
+                tracker = _enqueue_bulk_schedule()
+                response = {
+                    "job_id": tracker.job_id,
+                    "status_url": url_for(
+                        "main.schedule_progress_status", job_id=tracker.job_id
+                    ),
+                    "redirect_url": url_for("main.dashboard"),
+                    "label": "Génération globale",
+                }
+                return jsonify(response), 202
             total_created = 0
             error_messages: list[str] = []
             for course in courses:
@@ -1335,6 +1412,51 @@ def courses_list():
     )
 
 
+@bp.get("/generation/progress/<string:job_id>")
+def schedule_progress_status(job_id: str):
+    tracker = progress_registry.get(job_id)
+    if tracker is None:
+        return jsonify({"error": "Progression introuvable"}), 404
+    snapshot = tracker.snapshot()
+    if snapshot.total_hours > 0:
+        hours_detail = (
+            f"{_format_hours(snapshot.completed_hours)} / "
+            f"{_format_hours(snapshot.total_hours)} h planifiées"
+        )
+        if snapshot.sessions_created > 0:
+            detail = (
+                f"{snapshot.sessions_created} séance(s) planifiée(s) — "
+                + hours_detail
+            )
+        else:
+            detail = hours_detail
+    elif snapshot.sessions_created > 0:
+        detail = f"{snapshot.sessions_created} séance(s) planifiée(s)"
+    else:
+        detail = None
+    detail_parts: List[str] = []
+    if snapshot.current_label:
+        detail_parts.append(snapshot.current_label)
+    if detail:
+        detail_parts.append(detail)
+    detail_text = " — ".join(detail_parts) if detail_parts else None
+    return jsonify(
+        {
+            "id": snapshot.job_id,
+            "label": snapshot.label,
+            "state": snapshot.state,
+            "percent": snapshot.percent,
+            "eta_seconds": snapshot.eta_seconds,
+            "sessions_created": snapshot.sessions_created,
+            "completed_hours": snapshot.completed_hours,
+            "total_hours": snapshot.total_hours,
+            "message": snapshot.message,
+            "detail": detail_text,
+            "finished": snapshot.finished,
+        }
+    )
+
+
 @bp.route("/matiere/<int:course_id>", methods=["GET", "POST"])
 def course_detail(course_id: int):
     course = (
@@ -1423,12 +1545,33 @@ def course_detail(course_id: int):
             allowed_ranges = course.allowed_week_ranges
             window_start = allowed_ranges[0][0] if allowed_ranges else None
             window_end = allowed_ranges[-1][1] if allowed_ranges else None
+            allowed_payload = (
+                [(start, end) for start, end in allowed_ranges]
+                if allowed_ranges
+                else None
+            )
+            if _wants_json_response():
+                tracker = _enqueue_course_schedule(
+                    course,
+                    window_start=window_start,
+                    window_end=window_end,
+                    allowed_weeks=allowed_payload,
+                )
+                response = {
+                    "job_id": tracker.job_id,
+                    "status_url": url_for(
+                        "main.schedule_progress_status", job_id=tracker.job_id
+                    ),
+                    "redirect_url": url_for("main.course_detail", course_id=course.id),
+                    "label": course.name,
+                }
+                return jsonify(response), 202
             try:
                 created_sessions = generate_schedule(
                     course,
                     window_start=window_start,
                     window_end=window_end,
-                    allowed_weeks=allowed_ranges if allowed_ranges else None,
+                    allowed_weeks=allowed_payload,
                 )
                 db.session.commit()
                 if created_sessions:
@@ -1635,6 +1778,8 @@ def course_detail(course_id: int):
         for allowed in course.allowed_weeks
     ]
 
+    remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
+
     return render_template(
         "courses/detail.html",
         course=course,
@@ -1657,6 +1802,7 @@ def course_detail(course_id: int):
         course_week_options=course_week_options,
         selected_course_week_values=selected_course_week_values,
         selected_course_week_labels=selected_course_week_labels,
+        course_remaining_hours=remaining_hours,
     )
 
 
@@ -1720,3 +1866,169 @@ def delete_session(session_id: int):
     db.session.delete(session)
     db.session.commit()
     return {"status": "deleted"}
+
+
+def _wants_json_response() -> bool:
+    if request.headers.get("X-Requested-With", "").lower() == "xmlhttprequest":
+        return True
+    if request.is_json:
+        return True
+    accept = request.accept_mimetypes
+    if not accept:
+        return False
+    best = accept.best
+    if best == "application/json":
+        return True
+    json_quality = accept["application/json"]
+    html_quality = accept["text/html"]
+    return json_quality and json_quality >= html_quality
+
+
+def _run_course_schedule_job(
+    app,
+    tracker_id: str,
+    course_id: int,
+    window_start: date | None,
+    window_end: date | None,
+    allowed_weeks: list[tuple[date, date]] | None,
+) -> None:
+    with app.app_context():
+        tracker = progress_registry.get(tracker_id)
+        if tracker is None:
+            return
+        try:
+            course = Course.query.get(course_id)
+            if course is None:
+                tracker.fail("Cours introuvable.")
+                return
+            created_sessions = generate_schedule(
+                course,
+                window_start=window_start,
+                window_end=window_end,
+                allowed_weeks=allowed_weeks,
+                progress=tracker,
+            )
+            db.session.commit()
+            if not tracker.is_finished():
+                tracker.complete(
+                    f"{len(created_sessions)} séance(s) générée(s)"
+                )
+        except ValueError as exc:
+            db.session.rollback()
+            tracker.fail(str(exc))
+        except Exception:  # pragma: no cover - defensive logging
+            db.session.rollback()
+            tracker.fail("Erreur inattendue lors de la génération.")
+            current_app.logger.exception(
+                "Automatic scheduling failed for course %s", course_id
+            )
+        finally:
+            db.session.remove()
+
+
+def _enqueue_course_schedule(
+    course: Course,
+    *,
+    window_start: date | None,
+    window_end: date | None,
+    allowed_weeks: list[tuple[date, date]] | None,
+) -> ScheduleProgressTracker:
+    app = current_app._get_current_object()
+    tracker = progress_registry.create(course.name)
+    progress_registry.purge()
+    thread = threading.Thread(
+        target=_run_course_schedule_job,
+        args=(app, tracker.job_id, course.id, window_start, window_end, allowed_weeks),
+        daemon=True,
+    )
+    thread.start()
+    return tracker
+
+
+def _run_bulk_schedule_job(app, tracker_id: str) -> None:
+    with app.app_context():
+        tracker = progress_registry.get(tracker_id)
+        if tracker is None:
+            return
+        try:
+            courses = (
+                Course.query.order_by(Course.priority.desc())
+                .options(
+                    selectinload(Course.class_links),
+                    selectinload(Course.sessions),
+                )
+                .all()
+            )
+            total_hours = sum(
+                max(course.total_required_hours - course.scheduled_hours, 0)
+                for course in courses
+            )
+            tracker.initialise(total_hours)
+
+            total_created = 0
+            errors: list[str] = []
+
+            for course in courses:
+                allowed_ranges = course.allowed_week_ranges
+                window_start = allowed_ranges[0][0] if allowed_ranges else None
+                window_end = allowed_ranges[-1][1] if allowed_ranges else None
+                allowed_payload = (
+                    [(start, end) for start, end in allowed_ranges]
+                    if allowed_ranges
+                    else None
+                )
+                slice_progress = tracker.create_slice(
+                    label=f"Planification de {course.name}"
+                )
+                try:
+                    created_sessions = generate_schedule(
+                        course,
+                        window_start=window_start,
+                        window_end=window_end,
+                        allowed_weeks=allowed_payload,
+                        progress=slice_progress,
+                    )
+                except ValueError as exc:
+                    errors.append(f"{course.name} : {exc}")
+                    tracker.set_current_label(None)
+                    db.session.commit()
+                    continue
+                total_created += len(created_sessions)
+                db.session.commit()
+
+            if errors:
+                current_app.logger.warning(
+                    "Bulk scheduling completed with warnings: %s", errors
+                )
+
+            if total_created:
+                summary = f"{total_created} séance(s) générée(s)"
+            else:
+                summary = (
+                    "Aucune séance n'a pu être générée avec les contraintes actuelles."
+                )
+
+            if errors:
+                summary = f"{summary} — {len(errors)} cours en erreur"
+
+            tracker.complete(summary)
+        except Exception:
+            db.session.rollback()
+            tracker.fail("Erreur inattendue lors de la génération globale.")
+            current_app.logger.exception("Automatic bulk scheduling failed")
+        finally:
+            db.session.remove()
+
+
+def _enqueue_bulk_schedule() -> ScheduleProgressTracker:
+    app = current_app._get_current_object()
+    tracker = progress_registry.create("Génération globale")
+    progress_registry.purge()
+    thread = threading.Thread(
+        target=_run_bulk_schedule_job,
+        args=(app, tracker.job_id),
+        daemon=True,
+    )
+    thread.start()
+    return tracker
+

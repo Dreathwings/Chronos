@@ -124,7 +124,23 @@
     </h2>
     <div id="dashboardAuto" class="accordion-collapse collapse" aria-labelledby="dashboardAutoHeading" data-bs-parent="#dashboardAccordion">
       <div class="accordion-body">
-        <form method="post" class="vstack gap-3">
+        {% set totals = namespace(hours=0, courses=0) %}
+        {% for summary in course_summaries %}
+          {% set totals.hours = totals.hours + summary.remaining %}
+          {% if summary.remaining > 0 %}
+            {% set totals.courses = totals.courses + 1 %}
+          {% endif %}
+        {% endfor %}
+        <form
+          method="post"
+          class="vstack gap-3"
+          data-chronos-progress
+          data-chronos-progress-async="true"
+          data-chronos-progress-context="bulk"
+          data-chronos-progress-hours="{{ totals.hours }}"
+          data-chronos-progress-tasks="{{ totals.courses }}"
+          data-chronos-progress-label="Synthèse : {{ totals.hours }} heure(s) restante(s) sur {{ totals.courses }} cours."
+        >
           <input type="hidden" name="form" value="bulk-auto-schedule">
           <div class="alert alert-info mb-0">
             Configurez les semaines autorisées directement dans les contraintes de chaque cours. Sans sélection, la

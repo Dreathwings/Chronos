@@ -367,7 +367,14 @@
         >
           <div class="accordion-body">
             <div class="d-grid gap-2">
-              <form method="post" class="vstack gap-2">
+              <form
+                method="post"
+                class="vstack gap-2"
+                data-chronos-progress
+                data-chronos-progress-async="true"
+                data-chronos-progress-hours="{{ course_remaining_hours }}"
+                data-chronos-progress-label="{{ course.name }} — {{ course_remaining_hours }} heure(s) restante(s)."
+              >
                 <input type="hidden" name="form" value="auto-schedule">
                 <div class="small text-muted">
                   <div class="text-uppercase fw-semibold mb-1">Semaines de planification</div>
