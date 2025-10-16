@@ -14,6 +14,7 @@ from .models import (
     Course,
     CourseClassLink,
     CourseScheduleLog,
+    ClosingPeriod,
     Room,
     Session,
     Teacher,
@@ -59,6 +60,22 @@ EXTENDED_BREAKS = _build_extended_breaks()
 START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
 
 COURSE_TYPE_CHRONOLOGY: dict[str, int] = {"CM": 0, "TD": 1, "TP": 2, "TEST": 3}
+
+
+def _closed_days_between(start: date, end: date) -> set[date]:
+    if start > end:
+        return set()
+    closed: set[date] = set()
+    for period in ClosingPeriod.ordered_periods():
+        if period.end_date < start:
+            continue
+        if period.start_date > end:
+            break
+        span_start = max(period.start_date, start)
+        span_end = min(period.end_date, end)
+        for day in daterange(span_start, span_end):
+            closed.add(day)
+    return closed
 
 
 class ScheduleReporter:
@@ -1476,12 +1493,55 @@ def generate_schedule(
     else:
         reporter.set_window(schedule_start, schedule_end)
 
+    closed_days = _closed_days_between(schedule_start, schedule_end)
+    if closed_days:
+        reporter.info(
+            f"{len(closed_days)} jour(s) exclus pour fermeture (vacances)"
+        )
+
     allowed_days: set[date] | None = None
     if normalised_weeks:
         allowed_days = set()
+        removed_weeks: list[date] = []
         for span_start, span_end in normalised_weeks:
-            for day in daterange(span_start, span_end):
-                allowed_days.add(day)
+            span_days = [
+                day
+                for day in daterange(span_start, span_end)
+                if day not in closed_days
+            ]
+            if not span_days:
+                removed_weeks.append(span_start)
+                continue
+            allowed_days.update(span_days)
+        if removed_weeks:
+            removed_labels = ", ".join(
+                week_start.strftime("%d/%m/%Y") for week_start in removed_weeks
+            )
+            reporter.info(
+                "Semaines exclues pour congés : " + removed_labels
+            )
+        if not allowed_days:
+            message = (
+                "Les semaines sélectionnées correspondent uniquement à des périodes de fermeture."
+            )
+            reporter.error(message)
+            reporter.summary = message
+            reporter.finalise(0)
+            raise ValueError(message)
+    elif closed_days:
+        allowed_days = {
+            day
+            for day in daterange(schedule_start, schedule_end)
+            if day not in closed_days
+        }
+        if not allowed_days:
+            message = (
+                "La fenêtre de planification est entièrement couverte par des périodes de fermeture."
+            )
+            reporter.error(message)
+            reporter.summary = message
+            reporter.finalise(0)
+            raise ValueError(message)
 
     if not course.classes:
         message = "Associez au moins une classe au cours avant de planifier."
@@ -1610,9 +1670,10 @@ def generate_schedule(
 
             ordered_days = sorted(available_days, key=_cm_day_sort_key)
 
-            placed = False
             chronology_weeks: set[date] = set()
-            for day in ordered_days:
+
+            def _attempt_day(day: date) -> bool:
+                nonlocal hours_remaining, block_index
                 if not all(
                     _day_respects_chronology(
                         course, group, day, created_sessions, subgroup_label=None
@@ -1621,7 +1682,7 @@ def generate_schedule(
                 ):
                     week_start, _ = _week_bounds(day)
                     chronology_weeks.add(week_start)
-                    continue
+                    return False
                 preferred_offsets: list[int] = []
                 if (
                     continuity_slot_index is not None
@@ -1634,6 +1695,7 @@ def generate_schedule(
                     class_groups,
                     day,
                     pending_sessions=created_sessions,
+                    subgroup_label=None,
                 )
                 if preferred_slot is not None and preferred_slot not in preferred_offsets:
                     preferred_offsets.append(preferred_slot)
@@ -1641,7 +1703,6 @@ def generate_schedule(
                 if fallback_offset not in preferred_offsets:
                     preferred_offsets.append(fallback_offset)
 
-                block_sessions: list[Session] | None = None
                 for base_offset in preferred_offsets:
                     block_sessions = _cm_schedule_block_for_day(
                         course=course,
@@ -1652,20 +1713,36 @@ def generate_schedule(
                         base_offset=base_offset,
                         reporter=reporter,
                     )
-                    if block_sessions:
+                    if not block_sessions:
+                        continue
+                    created_sessions.extend(block_sessions)
+                    for session in block_sessions:
+                        reporter.session_created(session)
+                        weekday_frequencies[session.start_time.weekday()] += 1
+                    block_hours = sum(session.duration_hours for session in block_sessions)
+                    per_day_hours[day] += block_hours
+                    hours_remaining = max(hours_remaining - block_hours, 0)
+                    block_index += 1
+                    return True
+                return False
+
+            placed = False
+            if (
+                continuity_target_date is not None
+                and continuity_target_date in available_days
+            ):
+                placed = _attempt_day(continuity_target_date)
+
+            if not placed:
+                for day in ordered_days:
+                    if (
+                        continuity_target_date is not None
+                        and day == continuity_target_date
+                    ):
+                        continue
+                    if _attempt_day(day):
+                        placed = True
                         break
-                if not block_sessions:
-                    continue
-                created_sessions.extend(block_sessions)
-                for session in block_sessions:
-                    reporter.session_created(session)
-                    weekday_frequencies[session.start_time.weekday()] += 1
-                block_hours = sum(session.duration_hours for session in block_sessions)
-                per_day_hours[day] += block_hours
-                hours_remaining = max(hours_remaining - block_hours, 0)
-                block_index += 1
-                placed = True
-                break
 
             if not placed:
                 for week_start in sorted(chronology_weeks):
@@ -1779,9 +1856,10 @@ def generate_schedule(
 
                 ordered_days = sorted(available_days, key=_day_sort_key)
 
-                placed = False
                 chronology_weeks: set[date] = set()
-                for day in ordered_days:
+
+                def _attempt_day(day: date) -> bool:
+                    nonlocal hours_remaining, block_index
                     if not _day_respects_chronology(
                         course,
                         class_group,
@@ -1791,7 +1869,7 @@ def generate_schedule(
                     ):
                         week_start, _ = _week_bounds(day)
                         chronology_weeks.add(week_start)
-                        continue
+                        return False
                     preferred_offsets: list[int] = []
                     if (
                         continuity_slot_index is not None
@@ -1812,7 +1890,6 @@ def generate_schedule(
                     if fallback_offset not in preferred_offsets:
                         preferred_offsets.append(fallback_offset)
 
-                    block_sessions: list[Session] | None = None
                     for base_offset in preferred_offsets:
                         block_sessions = _schedule_block_for_day(
                             course=course,
@@ -1824,22 +1901,38 @@ def generate_schedule(
                             base_offset=base_offset,
                             reporter=reporter,
                         )
-                        if block_sessions:
+                        if not block_sessions:
+                            continue
+                        created_sessions.extend(block_sessions)
+                        for session in block_sessions:
+                            reporter.session_created(session)
+                            weekday_frequencies[session.start_time.weekday()] += 1
+                        block_hours = sum(
+                            session.duration_hours for session in block_sessions
+                        )
+                        per_day_hours[day] += block_hours
+                        hours_remaining = max(hours_remaining - block_hours, 0)
+                        block_index += 1
+                        return True
+                    return False
+
+                placed = False
+                if (
+                    continuity_target_date is not None
+                    and continuity_target_date in available_days
+                ):
+                    placed = _attempt_day(continuity_target_date)
+
+                if not placed:
+                    for day in ordered_days:
+                        if (
+                            continuity_target_date is not None
+                            and day == continuity_target_date
+                        ):
+                            continue
+                        if _attempt_day(day):
+                            placed = True
                             break
-                    if not block_sessions:
-                        continue
-                    created_sessions.extend(block_sessions)
-                    for session in block_sessions:
-                        reporter.session_created(session)
-                        weekday_frequencies[session.start_time.weekday()] += 1
-                    block_hours = sum(
-                        session.duration_hours for session in block_sessions
-                    )
-                    per_day_hours[day] += block_hours
-                    hours_remaining = max(hours_remaining - block_hours, 0)
-                    block_index += 1
-                    placed = True
-                    break
 
                 if not placed:
                     for week_start in sorted(chronology_weeks):
