@@ -93,6 +93,18 @@
         return String(number).padStart(2, '0');
       }
 
+      function chronosEscapeHtml(value) {
+        if (value === null || value === undefined) {
+          return '';
+        }
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
       function chronosFormatLocalISO(date) {
         if (!(date instanceof Date)) {
           return null;
@@ -153,6 +165,78 @@
           return `${startDateText} de ${startTimeText} à ${endTimeText}`;
         }
         return `${startDateText} ${startTimeText} → ${endDateText} ${endTimeText}`;
+      }
+
+      function chronosBuildOverlapPopoverContent(events) {
+        if (!Array.isArray(events) || events.length < 2) {
+          return '';
+        }
+        const normalised = events
+          .filter(function(event) {
+            return event && event.start instanceof Date;
+          })
+          .slice();
+        if (normalised.length < 2) {
+          return '';
+        }
+        const schedule = chronosBuildEventSchedule(normalised[0].start, normalised[0].end);
+        normalised.sort(function(a, b) {
+          const propsA = a.extendedProps || {};
+          const propsB = b.extendedProps || {};
+          const courseA = String(propsA.course || a.title || '').toLowerCase();
+          const courseB = String(propsB.course || b.title || '').toLowerCase();
+          if (courseA < courseB) {
+            return -1;
+          }
+          if (courseA > courseB) {
+            return 1;
+          }
+          const classA = String(propsA.class_group || '').toLowerCase();
+          const classB = String(propsB.class_group || '').toLowerCase();
+          if (classA < classB) {
+            return -1;
+          }
+          if (classA > classB) {
+            return 1;
+          }
+          return 0;
+        });
+        const items = normalised
+          .map(function(event) {
+            const props = event.extendedProps || {};
+            const title = props.course || event.title || '';
+            const classGroup = props.class_group || '';
+            const room = props.room || '';
+            const lines = [];
+            if (title) {
+              lines.push('<span class="fw-semibold">' + chronosEscapeHtml(title) + '</span>');
+            }
+            if (classGroup) {
+              lines.push('<span class="text-muted">' + chronosEscapeHtml(classGroup) + '</span>');
+            }
+            if (room) {
+              lines.push('<span class="text-muted">' + chronosEscapeHtml(room) + '</span>');
+            }
+            if (!lines.length && event.title) {
+              lines.push('<span>' + chronosEscapeHtml(event.title) + '</span>');
+            }
+            if (!lines.length) {
+              return '';
+            }
+            return '<div class="chronos-popover-entry">' + lines.join('<br>') + '</div>';
+          })
+          .filter(function(html) {
+            return html.length > 0;
+          });
+        if (!items.length) {
+          return '';
+        }
+        const parts = [];
+        if (schedule) {
+          parts.push('<div class="text-muted small mb-2">' + chronosEscapeHtml(schedule) + '</div>');
+        }
+        parts.push(items.join('<hr class="my-2">'));
+        return parts.join('');
       }
 
       function chronosSetField(modal, fieldName, value) {
@@ -370,6 +454,138 @@
       window.createChronosCalendar = function(element, events, extraSources, overrides) {
         extraSources = extraSources || [];
         overrides = overrides || {};
+        const slotRegistry = new Map();
+
+        function chronosSlotKeyForEvent(event) {
+          if (!event || event.display === 'background') {
+            return null;
+          }
+          if (!(event.start instanceof Date)) {
+            return null;
+          }
+          const startKey = event.start.getTime();
+          const endKey = event.end instanceof Date ? event.end.getTime() : null;
+          return endKey !== null ? `${startKey}-${endKey}` : `start-${startKey}`;
+        }
+
+        function chronosRemoveOverlapPopover(element) {
+          if (!element) {
+            return;
+          }
+          const existing = bootstrap.Popover ? bootstrap.Popover.getInstance(element) : null;
+          if (existing) {
+            existing.dispose();
+          }
+          delete element.dataset.chronosOverlapPopover;
+        }
+
+        function chronosApplyOverlapPopover(element, eventsForSlot) {
+          if (!element || !Array.isArray(eventsForSlot) || eventsForSlot.length < 2) {
+            chronosRemoveOverlapPopover(element);
+            return;
+          }
+          const content = chronosBuildOverlapPopoverContent(eventsForSlot);
+          if (!content) {
+            chronosRemoveOverlapPopover(element);
+            return;
+          }
+          const existing = bootstrap.Popover ? bootstrap.Popover.getInstance(element) : null;
+          if (existing) {
+            existing.dispose();
+          }
+          if (!bootstrap.Popover) {
+            return;
+          }
+          new bootstrap.Popover(element, {
+            trigger: 'hover focus',
+            html: true,
+            title: 'Créneaux simultanés',
+            content: content,
+            container: 'body',
+            placement: 'auto',
+          });
+          element.dataset.chronosOverlapPopover = '1';
+        }
+
+        function chronosUpdateSlotPopovers(slotKey) {
+          if (!slotKey) {
+            return;
+          }
+          const entries = slotRegistry.get(slotKey) || [];
+          if (entries.length <= 1) {
+            entries.forEach(function(entry) {
+              chronosRemoveOverlapPopover(entry.element);
+            });
+            if (!entries.length) {
+              slotRegistry.delete(slotKey);
+            }
+            return;
+          }
+          const eventsForSlot = entries
+            .map(function(entry) {
+              return entry.event;
+            })
+            .filter(function(event) {
+              return Boolean(event);
+            });
+          if (eventsForSlot.length <= 1) {
+            entries.forEach(function(entry) {
+              chronosRemoveOverlapPopover(entry.element);
+            });
+            return;
+          }
+          entries.forEach(function(entry) {
+            chronosApplyOverlapPopover(entry.element, eventsForSlot);
+          });
+        }
+
+        function chronosRegisterSlotEvent(event, element) {
+          const slotKey = chronosSlotKeyForEvent(event);
+          if (!slotKey || !element) {
+            return;
+          }
+          const entries = slotRegistry.get(slotKey) || [];
+          let found = false;
+          entries.forEach(function(entry) {
+            if (entry.event === event) {
+              entry.element = element;
+              found = true;
+            }
+          });
+          if (!found) {
+            entries.push({ event: event, element: element });
+          }
+          slotRegistry.set(slotKey, entries);
+          chronosUpdateSlotPopovers(slotKey);
+        }
+
+        function chronosUnregisterSlotEvent(event, element) {
+          const slotKey = chronosSlotKeyForEvent(event);
+          if (!slotKey) {
+            chronosRemoveOverlapPopover(element);
+            return;
+          }
+          const entries = slotRegistry.get(slotKey);
+          if (!entries) {
+            chronosRemoveOverlapPopover(element);
+            return;
+          }
+          const remaining = [];
+          entries.forEach(function(entry) {
+            if (entry.event === event) {
+              chronosRemoveOverlapPopover(entry.element);
+              return;
+            }
+            remaining.push(entry);
+          });
+          if (remaining.length) {
+            slotRegistry.set(slotKey, remaining);
+          } else {
+            slotRegistry.delete(slotKey);
+          }
+          chronosUpdateSlotPopovers(slotKey);
+        }
+
         const config = Object.assign({
           initialView: 'timeGridWeek',
           locale: 'fr',
@@ -409,28 +625,37 @@
             chronosDisplayEventSummary(info.event);
           },
           eventDidMount: function(info) {
-            if (!info.el || info.el.dataset.chronosContextMenuBound === '1') {
+            if (!info.el || !info.event || info.event.display === 'background') {
               return;
             }
-            info.el.dataset.chronosContextMenuBound = '1';
-            info.el.addEventListener('contextmenu', function(event) {
-              event.preventDefault();
-              const props = info.event.extendedProps || {};
-              const segmentIds = Array.isArray(props.segment_ids) ? props.segment_ids : [];
-              const confirmationMessage = segmentIds.length > 1
-                ? 'Supprimer toutes les séances de ce bloc ?'
-                : 'Supprimer cette séance ?';
-              if (!window.confirm(confirmationMessage)) {
-                return;
-              }
-              chronosDeleteSession(info.event)
-                .then(function() {
-                  info.event.remove();
-                })
-                .catch(function(error) {
-                  window.alert(error.message || error);
-                });
-            });
+            if (info.el.dataset.chronosContextMenuBound !== '1') {
+              info.el.dataset.chronosContextMenuBound = '1';
+              info.el.addEventListener('contextmenu', function(event) {
+                event.preventDefault();
+                const props = info.event.extendedProps || {};
+                const segmentIds = Array.isArray(props.segment_ids) ? props.segment_ids : [];
+                const confirmationMessage = segmentIds.length > 1
+                  ? 'Supprimer toutes les séances de ce bloc ?'
+                  : 'Supprimer cette séance ?';
+                if (!window.confirm(confirmationMessage)) {
+                  return;
+                }
+                chronosDeleteSession(info.event)
+                  .then(function() {
+                    info.event.remove();
+                  })
+                  .catch(function(error) {
+                    window.alert(error.message || error);
+                  });
+              });
+            }
+            chronosRegisterSlotEvent(info.event, info.el);
+          },
+          eventWillUnmount: function(info) {
+            if (!info.el || !info.event || info.event.display === 'background') {
+              return;
+            }
+            chronosUnregisterSlotEvent(info.event, info.el);
           },
         }, overrides);
 
