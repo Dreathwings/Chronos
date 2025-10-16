@@ -461,7 +461,7 @@
                 {% endif %}
               </div>
             </div>
-            <span class="badge {{ status_badges.get(latest_generation_log.status, 'bg-secondary') }}">{{ status_labels.get(latest_generation_log.status, latest_generation_log.status|title) }}</span>
+            <span class="badge {{ status_badges.get(generation_display_status, 'bg-secondary') }}">{{ status_labels.get(generation_display_status, generation_display_status|title) }}</span>
           </div>
           {% set messages = latest_generation_log.parsed_messages() %}
           {% if messages %}

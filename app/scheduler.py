@@ -167,7 +167,8 @@ class ScheduleReporter:
         text = message.strip()
         if not text:
             return
-        self.entries.append({"level": level, "message": text})
+        if level != "info":
+            self.entries.append({"level": level, "message": text})
         logger = getattr(current_app, "logger", None)
         if logger is not None:
             log_level = self.LEVELS.get(level, logging.INFO)
@@ -196,26 +197,9 @@ class ScheduleReporter:
             else:
                 label = f"{message} (résumé)"
             detailed.append({"level": level, "message": label})
-            if len(detailed) >= self.MAX_TOTAL_ENTRIES - 1:
+            if len(detailed) >= self.MAX_TOTAL_ENTRIES:
                 break
-
-        detailed.append(
-            {
-                "level": "info",
-                "message": "Journal abrégé pour limiter la taille enregistrée.",
-            }
-        )
-
-        if len(detailed) > self.MAX_TOTAL_ENTRIES:
-            detailed = detailed[: self.MAX_TOTAL_ENTRIES - 1]
-            detailed.append(
-                {
-                    "level": "info",
-                    "message": "D'autres messages ont été omis.",
-                }
-            )
-
-        return detailed
+        return detailed[: self.MAX_TOTAL_ENTRIES]
 
 
 class PlacementDiagnostics:

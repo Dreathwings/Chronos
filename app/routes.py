@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, List, MutableSequence
@@ -74,6 +75,8 @@ COURSE_TYPE_LABELS = {
 }
 DEFAULT_SEMESTER = SEMESTER_CHOICES[0]
 
+GENERATION_STATUS_LABELS = {**CourseScheduleLog.STATUS_LABELS, "none": "Jamais généré"}
+
 
 def _normalise_course_type(raw_value: str | None) -> str:
     if not raw_value:
@@ -101,6 +104,18 @@ def _parse_non_negative_int(raw_value: str | None, default: int = 0) -> int:
     except (TypeError, ValueError):
         return default
     return max(value, 0)
+
+
+def _clear_course_schedule(course: Course) -> tuple[int, int]:
+    removed_sessions = len(course.sessions)
+    for session in list(course.sessions):
+        db.session.delete(session)
+
+    removed_logs = len(course.generation_logs)
+    for log in list(course.generation_logs):
+        db.session.delete(log)
+
+    return removed_sessions, removed_logs
 
 
 def _build_default_backgrounds() -> list[dict[str, object]]:
@@ -186,6 +201,28 @@ def _format_hours(value: float) -> str:
     if abs(value - rounded) < 1e-6:
         return str(int(rounded))
     return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def _effective_generation_status(
+    course: Course,
+    latest_log: CourseScheduleLog | None,
+    *,
+    remaining_hours: float | None = None,
+) -> str:
+    if latest_log is None:
+        return "none"
+    status = latest_log.status
+    if status not in {"warning", "error"}:
+        return status
+
+    required_total = float(course.total_required_hours or 0)
+    scheduled_total = float(course.scheduled_hours or 0)
+    if remaining_hours is None:
+        remaining_hours = max(required_total - scheduled_total, 0.0)
+
+    if scheduled_total > 0 and math.isclose(remaining_hours, 0.0, abs_tol=1e-6):
+        return "success"
+    return status
 
 
 def _closing_period_backgrounds() -> list[dict[str, object]]:
@@ -860,10 +897,7 @@ def dashboard():
                 flash("Cours introuvable", "danger")
                 return redirect(url_for("main.dashboard"))
 
-            removed = len(course.sessions)
-            for session in list(course.sessions):
-                db.session.delete(session)
-
+            removed, _ = _clear_course_schedule(course)
             db.session.commit()
             if removed:
                 flash(
@@ -881,6 +915,11 @@ def dashboard():
         scheduled_total = course.scheduled_hours
         remaining = max(required_total - scheduled_total, 0)
         latest_log = course.latest_generation_log
+        display_status = _effective_generation_status(
+            course,
+            latest_log,
+            remaining_hours=remaining,
+        )
         course_summaries.append(
             {
                 "course": course,
@@ -890,6 +929,7 @@ def dashboard():
                 "remaining": remaining,
                 "priority": course.priority,
                 "latest_status": latest_log.status if latest_log else "none",
+                "display_status": display_status,
                 "latest_summary": latest_log.summary if latest_log and latest_log.summary else None,
                 "latest_timestamp": latest_log.created_at if latest_log else None,
             }
@@ -910,7 +950,7 @@ def dashboard():
         start_times=START_TIMES,
         course_type_labels=COURSE_TYPE_LABELS,
         global_search_index_json=json.dumps(global_search_index, ensure_ascii=False),
-        status_labels=CourseScheduleLog.STATUS_LABELS,
+        status_labels=GENERATION_STATUS_LABELS,
     )
 
 
@@ -1721,9 +1761,7 @@ def course_detail(course_id: int):
             db.session.commit()
             flash("Séance ajoutée", "success")
         elif form_name == "clear-sessions":
-            removed = len(course.sessions)
-            for session in list(course.sessions):
-                db.session.delete(session)
+            removed, _ = _clear_course_schedule(course)
             db.session.commit()
             if removed:
                 flash("Toutes les séances de ce cours ont été supprimées.", "success")
@@ -1779,6 +1817,11 @@ def course_detail(course_id: int):
     ]
 
     remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
+    generation_display_status = _effective_generation_status(
+        course,
+        latest_generation_log,
+        remaining_hours=remaining_hours,
+    )
 
     return render_template(
         "courses/detail.html",
@@ -1796,13 +1839,14 @@ def course_detail(course_id: int):
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
-        status_labels=CourseScheduleLog.STATUS_LABELS,
+        status_labels=GENERATION_STATUS_LABELS,
         status_badges=status_badges,
         level_badges=level_badges,
         course_week_options=course_week_options,
         selected_course_week_values=selected_course_week_values,
         selected_course_week_labels=selected_course_week_labels,
         course_remaining_hours=remaining_hours,
+        generation_display_status=generation_display_status,
     )
 
 
