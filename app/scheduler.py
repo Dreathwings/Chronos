@@ -350,14 +350,7 @@ def _describe_teacher_unavailability(
         for assigned in link.preferred_teachers(subgroup_label):
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
-
-    if link is not None:
         fallback_pool = link.assigned_teachers()
-        if not fallback_pool:
-            if course.teachers:
-                fallback_pool = list(course.teachers)
-            else:
-                fallback_pool = Teacher.query.all()
     elif course.teachers:
         fallback_pool = list(course.teachers)
     else:
@@ -365,6 +358,8 @@ def _describe_teacher_unavailability(
 
     candidates = preferred + [teacher for teacher in fallback_pool if teacher not in preferred]
     if not candidates:
+        if link is not None:
+            return "Aucun enseignant n'est associé à cette classe dans la section « Link teacher »."
         return "Aucun enseignant n'est associé au cours."
 
     segments_to_check = segments or [(start, end)]
@@ -611,6 +606,7 @@ def find_available_teacher(
     target_class_ids: Set[int] | None = None,
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
+    allowed_ids: set[int] | None = None
     if link is not None:
         for assigned in link.preferred_teachers(subgroup_label):
             if assigned is not None and assigned not in preferred:
@@ -618,11 +614,7 @@ def find_available_teacher(
 
     if link is not None:
         fallback_pool = link.assigned_teachers()
-        if not fallback_pool:
-            if course.teachers:
-                fallback_pool = list(course.teachers)
-            else:
-                fallback_pool = Teacher.query.all()
+        allowed_ids = {teacher.id for teacher in fallback_pool if teacher.id is not None}
     elif course.teachers:
         fallback_pool = list(course.teachers)
     else:
@@ -634,6 +626,9 @@ def find_available_teacher(
             if teacher is None:
                 continue
             teacher_id = teacher.id
+            if allowed_ids is not None:
+                if teacher_id is None or teacher_id not in allowed_ids:
+                    continue
             if teacher_id is not None and teacher_id in seen:
                 continue
             target.append(teacher)
