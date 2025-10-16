@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, MutableSequence
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -28,6 +38,7 @@ from .models import (
     SEMESTER_CHOICES,
     semester_date_window,
 )
+from .progress import progress_registry, ScheduleProgressTracker
 from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
@@ -168,6 +179,13 @@ def _build_pause_backgrounds() -> list[dict[str, object]]:
 
 
 PAUSE_BACKGROUNDS = _build_pause_backgrounds()
+
+
+def _format_hours(value: float) -> str:
+    rounded = round(value)
+    if abs(value - rounded) < 1e-6:
+        return str(int(rounded))
+    return f"{value:.1f}".rstrip("0").rstrip(".")
 
 
 def _closing_period_backgrounds() -> list[dict[str, object]]:
@@ -1383,6 +1401,45 @@ def courses_list():
     )
 
 
+@bp.get("/generation/progress/<string:job_id>")
+def schedule_progress_status(job_id: str):
+    tracker = progress_registry.get(job_id)
+    if tracker is None:
+        return jsonify({"error": "Progression introuvable"}), 404
+    snapshot = tracker.snapshot()
+    if snapshot.total_hours > 0:
+        hours_detail = (
+            f"{_format_hours(snapshot.completed_hours)} / "
+            f"{_format_hours(snapshot.total_hours)} h planifiées"
+        )
+        if snapshot.sessions_created > 0:
+            detail = (
+                f"{snapshot.sessions_created} séance(s) planifiée(s) — "
+                + hours_detail
+            )
+        else:
+            detail = hours_detail
+    elif snapshot.sessions_created > 0:
+        detail = f"{snapshot.sessions_created} séance(s) planifiée(s)"
+    else:
+        detail = None
+    return jsonify(
+        {
+            "id": snapshot.job_id,
+            "label": snapshot.label,
+            "state": snapshot.state,
+            "percent": snapshot.percent,
+            "eta_seconds": snapshot.eta_seconds,
+            "sessions_created": snapshot.sessions_created,
+            "completed_hours": snapshot.completed_hours,
+            "total_hours": snapshot.total_hours,
+            "message": snapshot.message,
+            "detail": detail,
+            "finished": snapshot.finished,
+        }
+    )
+
+
 @bp.route("/matiere/<int:course_id>", methods=["GET", "POST"])
 def course_detail(course_id: int):
     course = (
@@ -1471,12 +1528,33 @@ def course_detail(course_id: int):
             allowed_ranges = course.allowed_week_ranges
             window_start = allowed_ranges[0][0] if allowed_ranges else None
             window_end = allowed_ranges[-1][1] if allowed_ranges else None
+            allowed_payload = (
+                [(start, end) for start, end in allowed_ranges]
+                if allowed_ranges
+                else None
+            )
+            if _wants_json_response():
+                tracker = _enqueue_course_schedule(
+                    course,
+                    window_start=window_start,
+                    window_end=window_end,
+                    allowed_weeks=allowed_payload,
+                )
+                response = {
+                    "job_id": tracker.job_id,
+                    "status_url": url_for(
+                        "main.schedule_progress_status", job_id=tracker.job_id
+                    ),
+                    "redirect_url": url_for("main.course_detail", course_id=course.id),
+                    "label": course.name,
+                }
+                return jsonify(response), 202
             try:
                 created_sessions = generate_schedule(
                     course,
                     window_start=window_start,
                     window_end=window_end,
-                    allowed_weeks=allowed_ranges if allowed_ranges else None,
+                    allowed_weeks=allowed_payload,
                 )
                 db.session.commit()
                 if created_sessions:
@@ -1771,3 +1849,81 @@ def delete_session(session_id: int):
     db.session.delete(session)
     db.session.commit()
     return {"status": "deleted"}
+
+
+def _wants_json_response() -> bool:
+    if request.headers.get("X-Requested-With", "").lower() == "xmlhttprequest":
+        return True
+    if request.is_json:
+        return True
+    accept = request.accept_mimetypes
+    if not accept:
+        return False
+    best = accept.best
+    if best == "application/json":
+        return True
+    json_quality = accept["application/json"]
+    html_quality = accept["text/html"]
+    return json_quality and json_quality >= html_quality
+
+
+def _run_course_schedule_job(
+    app,
+    tracker_id: str,
+    course_id: int,
+    window_start: date | None,
+    window_end: date | None,
+    allowed_weeks: list[tuple[date, date]] | None,
+) -> None:
+    with app.app_context():
+        tracker = progress_registry.get(tracker_id)
+        if tracker is None:
+            return
+        try:
+            course = Course.query.get(course_id)
+            if course is None:
+                tracker.fail("Cours introuvable.")
+                return
+            created_sessions = generate_schedule(
+                course,
+                window_start=window_start,
+                window_end=window_end,
+                allowed_weeks=allowed_weeks,
+                progress=tracker,
+            )
+            db.session.commit()
+            if not tracker.is_finished():
+                tracker.complete(
+                    f"{len(created_sessions)} séance(s) générée(s)"
+                )
+        except ValueError as exc:
+            db.session.rollback()
+            tracker.fail(str(exc))
+        except Exception:  # pragma: no cover - defensive logging
+            db.session.rollback()
+            tracker.fail("Erreur inattendue lors de la génération.")
+            current_app.logger.exception(
+                "Automatic scheduling failed for course %s", course_id
+            )
+        finally:
+            db.session.remove()
+
+
+def _enqueue_course_schedule(
+    course: Course,
+    *,
+    window_start: date | None,
+    window_end: date | None,
+    allowed_weeks: list[tuple[date, date]] | None,
+) -> ScheduleProgressTracker:
+    app = current_app._get_current_object()
+    tracker = progress_registry.create(course.name)
+    progress_registry.purge()
+    thread = threading.Thread(
+        target=_run_course_schedule_job,
+        args=(app, tracker.job_id, course.id, window_start, window_end, allowed_weeks),
+        daemon=True,
+    )
+    thread.start()
+    return tracker
+

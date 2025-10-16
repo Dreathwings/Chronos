@@ -19,6 +19,7 @@ from .models import (
     Session,
     Teacher,
 )
+from .progress import NullScheduleProgress, ScheduleProgress
 
 # Working windows respecting pauses
 WORKING_WINDOWS: List[tuple[time, time]] = [
@@ -1464,7 +1465,9 @@ def generate_schedule(
     window_start: date | None = None,
     window_end: date | None = None,
     allowed_weeks: Iterable[tuple[date, date]] | None = None,
+    progress: ScheduleProgress | None = None,
 ) -> list[Session]:
+    progress = progress or NullScheduleProgress()
     reporter = ScheduleReporter(course)
     created_sessions: list[Session] = []
 
@@ -1597,11 +1600,13 @@ def generate_schedule(
         total_required = course.sessions_required * course.session_length_hours
         already_scheduled = sum(existing_day_hours.values())
         hours_remaining = max(total_required - already_scheduled, 0)
+        progress.initialise(hours_remaining)
         reporter.info(
             f"Heures requises : {total_required} h — déjà planifiées : {already_scheduled} h"
         )
         if hours_remaining == 0:
             reporter.info("Toutes les heures requises sont déjà planifiées.")
+            progress.complete("Toutes les heures requises sont déjà planifiées.")
             reporter.finalise(len(created_sessions))
             return created_sessions
         available_days = [
@@ -1740,10 +1745,12 @@ def generate_schedule(
                     if not block_sessions:
                         continue
                     created_sessions.extend(block_sessions)
+                    block_hours = sum(session.duration_hours for session in block_sessions)
+                    if block_hours > 0:
+                        progress.record(block_hours, sessions=len(block_sessions))
                     for session in block_sessions:
                         reporter.session_created(session)
                         weekday_frequencies[session.start_time.weekday()] += 1
-                    block_hours = sum(session.duration_hours for session in block_sessions)
                     per_day_hours[day] += block_hours
                     hours_remaining = max(hours_remaining - block_hours, 0)
                     block_index += 1
@@ -1781,12 +1788,24 @@ def generate_schedule(
                 f"Impossible de planifier {hours_remaining} heure(s) supplémentaire(s) (cours magistral)"
             )
         reporter.info(f"Total de séances générées : {len(created_sessions)}")
+        progress.complete(
+            f"{len(created_sessions)} séance(s) générée(s)"
+        )
         reporter.finalise(len(created_sessions))
         return created_sessions
+    hours_needed_map: dict[tuple[int, str | None], float] = {}
+    total_hours_needed = 0.0
+    for link in links:
+        for subgroup_label in link.group_labels():
+            amount = _class_hours_needed(course, link.class_group, subgroup_label)
+            hours_needed_map[(link.class_group_id, subgroup_label or None)] = amount
+            total_hours_needed += max(amount, 0)
+    progress.initialise(total_hours_needed)
+
     for link in links:
         class_group = link.class_group
         for subgroup_label in link.group_labels():
-            hours_needed = _class_hours_needed(course, class_group, subgroup_label)
+            hours_needed = hours_needed_map.get((class_group.id, subgroup_label or None), 0)
             if hours_needed == 0:
                 continue
             available_days = [
@@ -1934,12 +1953,14 @@ def generate_schedule(
                         if not block_sessions:
                             continue
                         created_sessions.extend(block_sessions)
-                        for session in block_sessions:
-                            reporter.session_created(session)
-                            weekday_frequencies[session.start_time.weekday()] += 1
                         block_hours = sum(
                             session.duration_hours for session in block_sessions
                         )
+                        if block_hours > 0:
+                            progress.record(block_hours, sessions=len(block_sessions))
+                        for session in block_sessions:
+                            reporter.session_created(session)
+                            weekday_frequencies[session.start_time.weekday()] += 1
                         per_day_hours[day] += block_hours
                         hours_remaining = max(hours_remaining - block_hours, 0)
                         block_index += 1
@@ -1977,5 +1998,6 @@ def generate_schedule(
                     f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
                 )
     reporter.info(f"Total de séances générées : {len(created_sessions)}")
+    progress.complete(f"{len(created_sessions)} séance(s) générée(s)")
     reporter.finalise(len(created_sessions))
     return created_sessions
