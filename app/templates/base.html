@@ -27,32 +27,7 @@
     </style>
     {% block stylesheets %}{% endblock %}
     <script>
-      window.CHRONOS_PAUSE_BACKGROUNDS = [
-        {
-          daysOfWeek: [1, 2, 3, 4, 5],
-          startTime: '10:00:00',
-          endTime: '10:15:00',
-          display: 'background',
-          overlap: false,
-          color: '{{ background_block_color }}'
-        },
-        {
-          daysOfWeek: [1, 2, 3, 4, 5],
-          startTime: '12:15:00',
-          endTime: '13:30:00',
-          display: 'background',
-          overlap: false,
-          color: '{{ background_block_color }}'
-        },
-        {
-          daysOfWeek: [1, 2, 3, 4, 5],
-          startTime: '15:30:00',
-          endTime: '15:45:00',
-          display: 'background',
-          overlap: false,
-          color: '{{ background_block_color }}'
-        }
-      ];
+      window.CHRONOS_PAUSE_BACKGROUNDS = {{ pause_backgrounds_json|safe }};
       window.CHRONOS_DEFAULT_BACKGROUNDS = {{ default_backgrounds_json|safe }};
       window.CHRONOS_CLOSING_BACKGROUNDS = {{ closing_backgrounds_json|safe }};
       window.CHRONOS_SLOT_STARTS = {{ schedule_slot_starts_json|safe }};

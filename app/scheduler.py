@@ -809,21 +809,21 @@ def _preferred_slot_index_for_groups(
     return ordered[0][0]
 
 
-def _latest_session_for_groups(
+def _matching_sessions_for_groups(
     course: Course,
     class_groups: Iterable[ClassGroup],
     *,
     pending_sessions: Iterable[Session] = (),
     subgroup_label: str | None = None,
     require_exact_attendees: bool = False,
-) -> Session | None:
+) -> list[Session]:
     groups = [group for group in class_groups if group is not None]
     if not groups:
-        return None
+        return []
     target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
     target_ids = {group.id for group in groups}
     seen: set[int] = set()
-    latest: Session | None = None
+    matches: list[Session] = []
     candidates = list(course.sessions) + list(pending_sessions)
     for session in candidates:
         marker = id(session)
@@ -832,18 +832,36 @@ def _latest_session_for_groups(
         seen.add(marker)
         if session.course_id != course.id:
             continue
+        if target_label is not None:
+            session_label = _normalise_label(session.subgroup_label)
+            if session_label and session_label != target_label:
+                continue
         if require_exact_attendees:
             if session.attendee_ids() != target_ids:
                 continue
         elif not any(_session_involves_class(session, group) for group in groups):
             continue
-        if target_label is not None:
-            session_label = _normalise_label(session.subgroup_label)
-            if session_label and session_label != target_label:
-                continue
-        if latest is None or session.start_time > latest.start_time:
-            latest = session
-    return latest
+        matches.append(session)
+    matches.sort(key=lambda s: s.start_time)
+    return matches
+
+
+def _latest_session_for_groups(
+    course: Course,
+    class_groups: Iterable[ClassGroup],
+    *,
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+    require_exact_attendees: bool = False,
+) -> Session | None:
+    matches = _matching_sessions_for_groups(
+        course,
+        class_groups,
+        pending_sessions=pending_sessions,
+        subgroup_label=subgroup_label,
+        require_exact_attendees=require_exact_attendees,
+    )
+    return matches[-1] if matches else None
 
 
 def _collect_contiguous_slots(start_index: int, length: int) -> list[tuple[time, time]] | None:
@@ -1623,28 +1641,34 @@ def generate_schedule(
                 anchor_index = round(anchor_position)
             anchor_index = max(0, min(anchor_index, len(available_days) - 1))
 
-            last_session = _latest_session_for_groups(
+            matching_sessions = _matching_sessions_for_groups(
                 course,
                 class_groups,
                 pending_sessions=created_sessions,
                 require_exact_attendees=True,
             )
+            base_session = matching_sessions[0] if matching_sessions else None
             continuity_weekday = (
-                last_session.start_time.weekday() if last_session is not None else None
-            )
-            continuity_target_date = (
-                last_session.start_time.date() + timedelta(days=7)
-                if last_session is not None
-                else None
+                base_session.start_time.weekday() if base_session is not None else None
             )
             continuity_slot_index: int | None = None
-            if last_session is not None:
+            if base_session is not None:
                 try:
                     continuity_slot_index = START_TIMES.index(
-                        last_session.start_time.time()
+                        base_session.start_time.time()
                     )
                 except ValueError:
                     continuity_slot_index = None
+            continuity_target_date: date | None = None
+            if base_session is not None:
+                base_date = base_session.start_time.date()
+                week_offsets = [
+                    max(0, (session.start_time.date() - base_date).days // 7)
+                    for session in matching_sessions
+                    if session.start_time.date() >= base_date
+                ]
+                next_offset = max(week_offsets, default=0) + 1
+                continuity_target_date = base_date + timedelta(days=7 * next_offset)
 
             def _cm_day_sort_key(d: date) -> tuple[int, int, int, int, int, int, int]:
                 anchor_distance = abs(day_indices[d] - anchor_index)
@@ -1809,28 +1833,34 @@ def generate_schedule(
                     anchor_index = round(anchor_position)
                 anchor_index = max(0, min(anchor_index, len(available_days) - 1))
 
-                last_session = _latest_session_for_groups(
+                matching_sessions = _matching_sessions_for_groups(
                     course,
                     [class_group],
                     pending_sessions=created_sessions,
                     subgroup_label=subgroup_label,
                 )
+                base_session = matching_sessions[0] if matching_sessions else None
                 continuity_weekday = (
-                    last_session.start_time.weekday() if last_session is not None else None
-                )
-                continuity_target_date = (
-                    last_session.start_time.date() + timedelta(days=7)
-                    if last_session is not None
-                    else None
+                    base_session.start_time.weekday() if base_session is not None else None
                 )
                 continuity_slot_index: int | None = None
-                if last_session is not None:
+                if base_session is not None:
                     try:
                         continuity_slot_index = START_TIMES.index(
-                            last_session.start_time.time()
+                            base_session.start_time.time()
                         )
                     except ValueError:
                         continuity_slot_index = None
+                continuity_target_date: date | None = None
+                if base_session is not None:
+                    base_date = base_session.start_time.date()
+                    week_offsets = [
+                        max(0, (session.start_time.date() - base_date).days // 7)
+                        for session in matching_sessions
+                        if session.start_time.date() >= base_date
+                    ]
+                    next_offset = max(week_offsets, default=0) + 1
+                    continuity_target_date = base_date + timedelta(days=7 * next_offset)
 
                 def _day_sort_key(d: date) -> tuple[int, int, int, int, int, int, int]:
                     anchor_distance = abs(day_indices[d] - anchor_index)

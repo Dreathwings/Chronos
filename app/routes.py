@@ -93,25 +93,41 @@ def _parse_non_negative_int(raw_value: str | None, default: int = 0) -> int:
 
 
 def _build_default_backgrounds() -> list[dict[str, object]]:
-    spans: list[tuple[time, time]] = []
-    pointer = WORKDAY_START
-    for slot_start, slot_end in SCHEDULE_SLOTS:
-        slot_start = max(slot_start, WORKDAY_START)
-        slot_end = min(slot_end, WORKDAY_END)
-        if slot_start > pointer:
-            spans.append((pointer, slot_start))
-        if slot_end > pointer:
-            pointer = slot_end
-    if pointer < WORKDAY_END:
-        spans.append((pointer, WORKDAY_END))
-
     backgrounds: list[dict[str, object]] = []
-    for span_start, span_end in spans:
+    if not SCHEDULE_SLOTS:
         backgrounds.append(
             {
                 "daysOfWeek": [1, 2, 3, 4, 5],
-                "startTime": span_start.strftime("%H:%M:%S"),
-                "endTime": span_end.strftime("%H:%M:%S"),
+                "startTime": WORKDAY_START.strftime("%H:%M:%S"),
+                "endTime": WORKDAY_END.strftime("%H:%M:%S"),
+                "display": "background",
+                "overlap": False,
+                "color": BACKGROUND_BLOCK_COLOR,
+            }
+        )
+        return backgrounds
+
+    ordered_slots = sorted(SCHEDULE_SLOTS, key=lambda entry: entry[0])
+    first_start = max(ordered_slots[0][0], WORKDAY_START)
+    last_end = min(ordered_slots[-1][1], WORKDAY_END)
+
+    if first_start > WORKDAY_START:
+        backgrounds.append(
+            {
+                "daysOfWeek": [1, 2, 3, 4, 5],
+                "startTime": WORKDAY_START.strftime("%H:%M:%S"),
+                "endTime": first_start.strftime("%H:%M:%S"),
+                "display": "background",
+                "overlap": False,
+                "color": BACKGROUND_BLOCK_COLOR,
+            }
+        )
+    if last_end < WORKDAY_END:
+        backgrounds.append(
+            {
+                "daysOfWeek": [1, 2, 3, 4, 5],
+                "startTime": last_end.strftime("%H:%M:%S"),
+                "endTime": WORKDAY_END.strftime("%H:%M:%S"),
                 "display": "background",
                 "overlap": False,
                 "color": BACKGROUND_BLOCK_COLOR,
@@ -121,6 +137,37 @@ def _build_default_backgrounds() -> list[dict[str, object]]:
 
 
 DEFAULT_WORKDAY_BACKGROUNDS = _build_default_backgrounds()
+
+
+def _build_pause_backgrounds() -> list[dict[str, object]]:
+    backgrounds: list[dict[str, object]] = []
+    ordered_slots = sorted(SCHEDULE_SLOTS, key=lambda entry: entry[0])
+    pointer: time | None = None
+    for raw_start, raw_end in ordered_slots:
+        slot_start = max(raw_start, WORKDAY_START)
+        slot_end = min(raw_end, WORKDAY_END)
+        if slot_end <= WORKDAY_START or slot_start >= WORKDAY_END:
+            continue
+        if pointer is None:
+            pointer = slot_end
+            continue
+        if slot_start > pointer:
+            backgrounds.append(
+                {
+                    "daysOfWeek": [1, 2, 3, 4, 5],
+                    "startTime": pointer.strftime("%H:%M:%S"),
+                    "endTime": slot_start.strftime("%H:%M:%S"),
+                    "display": "background",
+                    "overlap": False,
+                    "color": BACKGROUND_BLOCK_COLOR,
+                }
+            )
+        if slot_end > pointer:
+            pointer = slot_end
+    return backgrounds
+
+
+PAUSE_BACKGROUNDS = _build_pause_backgrounds()
 
 
 def _closing_period_backgrounds() -> list[dict[str, object]]:
@@ -346,6 +393,7 @@ def inject_calendar_defaults() -> dict[str, object]:
     return {
         "default_backgrounds_json": json.dumps(DEFAULT_WORKDAY_BACKGROUNDS),
         "background_block_color": BACKGROUND_BLOCK_COLOR,
+        "pause_backgrounds_json": json.dumps(PAUSE_BACKGROUNDS),
         "closing_backgrounds_json": json.dumps(_closing_period_backgrounds()),
         "schedule_slot_starts_json": json.dumps(slot_starts),
     }
