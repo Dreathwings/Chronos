@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Iterable, MutableSequence
+from typing import Iterable, List, MutableSequence
 
 from flask import (
     Blueprint,
@@ -805,6 +805,17 @@ def dashboard():
             flash("Séance créée", "success")
             return redirect(url_for("main.dashboard"))
         elif request.form.get("form") == "bulk-auto-schedule":
+            if _wants_json_response():
+                tracker = _enqueue_bulk_schedule()
+                response = {
+                    "job_id": tracker.job_id,
+                    "status_url": url_for(
+                        "main.schedule_progress_status", job_id=tracker.job_id
+                    ),
+                    "redirect_url": url_for("main.dashboard"),
+                    "label": "Génération globale",
+                }
+                return jsonify(response), 202
             total_created = 0
             error_messages: list[str] = []
             for course in courses:
@@ -1423,6 +1434,12 @@ def schedule_progress_status(job_id: str):
         detail = f"{snapshot.sessions_created} séance(s) planifiée(s)"
     else:
         detail = None
+    detail_parts: List[str] = []
+    if snapshot.current_label:
+        detail_parts.append(snapshot.current_label)
+    if detail:
+        detail_parts.append(detail)
+    detail_text = " — ".join(detail_parts) if detail_parts else None
     return jsonify(
         {
             "id": snapshot.job_id,
@@ -1434,7 +1451,7 @@ def schedule_progress_status(job_id: str):
             "completed_hours": snapshot.completed_hours,
             "total_hours": snapshot.total_hours,
             "message": snapshot.message,
-            "detail": detail,
+            "detail": detail_text,
             "finished": snapshot.finished,
         }
     )
@@ -1922,6 +1939,94 @@ def _enqueue_course_schedule(
     thread = threading.Thread(
         target=_run_course_schedule_job,
         args=(app, tracker.job_id, course.id, window_start, window_end, allowed_weeks),
+        daemon=True,
+    )
+    thread.start()
+    return tracker
+
+
+def _run_bulk_schedule_job(app, tracker_id: str) -> None:
+    with app.app_context():
+        tracker = progress_registry.get(tracker_id)
+        if tracker is None:
+            return
+        try:
+            courses = (
+                Course.query.order_by(Course.priority.desc())
+                .options(
+                    selectinload(Course.class_links),
+                    selectinload(Course.sessions),
+                )
+                .all()
+            )
+            total_hours = sum(
+                max(course.total_required_hours - course.scheduled_hours, 0)
+                for course in courses
+            )
+            tracker.initialise(total_hours)
+
+            total_created = 0
+            errors: list[str] = []
+
+            for course in courses:
+                allowed_ranges = course.allowed_week_ranges
+                window_start = allowed_ranges[0][0] if allowed_ranges else None
+                window_end = allowed_ranges[-1][1] if allowed_ranges else None
+                allowed_payload = (
+                    [(start, end) for start, end in allowed_ranges]
+                    if allowed_ranges
+                    else None
+                )
+                slice_progress = tracker.create_slice(
+                    label=f"Planification de {course.name}"
+                )
+                try:
+                    created_sessions = generate_schedule(
+                        course,
+                        window_start=window_start,
+                        window_end=window_end,
+                        allowed_weeks=allowed_payload,
+                        progress=slice_progress,
+                    )
+                except ValueError as exc:
+                    errors.append(f"{course.name} : {exc}")
+                    tracker.set_current_label(None)
+                    db.session.commit()
+                    continue
+                total_created += len(created_sessions)
+                db.session.commit()
+
+            if errors:
+                current_app.logger.warning(
+                    "Bulk scheduling completed with warnings: %s", errors
+                )
+
+            if total_created:
+                summary = f"{total_created} séance(s) générée(s)"
+            else:
+                summary = (
+                    "Aucune séance n'a pu être générée avec les contraintes actuelles."
+                )
+
+            if errors:
+                summary = f"{summary} — {len(errors)} cours en erreur"
+
+            tracker.complete(summary)
+        except Exception:
+            db.session.rollback()
+            tracker.fail("Erreur inattendue lors de la génération globale.")
+            current_app.logger.exception("Automatic bulk scheduling failed")
+        finally:
+            db.session.remove()
+
+
+def _enqueue_bulk_schedule() -> ScheduleProgressTracker:
+    app = current_app._get_current_object()
+    tracker = progress_registry.create("Génération globale")
+    progress_registry.purge()
+    thread = threading.Thread(
+        target=_run_bulk_schedule_job,
+        args=(app, tracker.job_id),
         daemon=True,
     )
     thread.start()

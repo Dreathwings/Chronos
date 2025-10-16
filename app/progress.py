@@ -45,6 +45,7 @@ class ProgressSnapshot:
     total_hours: float
     message: str | None
     finished: bool
+    current_label: str | None
 
 
 class ScheduleProgressTracker(ScheduleProgress):
@@ -63,6 +64,7 @@ class ScheduleProgressTracker(ScheduleProgress):
         self._lock = threading.Lock()
         self._started_at: float | None = None
         self._finished_at: float | None = None
+        self._current_label: str | None = None
 
     # Public helpers -------------------------------------------------
     def initialise(self, total_hours: float) -> None:
@@ -99,6 +101,7 @@ class ScheduleProgressTracker(ScheduleProgress):
             if self._started_at is None:
                 self._started_at = time.monotonic()
             self._finished_at = time.monotonic()
+            self._current_label = None
 
     def fail(self, message: str) -> None:
         with self._lock:
@@ -107,6 +110,7 @@ class ScheduleProgressTracker(ScheduleProgress):
             if self._started_at is None:
                 self._started_at = time.monotonic()
             self._finished_at = time.monotonic()
+            self._current_label = None
 
     # Snapshot -------------------------------------------------------
     def snapshot(self) -> ProgressSnapshot:
@@ -126,6 +130,7 @@ class ScheduleProgressTracker(ScheduleProgress):
                 total_hours=self._total_hours,
                 message=message,
                 finished=finished,
+                current_label=self._current_label,
             )
 
     def is_finished(self) -> bool:
@@ -162,6 +167,39 @@ class ScheduleProgressTracker(ScheduleProgress):
             return None
         remaining_ratio = max(1.0 / ratio - 1.0, 0.0)
         return max(elapsed * remaining_ratio, 0.0)
+
+    # Coordination helpers ------------------------------------------
+    def set_current_label(self, label: str | None) -> None:
+        with self._lock:
+            if label is None:
+                self._current_label = None
+            else:
+                stripped = label.strip()
+                self._current_label = stripped or None
+            if self._state == "pending":
+                self._state = "running"
+                if self._started_at is None:
+                    self._started_at = time.monotonic()
+
+    def create_slice(self, label: str | None = None) -> "ScheduleProgressSlice":
+        return ScheduleProgressSlice(self, label=label)
+
+
+class ScheduleProgressSlice(ScheduleProgress):
+    """Adapter used to feed a shared tracker for nested jobs."""
+
+    def __init__(self, tracker: ScheduleProgressTracker, *, label: str | None = None) -> None:
+        self._tracker = tracker
+        self._label = label
+
+    def initialise(self, total_hours: float) -> None:
+        self._tracker.set_current_label(self._label)
+
+    def record(self, hours: float, sessions: int = 0) -> None:
+        self._tracker.record(hours, sessions=sessions)
+
+    def complete(self, message: str | None = None) -> None:
+        self._tracker.set_current_label(None)
 
 
 class ProgressRegistry:
