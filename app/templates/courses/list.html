@@ -164,7 +164,7 @@
                 <td><a href="{{ url_for('main.course_detail', course_id=course.id) }}">{{ course.name }}</a></td>
                 <td>{{ course_type_labels.get(course.course_type, course.course_type) }}</td>
                 <td>{{ course.semester }}</td>
-                <td>
+                <td style="width: 30%;">
                   {% if course.semester_start and course.semester_end %}
                   {{ course.semester_start }} → {{ course.semester_end }}
                   {% else %}
