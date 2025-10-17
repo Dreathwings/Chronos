@@ -180,7 +180,7 @@
                   {% if course.course_type == 'CM' %}
                   <div class="text-muted small mb-2">Cours magistral — classes regroupées</div>
                   {% endif %}
-                  <div class="vstack gap-2" style="display: grid;grid-template-columns: 200px 200px;grid-row: auto auto;grid-column-gap: 20px;grid-row-gap: 20px;">
+                  <div class="vstack gap-2" style="display: grid;grid-template-columns: 200px 200px;grid-row: auto auto;grid-column-gap: 20px;grid-row-gap: 20px;justify-content: center;">
                     {% for link in course.class_links %}
                     <div>
                       <span class="fw-semibold">{{ link.class_group.name }}</span>
