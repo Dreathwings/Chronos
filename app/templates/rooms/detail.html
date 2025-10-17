@@ -6,15 +6,11 @@
 {% endblock %}
 
 {% block content %}
-<div class="accordion chronos-accordion" id="roomDetailAccordion">
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="roomInfoHeading">
-      <button class="accordion-button bg-primary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#roomInfo" aria-expanded="true" aria-controls="roomInfo">
-        Informations
-      </button>
-    </h2>
-    <div id="roomInfo" class="accordion-collapse collapse show" aria-labelledby="roomInfoHeading" data-bs-parent="#roomDetailAccordion">
-      <div class="accordion-body">
+<div class="chronos-room-detail row g-4">
+  <div class="col-12 col-xl-5">
+    <section class="card shadow-sm h-100">
+      <div class="card-body">
+        <h2 class="h5 mb-4">Informations</h2>
         <form method="post" class="vstack gap-3">
           <input type="hidden" name="form" value="update">
           <div>
@@ -29,25 +25,27 @@
             <label class="form-label">Nombre de PC</label>
             <input type="number" class="form-control" name="computers" value="{{ room.computers }}" min="0">
           </div>
-          <div>
-            <label class="form-label">Équipements disponibles</label>
-            <div class="form-check">
-              {% for equipment in equipments %}
+          <div style="display: flex;justify-content: space-evenly;">
+            <div>
+              <label class="form-label">Équipements disponibles</label>
               <div class="form-check">
-                <input class="form-check-input" type="checkbox" name="equipments" value="{{ equipment.id }}" id="equip-{{ equipment.id }}" {% if equipment in room.equipments %}checked{% endif %}>
-                <label class="form-check-label" for="equip-{{ equipment.id }}">{{ equipment.name }}</label>
+                {% for equipment in equipments %}
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="equipments" value="{{ equipment.id }}" id="equip-{{ equipment.id }}" {% if equipment in room.equipments %}checked{% endif %}>
+                  <label class="form-check-label" for="equip-{{ equipment.id }}">{{ equipment.name }}</label>
+                </div>
+                {% endfor %}
               </div>
-              {% endfor %}
             </div>
-          </div>
-          <div>
-            <label class="form-label">Logiciels</label>
-            {% for software in softwares %}
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="softwares" value="{{ software.id }}" id="soft-{{ software.id }}" {% if software in room.softwares %}checked{% endif %}>
-              <label class="form-check-label" for="soft-{{ software.id }}">{{ software.name }}</label>
-            </div>
+            <div>
+              <label class="form-label">Logiciels</label>
+              {% for software in softwares %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="softwares" value="{{ software.id }}" id="soft-{{ software.id }}" {% if software in room.softwares %}checked{% endif %}>
+                <label class="form-check-label" for="soft-{{ software.id }}">{{ software.name }}</label>
+              </div>
             {% endfor %}
+            </div>
           </div>
           <div>
             <label class="form-label">Notes</label>
@@ -56,19 +54,17 @@
           <button class="btn btn-primary" type="submit">Enregistrer</button>
         </form>
       </div>
-    </div>
+    </section>
   </div>
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="roomCalendarHeading">
-      <button class="accordion-button collapsed bg-secondary text-white" type="button" data-bs-toggle="collapse" data-bs-target="#roomCalendar" aria-expanded="false" aria-controls="roomCalendar">
-        Calendrier des réservations
-      </button>
-    </h2>
-    <div id="roomCalendar" class="accordion-collapse collapse" aria-labelledby="roomCalendarHeading" data-bs-parent="#roomDetailAccordion">
-      <div class="accordion-body">
-        <div id="room-calendar"></div>
+  <div class="col-12 col-xl-7">
+    <section class="card shadow-sm h-100">
+      <div class="card-body d-flex flex-column">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h2 class="h5 mb-0">Calendrier des réservations</h2>
+        </div>
+        <div id="room-calendar" class="flex-grow-1"></div>
       </div>
-    </div>
+    </section>
   </div>
 </div>
 {% endblock %}

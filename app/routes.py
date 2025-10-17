@@ -59,7 +59,7 @@ bp = Blueprint("main", __name__)
 WORKDAY_START = time(hour=7)
 WORKDAY_END = time(hour=19)
 BACKGROUND_BLOCK_COLOR = "#6c757d"
-CLOSING_PERIOD_COLOR = "rgba(108, 117, 125, 0.45)"
+CLOSING_PERIOD_COLOR = "#333333"
 
 SCHEDULE_SLOT_LOOKUP = {start: end for start, end in SCHEDULE_SLOTS}
 SCHEDULE_SLOT_CHOICES = [
