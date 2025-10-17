@@ -75,12 +75,6 @@
 .table > tbody:nth-child(2) > tr > td:nth-child(1){
   width: 12.5%;
 }
-.table > tbody:nth-child(2) > tr > td:nth-child(2){
-  width: 7.5%;
-}
-.table > tbody:nth-child(2) > tr > td:nth-child(3){
-  width: 7.5%;
-}
 @media (max-width: 1199.98px) {
   .course-detail-layout .col-xl-8 {
     order: -1;
