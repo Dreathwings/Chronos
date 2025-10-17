@@ -144,7 +144,7 @@
       </button>
     </h2>
     <div id="coursesList" class="accordion-collapse collapse show" aria-labelledby="coursesListHeading" data-bs-parent="#coursesAccordion">
-      <div class="accordion-body">
+      <div class="accordion-body" style="text-align: center;">
         <div class="table-responsive">
           <table class="table table-striped align-middle mb-0">
             <thead>
@@ -180,7 +180,7 @@
                   {% if course.course_type == 'CM' %}
                   <div class="text-muted small mb-2">Cours magistral — classes regroupées</div>
                   {% endif %}
-                  <div class="vstack gap-2">
+                  <div class="vstack gap-2" style="display: grid;grid-template-columns: 200px 200px;grid-row: auto auto;grid-column-gap: 20px;grid-row-gap: 20px;">
                     {% for link in course.class_links %}
                     <div>
                       <span class="fw-semibold">{{ link.class_group.name }}</span>
