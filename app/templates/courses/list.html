@@ -164,7 +164,7 @@
                 <td><a href="{{ url_for('main.course_detail', course_id=course.id) }}">{{ course.name }}</a></td>
                 <td>{{ course_type_labels.get(course.course_type, course.course_type) }}</td>
                 <td>{{ course.semester }}</td>
-                <td style="width: 30%;">
+                <td>
                   {% if course.semester_start and course.semester_end %}
                   {{ course.semester_start }} → {{ course.semester_end }}
                   {% else %}
@@ -175,7 +175,7 @@
                 {% set required_hours = course.total_required_hours %}
                 <td>{{ course.scheduled_hours }}h/{{ required_hours }}h</td>
                 <td>{{ course.priority }}</td>
-                <td style="width: 25%;">
+                <td style="width: 30%;">
                   {% if course.class_links %}
                   {% if course.course_type == 'CM' %}
                   <div class="text-muted small mb-2">Cours magistral — classes regroupées</div>
