@@ -175,7 +175,7 @@
                 {% set required_hours = course.total_required_hours %}
                 <td>{{ course.scheduled_hours }}h/{{ required_hours }}h</td>
                 <td>{{ course.priority }}</td>
-                <td>
+                <td style="width: 30%;">
                   {% if course.class_links %}
                   {% if course.course_type == 'CM' %}
                   <div class="text-muted small mb-2">Cours magistral — classes regroupées</div>

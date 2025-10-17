@@ -1,26 +1,21 @@
-#roomsAccordion,
-#roomDetailAccordion {
+#roomsAccordion {
   --chronos-accordion-gap: 1rem;
 }
 
-#roomsAccordion .accordion-item + .accordion-item,
-#roomDetailAccordion .accordion-item + .accordion-item {
+#roomsAccordion .accordion-item + .accordion-item {
   margin-top: var(--chronos-accordion-gap);
 }
 
-#roomsAccordion .accordion-button,
-#roomDetailAccordion .accordion-button {
+#roomsAccordion .accordion-button {
   font-weight: 600;
 }
 
-#roomsAccordion .accordion-body,
-#roomDetailAccordion .accordion-body {
+#roomsAccordion .accordion-body {
   background-color: #f8f9fa;
   border-radius: 0.75rem;
 }
 
-#roomsAccordion form.vstack,
-#roomDetailAccordion form.vstack {
+#roomsAccordion form.vstack {
   max-width: 720px;
   margin: 0 auto;
 }
@@ -34,6 +29,34 @@
   min-height: 520px;
 }
 
-#roomDetailAccordion .form-check + .form-check {
+.chronos-room-detail {
+  margin: 0 auto;
+  max-width: 80%;
+}
+
+.chronos-room-detail .card {
+  border: none;
+  border-radius: 1rem;
+  height: 100%;
+}
+
+.chronos-room-detail .card-body {
+  background-color: #f8f9fa;
+  border-radius: 1rem;
+  height: 100%;
+}
+
+.chronos-room-detail form.vstack {
+  max-width: 100%;
+  margin: 0;
+}
+
+.chronos-room-detail .form-check + .form-check {
   margin-top: 0.25rem;
+}
+
+@media (max-width: 767.98px) {
+  .chronos-room-detail {
+    max-width: none;
+  }
 }
