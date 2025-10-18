@@ -506,17 +506,32 @@ class Session(db.Model, TimeStampedModel):
             )
 
         related_class_ids: set[int] = set()
+        related_class_labels: dict[int, str | None] = {}
         if self.class_group_id:
             related_class_ids.add(self.class_group_id)
+            related_class_labels[self.class_group_id] = self.subgroup_label
         for attendee in self.attendees or []:
             if attendee.id:
                 related_class_ids.add(attendee.id)
+                related_class_labels.setdefault(
+                    attendee.id,
+                    self.subgroup_label if attendee.id == self.class_group_id else None,
+                )
 
         if self.course is not None and related_class_ids:
             for link in self.course.class_links:
                 if link.class_group_id not in related_class_ids:
                     continue
-                for teacher in link.assigned_teachers():
+                if self.course.is_sae:
+                    candidate_teachers = link.assigned_teachers()
+                else:
+                    subgroup_label = related_class_labels.get(link.class_group_id)
+                    preferred_teacher = link.teacher_for_label(subgroup_label)
+                    if preferred_teacher is not None:
+                        candidate_teachers = [preferred_teacher]
+                    else:
+                        candidate_teachers = link.assigned_teachers()
+                for teacher in candidate_teachers:
                     if teacher is None or teacher.id in seen_teacher_ids:
                         continue
                     seen_teacher_ids.add(teacher.id)

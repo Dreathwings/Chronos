@@ -134,6 +134,38 @@ class TeacherAssignmentTestCase(unittest.TestCase):
         self.assertIsNotNone(refreshed)
         self.assertEqual(refreshed.teacher_id, teacher_b.id)
 
+    def test_session_event_lists_only_relevant_subgroup_teacher(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        room = Room(name="B202", capacity=24)
+        db.session.add_all([teacher_a, teacher_b, room])
+        db.session.commit()
+
+        link.teacher_a = teacher_a
+        link.teacher_b = teacher_b
+        db.session.commit()
+
+        start = datetime(2024, 1, 10, 8, 0, 0)
+        end = datetime(2024, 1, 10, 10, 0, 0)
+        session = Session(
+            course=course,
+            teacher=teacher_b,
+            room=room,
+            class_group=class_group,
+            subgroup_label="B",
+            start_time=start,
+            end_time=end,
+        )
+        session.attendees = [class_group]
+        db.session.add(session)
+        db.session.commit()
+
+        event = session.as_event()
+        teachers = event["extendedProps"]["teachers"]
+        self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
+        self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
+
 
 if __name__ == "__main__":
     unittest.main()
