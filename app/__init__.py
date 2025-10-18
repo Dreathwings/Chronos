@@ -15,6 +15,46 @@ db = SQLAlchemy()
 migrate = Migrate()
 
 
+def _realign_tp_session_teachers() -> int:
+    """Realign TP sessions with the teacher assigned to their subgroup."""
+
+    from .models import Course, Session
+
+    updated = 0
+    sessions = (
+        Session.query.options(
+            selectinload(Session.course).selectinload(Course.class_links),
+            selectinload(Session.class_group),
+            selectinload(Session.teacher),
+        )
+        .filter(Session.subgroup_label.isnot(None))
+        .all()
+    )
+    for session in sessions:
+        course = session.course
+        class_group = session.class_group
+        if course is None or class_group is None:
+            continue
+        link = next(
+            (
+                link
+                for link in course.class_links
+                if link.class_group_id == class_group.id
+            ),
+            None,
+        )
+        if link is None or link.group_count != 2:
+            continue
+        assigned = link.teacher_for_label(session.subgroup_label)
+        if assigned is None or session.teacher_id == assigned.id:
+            continue
+        session.teacher = assigned
+        updated += 1
+    if updated:
+        db.session.commit()
+    return updated
+
+
 def create_app(config_class: type[Config] = Config) -> Flask:
     app = Flask(__name__, static_folder=None)
     app.config.from_object(config_class)
@@ -55,6 +95,12 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
         _ensure_session_attendance_backfill()
+        updated_sessions = _realign_tp_session_teachers()
+        if updated_sessions:
+            app.logger.info(
+                "Realigned %s TP session(s) with their subgroup teacher.",
+                updated_sessions,
+            )
 
     from .routes import bp as main_bp
 
@@ -73,40 +119,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     @with_appcontext
     def clean_session_teachers() -> None:
         """Realign TP sessions with their subgroup teachers."""
-        from .models import Course, Session
-
-        updated = 0
-        sessions = (
-            Session.query.options(
-                selectinload(Session.course).selectinload(Course.class_links),
-                selectinload(Session.class_group),
-                selectinload(Session.teacher),
-            )
-            .filter(Session.subgroup_label.isnot(None))
-            .all()
-        )
-        for session in sessions:
-            course = session.course
-            class_group = session.class_group
-            if course is None or class_group is None:
-                continue
-            link = next(
-                (
-                    link
-                    for link in course.class_links
-                    if link.class_group_id == class_group.id
-                ),
-                None,
-            )
-            if link is None or link.group_count != 2:
-                continue
-            assigned = link.teacher_for_label(session.subgroup_label)
-            if assigned is None or session.teacher_id == assigned.id:
-                continue
-            session.teacher = assigned
-            updated += 1
-        if updated:
-            db.session.commit()
+        updated = _realign_tp_session_teachers()
         click.echo(f"{updated} séance(s) corrigée(s).")
 
     return app
