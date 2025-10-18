@@ -1,9 +1,11 @@
+import click
 from flask import Flask, current_app
 from flask.cli import with_appcontext
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import selectinload
 import os
 from config import Config, _normalise_prefix
 
@@ -66,6 +68,46 @@ def create_app(config_class: type[Config] = Config) -> Flask:
 
         seed_data()
         print("Database seeded with sample data.")
+
+    @app.cli.command("clean-session-teachers")
+    @with_appcontext
+    def clean_session_teachers() -> None:
+        """Realign TP sessions with their subgroup teachers."""
+        from .models import Course, Session
+
+        updated = 0
+        sessions = (
+            Session.query.options(
+                selectinload(Session.course).selectinload(Course.class_links),
+                selectinload(Session.class_group),
+                selectinload(Session.teacher),
+            )
+            .filter(Session.subgroup_label.isnot(None))
+            .all()
+        )
+        for session in sessions:
+            course = session.course
+            class_group = session.class_group
+            if course is None or class_group is None:
+                continue
+            link = next(
+                (
+                    link
+                    for link in course.class_links
+                    if link.class_group_id == class_group.id
+                ),
+                None,
+            )
+            if link is None or link.group_count != 2:
+                continue
+            assigned = link.teacher_for_label(session.subgroup_label)
+            if assigned is None or session.teacher_id == assigned.id:
+                continue
+            session.teacher = assigned
+            updated += 1
+        if updated:
+            db.session.commit()
+        click.echo(f"{updated} séance(s) corrigée(s).")
 
     return app
 

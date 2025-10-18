@@ -919,12 +919,28 @@ class CourseClassLink(db.Model):
         if self.group_count == 2:
             label = (subgroup_label or "").strip().upper()
             ordered: list[Teacher] = []
-            if label == "B" and self.teacher_b:
-                ordered.append(self.teacher_b)
-            if self.teacher_a and self.teacher_a not in ordered:
-                ordered.append(self.teacher_a)
-            if self.teacher_b and self.teacher_b not in ordered:
-                ordered.append(self.teacher_b)
+            if label == "A":
+                if self.teacher_a:
+                    ordered.append(self.teacher_a)
+                if not ordered and self.teacher_b:
+                    ordered.append(self.teacher_b)
+            elif label == "B":
+                if self.teacher_b:
+                    ordered.append(self.teacher_b)
+                if not ordered and self.teacher_a:
+                    ordered.append(self.teacher_a)
+            else:
+                if self.teacher_a:
+                    ordered.append(self.teacher_a)
+                if self.teacher_b and self.teacher_b not in ordered:
+                    ordered.append(self.teacher_b)
+            if (
+                label in {"A", "B"}
+                and self.teacher_a
+                and self.teacher_b
+                and self.teacher_a.id != self.teacher_b.id
+            ):
+                return ordered[:1]
             return ordered
         if teachers:
             return teachers[:1]
