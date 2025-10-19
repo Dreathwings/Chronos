@@ -68,10 +68,11 @@ SCHEDULE_SLOT_CHOICES = [
 ]
 
 COURSE_TYPE_LABELS = {
-    "CM": "Cours magistral",
-    "TD": "Travaux dirigés",
-    "TP": "Travaux pratiques",
-    "SAE": "Situation d'apprentissage et d'évaluation",
+    "CM": "CM",
+    "TD": "TD",
+    "TP": "TP",
+    "SAE": "SAE",
+    "Eval":"Eval"
 }
 DEFAULT_SEMESTER = SEMESTER_CHOICES[0]
 
