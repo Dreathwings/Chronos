@@ -59,10 +59,11 @@
             <div class="col-md-4">
               <label class="form-label">Type de cours</label>
               <select class="form-select" name="course_type">
-                <option value="CM" {% if course.course_type == 'CM' %}selected{% endif %}>Cours magistral</option>
-                <option value="TD" {% if course.course_type == 'TD' %}selected{% endif %}>Travaux dirigés</option>
-                <option value="TP" {% if course.course_type == 'TP' %}selected{% endif %}>Travaux pratiques</option>
-                <option value="SAE" {% if course.course_type == 'SAE' %}selected{% endif %}>Situation d'apprentissage et d'évaluation</option>
+                <option value="CM" {% if course.course_type == 'CM' %}selected{% endif %}>CM</option>
+                <option value="TD" {% if course.course_type == 'TD' %}selected{% endif %}>TD</option>
+                <option value="TP" {% if course.course_type == 'TP' %}selected{% endif %}>TP</option>
+                <option value="SAE" {% if course.course_type == 'SAE' %}selected{% endif %}>SAE</option>
+                <option value="Eval" {% if course.course_type == 'Eval' %}selected{% endif %}>Eval</option>
               </select>
             </div>
             <div class="col-md-4">
