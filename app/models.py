@@ -204,10 +204,11 @@ class Room(db.Model, TimeStampedModel):
 
 COURSE_TYPE_CHOICES = ("CM", "TD", "TP", "SAE")
 COURSE_TYPE_LABELS = {
-    "CM": "Cours magistral",
-    "TD": "Travaux dirigés",
-    "TP": "Travaux pratiques",
-    "SAE": "Situation d'apprentissage et d'évaluation",
+    "CM": "CM",
+    "TD": "TD",
+    "TP": "TP",
+    "SAE": "SAE",
+    "Eval":"Eval"
 }
 SEMESTER_CHOICES = ("S1", "S2", "S3", "S4", "S5", "S6")
 SEMESTER_PLANNING_WINDOWS: dict[str, tuple[date, date]] = {
