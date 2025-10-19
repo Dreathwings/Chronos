@@ -279,7 +279,7 @@ class Course(db.Model, TimeStampedModel):
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
         CheckConstraint("computers_required >= 0", name="chk_course_computers_non_negative"),
         CheckConstraint(
-            "course_type IN ('CM','TD','TP','SAE')",
+            "course_type IN ('CM','TD','TP','SAE','Eval')",
             name="chk_course_type_valid",
         ),
         CheckConstraint(
