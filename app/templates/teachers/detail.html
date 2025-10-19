@@ -111,6 +111,29 @@
     </div>
   </div>
   <div class="col-xl-8">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-secondary text-white">Charge horaire par semestre</div>
+      <div class="card-body">
+        {% if semester_hours %}
+        <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-3">
+          {% for semester, hours in semester_hours %}
+          <div class="col">
+            <div class="border rounded p-3 text-center h-100">
+              <div class="fw-semibold text-uppercase text-muted small">{{ semester }}</div>
+              <div class="display-6 fw-semibold mb-1">{{ hours }}h</div>
+              <div class="text-muted small">Heures planifiées</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="text-end text-muted mt-3">
+          Total planifié : <span class="fw-semibold">{{ total_semester_hours }}h</span>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">Aucune heure planifiée pour cet enseignant.</p>
+        {% endif %}
+      </div>
+    </div>
     <div class="card shadow-sm">
       <div class="card-header bg-secondary text-white">Calendrier de {{ teacher.name }}</div>
       <div class="card-body">

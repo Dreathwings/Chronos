@@ -1180,6 +1180,27 @@ def teacher_detail(teacher_id: int):
 
     backgrounds = _teacher_unavailability_backgrounds(teacher)
 
+    semester_hours_map: dict[str, int] = {semester: 0 for semester in SEMESTER_CHOICES}
+    extra_semester_hours: dict[str, int] = {}
+    for session in teacher.sessions:
+        course = session.course
+        if course is None or not course.semester:
+            continue
+        semester = course.semester.strip().upper()
+        hours = session.duration_hours
+        if semester in semester_hours_map:
+            semester_hours_map[semester] += hours
+        else:
+            extra_semester_hours[semester] = extra_semester_hours.get(semester, 0) + hours
+
+    ordered_semester_hours: list[tuple[str, int]] = [
+        (semester, semester_hours_map[semester]) for semester in SEMESTER_CHOICES
+    ]
+    if extra_semester_hours:
+        ordered_semester_hours.extend(sorted(extra_semester_hours.items()))
+
+    total_semester_hours = sum(hours for _, hours in ordered_semester_hours)
+
     return render_template(
         "teachers/detail.html",
         teacher=teacher,
@@ -1192,6 +1213,8 @@ def teacher_detail(teacher_id: int):
         unavailability_ranges=ranges_as_payload(
             parse_unavailability_ranges(teacher.unavailable_dates)
         ),
+        semester_hours=ordered_semester_hours,
+        total_semester_hours=total_semester_hours,
     )
 
 
