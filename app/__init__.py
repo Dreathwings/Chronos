@@ -241,54 +241,90 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
         return
 
     desired_columns = {"class_group_id", "subgroup_label", "start_time"}
-    unique_constraints = inspector.get_unique_constraints("session")
-    constraint = next(
-        (uc for uc in unique_constraints if uc.get("name") == "uq_class_start_time"),
-        None,
-    )
+    legacy_columns = {"class_group_id", "start_time"}
 
-    index = next(
-        (
-            idx
-            for idx in inspector.get_indexes("session")
-            if idx.get("name") == "uq_class_start_time" and idx.get("unique")
-        ),
-        None,
-    )
+    unique_structures: list[tuple[str, str | None, set[str]]] = []
+    for constraint in inspector.get_unique_constraints("session"):
+        column_names = constraint.get("column_names") or []
+        unique_structures.append(
+            ("constraint", constraint.get("name"), {col for col in column_names if col})
+        )
 
-    existing_columns = None
-    if constraint and constraint.get("column_names"):
-        existing_columns = set(constraint["column_names"])
-    elif index and index.get("column_names"):
-        existing_columns = set(index["column_names"])
+    for index in inspector.get_indexes("session"):
+        if not index.get("unique"):
+            continue
+        column_names = index.get("column_names") or []
+        unique_structures.append(
+            ("index", index.get("name"), {col for col in column_names if col})
+        )
 
-    if existing_columns == desired_columns:
-        return
+    has_desired = any(columns == desired_columns for _, _, columns in unique_structures)
+    legacy_targets = [
+        (kind, name)
+        for kind, name, columns in unique_structures
+        if columns == legacy_columns
+    ]
 
     dialect = engine.dialect.name
     statements: list[str] = []
-    drop_mysql_index = constraint is not None or index is not None
 
-    if dialect == "mysql":
-        if drop_mysql_index:
-            statements.append("ALTER TABLE session DROP INDEX uq_class_start_time")
-        statements.append("ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)")
-    elif dialect == "postgresql":
-        statements.append("ALTER TABLE session DROP CONSTRAINT IF EXISTS uq_class_start_time")
-        statements.append("ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)")
-    elif dialect == "sqlite":
-        statements.append("DROP INDEX IF EXISTS uq_class_start_time")
-        statements.append("CREATE UNIQUE INDEX IF NOT EXISTS uq_class_start_time ON session (class_group_id, subgroup_label, start_time)")
-    else:
-        statements.append("ALTER TABLE session DROP CONSTRAINT uq_class_start_time")
-        statements.append("ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)")
+    def _drop_index(name: str) -> None:
+        if dialect == "mysql":
+            statements.append(f"ALTER TABLE session DROP INDEX {name}")
+        elif dialect in {"postgresql", "sqlite"}:
+            statements.append(f"DROP INDEX IF EXISTS {name}")
+        else:
+            statements.append(f"DROP INDEX {name}")
+
+    def _drop_constraint(name: str) -> None:
+        if dialect == "mysql":
+            statements.append(f"ALTER TABLE session DROP INDEX {name}")
+        elif dialect == "postgresql":
+            statements.append(f"ALTER TABLE session DROP CONSTRAINT IF EXISTS {name}")
+        else:
+            statements.append(f"ALTER TABLE session DROP CONSTRAINT {name}")
+
+    for kind, name in legacy_targets:
+        if not name:
+            continue
+        if kind == "index":
+            _drop_index(name)
+        else:
+            _drop_constraint(name)
+
+    if not has_desired:
+        if dialect == "mysql":
+            statements.append(
+                "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE "
+                "(class_group_id, subgroup_label, start_time)"
+            )
+        elif dialect == "postgresql":
+            statements.append(
+                "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE "
+                "(class_group_id, subgroup_label, start_time)"
+            )
+        elif dialect == "sqlite":
+            statements.append(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_class_start_time ON session "
+                "(class_group_id, subgroup_label, start_time)"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE "
+                "(class_group_id, subgroup_label, start_time)"
+            )
+
+    if not statements:
+        return
 
     try:
         with engine.begin() as connection:
             for statement in statements:
                 connection.execute(text(statement))
     except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
-        current_app.logger.warning("Unable to realign session subgroup uniqueness constraint: %s", exc)
+        current_app.logger.warning(
+            "Unable to realign session subgroup uniqueness constraint: %s", exc
+        )
 
 
 def _ensure_course_class_teacher_columns() -> None:
