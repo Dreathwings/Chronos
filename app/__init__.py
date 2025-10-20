@@ -88,6 +88,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         db.create_all()
         _ensure_session_class_group_column()
         _ensure_session_subgroup_column()
+        _ensure_session_subgroup_uniqueness_constraint()
         _ensure_course_class_group_count_column()
         _ensure_course_class_subgroup_name_columns()
         _ensure_course_class_teacher_columns()
@@ -231,6 +232,42 @@ def _ensure_session_subgroup_column() -> None:
             connection.execute(text("ALTER TABLE session ADD COLUMN subgroup_label VARCHAR(1)"))
     except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
         current_app.logger.warning("Unable to add subgroup_label column to session: %s", exc)
+
+
+def _ensure_session_subgroup_uniqueness_constraint() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "session" not in inspector.get_table_names():
+        return
+
+    desired_columns = {"class_group_id", "subgroup_label", "start_time"}
+    unique_constraints = inspector.get_unique_constraints("session")
+    constraint = next((uc for uc in unique_constraints if uc.get("name") == "uq_class_start_time"), None)
+    if constraint and set(constraint.get("column_names", [])) == desired_columns:
+        return
+
+    dialect = engine.dialect.name
+    statements: list[str] = []
+    if dialect == "mysql":
+        if constraint:
+            statements.append("ALTER TABLE session DROP INDEX uq_class_start_time")
+        statements.append("ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)")
+    elif dialect == "postgresql":
+        statements.append("ALTER TABLE session DROP CONSTRAINT IF EXISTS uq_class_start_time")
+        statements.append("ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)")
+    elif dialect == "sqlite":
+        statements.append("DROP INDEX IF EXISTS uq_class_start_time")
+        statements.append("CREATE UNIQUE INDEX IF NOT EXISTS uq_class_start_time ON session (class_group_id, subgroup_label, start_time)")
+    else:
+        statements.append("ALTER TABLE session DROP CONSTRAINT uq_class_start_time")
+        statements.append("ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)")
+
+    try:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        current_app.logger.warning("Unable to realign session subgroup uniqueness constraint: %s", exc)
 
 
 def _ensure_course_class_teacher_columns() -> None:
