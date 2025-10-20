@@ -530,10 +530,8 @@ def _session_involves_class(session: Session, class_group: ClassGroup) -> bool:
     return any(att.id == class_group.id for att in attendees)
 
 
-def _class_sessions_in_week(
+def _class_sessions_in_scope(
     class_group: ClassGroup,
-    week_start: date,
-    week_end: date,
     pending_sessions: Iterable[Session] = (),
     *,
     subgroup_label: str | None = None,
@@ -560,10 +558,9 @@ def _class_sessions_in_week(
             continue
         if not _matches_scope(session):
             continue
-        session_day = session.start_time.date()
-        if week_start <= session_day <= week_end:
-            seen.add(marker)
-            yield session
+        seen.add(marker)
+        yield session
+
     for session in pending_sessions:
         if ignore_session_id is not None and session.id == ignore_session_id:
             continue
@@ -572,9 +569,27 @@ def _class_sessions_in_week(
             continue
         if not _matches_scope(session):
             continue
+        seen.add(marker)
+        yield session
+
+
+def _class_sessions_in_week(
+    class_group: ClassGroup,
+    week_start: date,
+    week_end: date,
+    pending_sessions: Iterable[Session] = (),
+    *,
+    subgroup_label: str | None = None,
+    ignore_session_id: int | None = None,
+) -> Iterable[Session]:
+    for session in _class_sessions_in_scope(
+        class_group,
+        pending_sessions,
+        subgroup_label=subgroup_label,
+        ignore_session_id=ignore_session_id,
+    ):
         session_day = session.start_time.date()
         if week_start <= session_day <= week_end:
-            seen.add(marker)
             yield session
 
 
@@ -589,10 +604,15 @@ def _course_family_key(course: Course) -> tuple[str, int | str]:
     return ("course-name", (course.name or "").lower())
 
 
+def _course_semester_key(course: Course) -> str | None:
+    semester = (course.semester or "").strip().upper()
+    return semester or None
+
+
 def _day_respects_chronology(
     course: Course,
     class_group: ClassGroup,
-    day: date,
+    day: date | datetime,
     pending_sessions: Iterable[Session] = (),
     *,
     subgroup_label: str | None = None,
@@ -602,25 +622,37 @@ def _day_respects_chronology(
     if priority is None:
         return True
     family_key = _course_family_key(course)
-    week_start, week_end = _week_bounds(day)
-    for session in _class_sessions_in_week(
+    semester_key = _course_semester_key(course)
+    if isinstance(day, datetime):
+        target_day = day.date()
+        target_time: time | None = day.time()
+    else:
+        target_day = day
+        target_time = None
+    for session in _class_sessions_in_scope(
         class_group,
-        week_start,
-        week_end,
         pending_sessions,
         subgroup_label=subgroup_label,
         ignore_session_id=ignore_session_id,
     ):
         if _course_family_key(session.course) != family_key:
             continue
+        if _course_semester_key(session.course) != semester_key:
+            continue
         other_priority = _course_type_priority(session.course.course_type)
         if other_priority is None or other_priority == priority:
             continue
         session_day = session.start_time.date()
-        if other_priority < priority and session_day > day:
+        if other_priority < priority and session_day > target_day:
             return False
-        if other_priority > priority and session_day < day:
+        if other_priority > priority and session_day < target_day:
             return False
+        if target_time is not None and session_day == target_day:
+            session_time = session.start_time.time()
+            if other_priority < priority and session_time >= target_time:
+                return False
+            if other_priority > priority and session_time <= target_time:
+                return False
     return True
 
 
@@ -633,11 +665,10 @@ def respects_weekly_chronology(
     pending_sessions: Iterable[Session] = (),
     ignore_session_id: int | None = None,
 ) -> bool:
-    target_day = start.date() if isinstance(start, datetime) else start
     return _day_respects_chronology(
         course,
         class_group,
-        target_day,
+        start,
         pending_sessions,
         subgroup_label=subgroup_label,
         ignore_session_id=ignore_session_id,
