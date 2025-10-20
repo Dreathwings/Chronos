@@ -243,6 +243,49 @@ def _closing_period_backgrounds() -> list[dict[str, object]]:
     return backgrounds
 
 
+def _closing_period_spans() -> list[tuple[date, date]]:
+    periods = ClosingPeriod.ordered_periods()
+    spans = [(period.start_date, period.end_date) for period in periods]
+    if not spans:
+        return []
+    spans.sort(key=lambda span: span[0])
+    merged: list[tuple[date, date]] = []
+    for start, end in spans:
+        if not merged:
+            merged.append((start, end))
+            continue
+        previous_start, previous_end = merged[-1]
+        if start <= previous_end + timedelta(days=1):
+            merged[-1] = (previous_start, max(previous_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _is_day_within_closing_periods(day: date, spans: list[tuple[date, date]]) -> bool:
+    if not spans:
+        return False
+    for start, end in spans:
+        if start > day:
+            break
+        if start <= day <= end:
+            return True
+    return False
+
+
+def _is_week_closed(
+    week_start: date, week_end: date, spans: list[tuple[date, date]]
+) -> bool:
+    if not spans:
+        return False
+    current = week_start
+    while current <= week_end:
+        if not _is_day_within_closing_periods(current, spans):
+            return False
+        current += timedelta(days=1)
+    return True
+
+
 def _week_bounds_for(day: date) -> tuple[date, date]:
     start = day - timedelta(days=day.weekday())
     end = start + timedelta(days=6)
@@ -260,8 +303,11 @@ def _semester_week_ranges(semester: str) -> list[tuple[date, date]]:
 
     ranges: list[tuple[date, date]] = []
     current = start
+    closing_spans = _closing_period_spans()
     while current <= end:
-        ranges.append((current, current + timedelta(days=6)))
+        week_end = current + timedelta(days=6)
+        if not _is_week_closed(current, week_end, closing_spans):
+            ranges.append((current, week_end))
         current += timedelta(days=7)
     return ranges
 
@@ -340,13 +386,16 @@ def _sync_simple_relationship(collection: MutableSequence, desired: Iterable[obj
 
 
 def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> None:
+    closing_spans = _closing_period_spans()
     desired: list[date] = []
     seen: set[date] = set()
     for raw_start in week_starts:
         if raw_start is None:
             continue
-        week_start, _ = _week_bounds_for(raw_start)
+        week_start, week_end = _week_bounds_for(raw_start)
         if week_start in seen:
+            continue
+        if _is_week_closed(week_start, week_end, closing_spans):
             continue
         seen.add(week_start)
         desired.append(week_start)
@@ -1859,14 +1908,20 @@ def course_detail(course_id: int):
         key=lambda teacher: (teacher.name or "").lower(),
     )
 
+    closing_spans = _closing_period_spans()
+
     week_ranges = _semester_week_ranges(course.semester)
 
     selected_course_week_values = {
-        allowed.week_start.isoformat() for allowed in course.allowed_weeks
+        allowed.week_start.isoformat()
+        for allowed in course.allowed_weeks
+        if not _is_week_closed(allowed.week_start, allowed.week_end, closing_spans)
     }
 
     known_starts = {start for start, _ in week_ranges}
     for allowed in course.allowed_weeks:
+        if _is_week_closed(allowed.week_start, allowed.week_end, closing_spans):
+            continue
         if allowed.week_start not in known_starts:
             week_ranges.append((allowed.week_start, allowed.week_end))
             known_starts.add(allowed.week_start)
@@ -1880,6 +1935,7 @@ def course_detail(course_id: int):
     selected_course_week_labels = [
         _week_label(allowed.week_start, allowed.week_end)
         for allowed in course.allowed_weeks
+        if not _is_week_closed(allowed.week_start, allowed.week_end, closing_spans)
     ]
 
     remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
