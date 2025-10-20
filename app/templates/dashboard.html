@@ -64,7 +64,6 @@
                 </div>
               </div>
               <div class="text-end d-flex flex-column align-items-end gap-1">
-                <span class="badge bg-light text-dark">Priorité {{ item.priority }}</span>
                 {% if item.display_status != 'none' %}
                 <span class="badge {{ status_badge_classes.get(item.display_status, 'bg-secondary') }}">{{ status_labels.get(item.display_status, item.display_status|title) }}</span>
                 {% else %}
@@ -147,7 +146,8 @@
               Configurez les semaines autorisées directement dans les contraintes de chaque cours. Sans sélection, la
               période définie sur le cours sera utilisée pour la génération.
             </div>
-            <div class="form-text">Les cours sont traités selon leur priorité décroissante.</div>
+            <div class="form-text">Les cours sont traités selon leur type de cours.</div>
+            <div class="form-text">Ordre appliqué : SAE → CM → TD → TP → Éval.</div>
             <button type="submit" class="btn btn-primary">Générer l'ensemble des cours</button>
           </form>
           <form method="post" class="d-grid">

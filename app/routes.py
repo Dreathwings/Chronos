@@ -16,6 +16,7 @@ from flask import (
     request,
     url_for,
 )
+from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -23,6 +24,7 @@ from . import db
 from .events import sessions_to_grouped_events
 from .models import (
     COURSE_TYPE_CHOICES,
+    COURSE_TYPE_PLACEMENT_ORDER,
     ClassGroup,
     ClosingPeriod,
     Course,
@@ -73,9 +75,21 @@ COURSE_TYPE_LABELS = {
     "TD": "TD",
     "TP": "TP",
     "SAE": "SAE",
-    "Eval":"Eval"
+    "Eval": "Évaluation",
 }
 DEFAULT_SEMESTER = SEMESTER_CHOICES[0]
+
+COURSE_TYPE_CANONICAL = {
+    choice.upper(): choice for choice in COURSE_TYPE_CHOICES
+}
+
+COURSE_TYPE_ORDER_EXPRESSION = case(
+    *[
+        (func.upper(Course.course_type) == label.upper(), index)
+        for index, label in enumerate(COURSE_TYPE_PLACEMENT_ORDER)
+    ],
+    else_=len(COURSE_TYPE_PLACEMENT_ORDER),
+)
 
 GENERATION_STATUS_LABELS = {**CourseScheduleLog.STATUS_LABELS, "none": "Jamais généré"}
 
@@ -83,9 +97,12 @@ GENERATION_STATUS_LABELS = {**CourseScheduleLog.STATUS_LABELS, "none": "Jamais g
 def _normalise_course_type(raw_value: str | None) -> str:
     if not raw_value:
         return "CM"
-    raw_value = raw_value.strip().upper()
-    if raw_value in COURSE_TYPE_CHOICES:
-        return raw_value
+    value = raw_value.strip()
+    if not value:
+        return "CM"
+    canonical = COURSE_TYPE_CANONICAL.get(value.upper())
+    if canonical:
+        return canonical
     return "CM"
 
 
@@ -719,7 +736,7 @@ def _validate_session_constraints(
 def dashboard():
     courses = (
         Course.query.options(selectinload(Course.generation_logs))
-        .order_by(Course.priority.desc())
+        .order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
         .all()
     )
     teachers = Teacher.query.order_by(Teacher.name).all()
@@ -1038,7 +1055,6 @@ def dashboard():
                 "required": required_total,
                 "scheduled": scheduled_total,
                 "remaining": remaining,
-                "priority": course.priority,
                 "latest_status": latest_log.status if latest_log else "none",
                 "display_status": display_status,
                 "latest_summary": latest_log.summary if latest_log and latest_log.summary else None,
@@ -1188,7 +1204,9 @@ def teachers_list():
 @bp.route("/enseignant/<int:teacher_id>", methods=["GET", "POST"])
 def teacher_detail(teacher_id: int):
     teacher = Teacher.query.get_or_404(teacher_id)
-    courses = Course.query.order_by(Course.name).all()
+    courses = (
+        Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc()).all()
+    )
     assignable_courses = [course for course in courses if teacher not in course.teachers]
 
     if request.method == "POST":
@@ -1333,7 +1351,9 @@ def classes_list():
 @bp.route("/classe/<int:class_id>", methods=["GET", "POST"])
 def class_detail(class_id: int):
     class_group = ClassGroup.query.get_or_404(class_id)
-    courses = Course.query.order_by(Course.name).all()
+    courses = (
+        Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc()).all()
+    )
     assignable_courses = [course for course in courses if class_group not in course.classes]
     teachers = Teacher.query.order_by(Teacher.name).all()
 
@@ -1514,7 +1534,6 @@ def courses_list():
                 description=request.form.get("description"),
                 session_length_hours=int(request.form.get("session_length_hours", 2)),
                 sessions_required=int(request.form.get("sessions_required", 1)),
-                priority=int(request.form.get("priority", 1)),
                 course_type=course_type,
                 semester=semester,
                 configured_name=course_name,
@@ -1549,7 +1568,9 @@ def courses_list():
                 flash("Nom de cours déjà utilisé", "danger")
         return redirect(url_for("main.courses_list"))
 
-    courses = Course.query.order_by(Course.priority.desc()).all()
+    courses = (
+        Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc()).all()
+    )
     return render_template(
         "courses/list.html",
         courses=courses,
@@ -1642,7 +1663,6 @@ def course_detail(course_id: int):
             course.description = request.form.get("description")
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.sessions_required = int(request.form.get("sessions_required", course.sessions_required))
-            course.priority = int(request.form.get("priority", course.priority))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
             course.configured_name = selected_course_name
@@ -2126,7 +2146,7 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
             return
         try:
             courses = (
-                Course.query.order_by(Course.priority.desc())
+                Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
                 .options(
                     selectinload(Course.class_links),
                     selectinload(Course.sessions),

@@ -65,6 +65,7 @@
                 <option value="SAE" {% if course.course_type == 'SAE' %}selected{% endif %}>SAE</option>
                 <option value="Eval" {% if course.course_type == 'Eval' %}selected{% endif %}>Eval</option>
               </select>
+              <div class="form-text">Les cours sont générés selon l'ordre : SAE → CM → TD → TP → Éval.</div>
             </div>
             <div class="col-md-4">
               <label class="form-label">Semestre</label>
@@ -84,10 +85,6 @@
             <div class="col">
               <label class="form-label">Séances requises</label>
               <input type="number" class="form-control" name="sessions_required" value="{{ course.sessions_required }}" min="1">
-            </div>
-            <div class="col">
-              <label class="form-label">Priorité</label>
-              <input type="number" class="form-control" name="priority" value="{{ course.priority }}" min="1">
             </div>
           </div>
           <div class="text-muted small">

@@ -8,7 +8,7 @@ Application Flask permettant de gérer enseignants, salles, cours et ressources 
 - Gestion des enseignants (créneaux de disponibilité hebdomadaires, jours d'indisponibilité, charge hebdomadaire maximale) et assignation aux cours.
 - Gestion des classes (effectifs, indisponibilités ponctuelles) avec association aux cours et calendrier dédié.
 - Gestion des salles avec capacités, postes informatiques, matériels et logiciels disponibles.
-- Gestion des cours avec contraintes (nombre de séances, durée, période de planification, priorité, équipements et logiciels requis, besoin en ordinateurs) et assignation multi-enseignants.
+- Gestion des cours avec contraintes (nombre de séances, durée, période de planification, ordre automatique selon le type de cours, équipements et logiciels requis, besoin en ordinateurs) et assignation multi-enseignants.
 - Référentiels centralisés pour les matériels et logiciels utilisés lors de la planification.
 - Génération automatique de séances respectant les contraintes (créneaux 8h-18h avec pauses définies, disponibilités enseignants et classes, capacités des salles, matériel/logiciel requis).
 - Affichage des calendriers individuels (enseignant, classe, salle, cours) via FullCalendar avec grisage automatique des pauses et plages hors planning.

@@ -27,7 +27,6 @@ def seed_data() -> None:
         description="Programmation avancée en Python",
         session_length_hours=2,
         sessions_required=4,
-        priority=1,
         course_type="TD",
         semester="S1",
         configured_name=python_course_name,

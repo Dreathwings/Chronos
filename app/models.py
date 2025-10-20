@@ -202,7 +202,8 @@ class Room(db.Model, TimeStampedModel):
         return f"Room<{self.id} {self.name}>"
 
 
-COURSE_TYPE_CHOICES = ("CM", "TD", "TP", "SAE","Eval")
+COURSE_TYPE_CHOICES = ("CM", "TD", "TP", "SAE", "Eval")
+COURSE_TYPE_PLACEMENT_ORDER = ("SAE", "CM", "TD", "TP", "Eval")
 COURSE_TYPE_LABELS = {
     "CM": "CM",
     "TD": "TD",
