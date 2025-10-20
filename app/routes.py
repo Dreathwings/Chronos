@@ -4,6 +4,7 @@ import json
 import math
 import threading
 from datetime import date, datetime, time, timedelta, timezone
+from collections import Counter
 from typing import Iterable, List, MutableSequence
 
 from flask import (
@@ -78,6 +79,18 @@ COURSE_TYPE_LABELS = {
 DEFAULT_SEMESTER = SEMESTER_CHOICES[0]
 
 GENERATION_STATUS_LABELS = {**CourseScheduleLog.STATUS_LABELS, "none": "Jamais généré"}
+
+GENERATION_CRITERIA_LABELS = {
+    "success": "Critères respectés",
+    "warning": "À vérifier",
+    "error": "Non respectés",
+}
+
+GENERATION_CRITERIA_BADGES = {
+    "success": "bg-success",
+    "warning": "bg-warning text-dark",
+    "error": "bg-danger",
+}
 
 
 def _normalise_course_type(raw_value: str | None) -> str:
@@ -666,6 +679,78 @@ def _validate_session_constraints(
     return None
 
 
+def _evaluate_course_generation(course: Course) -> dict[str, object]:
+    status = "success"
+    messages: list[str] = []
+
+    required_total = course.total_required_hours
+    scheduled_total = course.scheduled_hours
+    missing_hours = max(required_total - scheduled_total, 0)
+
+    if required_total > 0:
+        if missing_hours > 0:
+            status = "warning"
+            messages.append(
+                (
+                    f"Heures manquantes : {missing_hours} h "+
+                    f"sur {required_total} h requises"
+                )
+            )
+        else:
+            messages.append("Toutes les heures requises sont planifiées.")
+    else:
+        messages.append("Aucune heure requise n'est définie pour ce cours.")
+
+    if course.sessions:
+        for session in course.sessions:
+            teacher = session.teacher
+            room = session.room
+            if teacher is None or room is None:
+                status = "error"
+                messages.append(
+                    "Séance sans enseignant ou salle attribués : "
+                    f"{session.start_time.strftime('%d/%m/%Y %H:%M')}"
+                )
+                continue
+            class_groups = list(session.attendees or [])
+            if not class_groups and session.class_group is not None:
+                class_groups = [session.class_group]
+            class_group_labels: dict[int, str | None] = {}
+            if session.class_group_id is not None:
+                class_group_labels[session.class_group_id] = session.subgroup_label
+            for attendee in session.attendees or []:
+                if attendee.id is not None and attendee.id not in class_group_labels:
+                    class_group_labels[attendee.id] = session.subgroup_label
+            error = _validate_session_constraints(
+                course,
+                teacher,
+                room,
+                class_groups,
+                session.start_time,
+                session.end_time,
+                ignore_session_id=session.id,
+                class_group_labels=class_group_labels or None,
+            )
+            if error:
+                status = "error"
+                timestamp = session.start_time.strftime("%d/%m/%Y %H:%M")
+                messages.append(f"{timestamp} — {error}")
+    elif required_total > 0:
+        status = "warning"
+        messages.append("Aucune séance n'est planifiée pour ce cours.")
+
+    return {
+        "course": course,
+        "status": status,
+        "status_label": GENERATION_CRITERIA_LABELS.get(status, status.title()),
+        "badge_class": GENERATION_CRITERIA_BADGES.get(status, "bg-secondary"),
+        "messages": messages,
+        "required_hours": required_total,
+        "scheduled_hours": scheduled_total,
+        "missing_hours": missing_hours,
+    }
+
+
 @bp.route("/", methods=["GET", "POST"])
 def dashboard():
     courses = (
@@ -972,6 +1057,7 @@ def dashboard():
     events = sessions_to_grouped_events(all_sessions)
     has_any_scheduled_sessions = len(all_sessions) > 0
     course_summaries: list[dict[str, object]] = []
+    generation_evaluation: list[dict[str, object]] = []
     for course in courses:
         required_total = course.total_required_hours
         scheduled_total = course.scheduled_hours
@@ -982,6 +1068,7 @@ def dashboard():
             latest_log,
             remaining_hours=remaining,
         )
+        evaluation = _evaluate_course_generation(course)
         course_summaries.append(
             {
                 "course": course,
@@ -996,6 +1083,23 @@ def dashboard():
                 "latest_timestamp": latest_log.created_at if latest_log else None,
             }
         )
+        generation_evaluation.append(evaluation)
+
+    evaluation_counts = Counter(result["status"] for result in generation_evaluation)
+    generation_evaluation_overview = {
+        "total": len(generation_evaluation),
+        "success": evaluation_counts.get("success", 0),
+        "warning": evaluation_counts.get("warning", 0),
+        "error": evaluation_counts.get("error", 0),
+    }
+    severity_order = {"error": 0, "warning": 1, "success": 2}
+    generation_evaluation_flagged = sorted(
+        [result for result in generation_evaluation if result["status"] != "success"],
+        key=lambda entry: (
+            severity_order.get(entry["status"], 3),
+            entry["course"].name.lower() if entry.get("course") else "",
+        ),
+    )
 
     return render_template(
         "dashboard.html",
@@ -1014,6 +1118,11 @@ def dashboard():
         global_search_index_json=json.dumps(global_search_index, ensure_ascii=False),
         status_labels=GENERATION_STATUS_LABELS,
         has_any_scheduled_sessions=has_any_scheduled_sessions,
+        generation_evaluation=generation_evaluation,
+        generation_evaluation_flagged=generation_evaluation_flagged,
+        generation_evaluation_overview=generation_evaluation_overview,
+        generation_criteria_labels=GENERATION_CRITERIA_LABELS,
+        generation_criteria_badges=GENERATION_CRITERIA_BADGES,
     )
 
 

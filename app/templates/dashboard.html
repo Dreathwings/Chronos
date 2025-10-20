@@ -132,6 +132,50 @@
           {% endif %}
         {% endfor %}
         <div class="vstack gap-3">
+          {% if generation_evaluation_overview.total %}
+          <div class="alert alert-light border mb-0">
+            <div class="fw-semibold mb-2">Évaluation des critères</div>
+            <div class="d-flex flex-wrap gap-2 small mb-2">
+              <span class="badge {{ generation_criteria_badges.get('success', 'bg-success') }}">
+                Respectés : {{ generation_evaluation_overview.success }}
+              </span>
+              <span class="badge {{ generation_criteria_badges.get('warning', 'bg-warning text-dark') }}">
+                À vérifier : {{ generation_evaluation_overview.warning }}
+              </span>
+              <span class="badge {{ generation_criteria_badges.get('error', 'bg-danger') }}">
+                Non respectés : {{ generation_evaluation_overview.error }}
+              </span>
+            </div>
+            {% if generation_evaluation_flagged %}
+            <div class="small text-muted mb-2">
+              Les cours ci-dessous présentent des points à surveiller.
+            </div>
+            <div class="vstack gap-2">
+              {% for entry in generation_evaluation_flagged %}
+              <div class="border rounded p-2">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                  <div>
+                    <div class="fw-semibold">{{ entry.course.name }}</div>
+                    {% if entry.messages %}
+                    <ul class="small ps-3 mb-0 mt-1">
+                      {% for message in entry.messages %}
+                      <li>{{ message }}</li>
+                      {% endfor %}
+                    </ul>
+                    {% endif %}
+                  </div>
+                  <span class="badge {{ entry.badge_class }}">{{ entry.status_label }}</span>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="small text-success mb-0">
+              Tous les cours respectent les critères définis.
+            </div>
+            {% endif %}
+          </div>
+          {% endif %}
           <form
             method="post"
             class="vstack gap-3"
