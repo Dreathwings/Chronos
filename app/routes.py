@@ -47,6 +47,7 @@ from .scheduler import (
     START_TIMES,
     fits_in_windows,
     generate_schedule,
+    has_weekly_course_conflict,
     overlaps,
     respects_weekly_chronology,
 )
@@ -705,6 +706,27 @@ def _validate_session_constraints(
             subgroup_label=subgroup_label,
         ):
             return "La classe est indisponible sur ce créneau."
+        if has_weekly_course_conflict(
+            course,
+            class_group,
+            start_dt,
+            subgroup_label=subgroup_label,
+            ignore_session_id=ignore_session_id,
+        ):
+            week_start = start_dt.date() - timedelta(days=start_dt.weekday())
+            label = class_group.name
+            if subgroup_label:
+                subgroup_name = course.subgroup_name_for(class_group, subgroup_label)
+                clean_label = (subgroup_label or "").strip().upper()
+                if subgroup_name:
+                    label = f"{label} — {subgroup_name}"
+                elif clean_label:
+                    label = f"{label} — groupe {clean_label}"
+            return (
+                "Une séance pour ce cours est déjà planifiée pour "
+                f"{label} sur la semaine du {week_start.strftime('%d/%m/%Y')}"
+                "."
+            )
         if not respects_weekly_chronology(
             course,
             class_group,

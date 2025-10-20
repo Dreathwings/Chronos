@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from unittest.mock import MagicMock, patch
 
 from app import (create_app, db, _realign_tp_session_teachers,
@@ -20,6 +20,7 @@ from app.models import (
 )
 from sqlalchemy import text
 from app.routes import _validate_session_constraints
+from app.scheduler import has_weekly_course_conflict
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -683,6 +684,9 @@ class ChronologyValidationTestCase(DatabaseTestCase):
         db.session.add_all(availabilities)
         db.session.commit()
 
+        db.session.commit()
+
+    def test_validation_blocks_td_before_cm(self) -> None:
         cm_session = Session(
             course=self.course_cm,
             teacher=self.teacher,
@@ -692,19 +696,9 @@ class ChronologyValidationTestCase(DatabaseTestCase):
             end_time=datetime(2024, 1, 11, 12, 15, 0),
         )
         cm_session.attendees = [self.class_group]
-        tp_session = Session(
-            course=self.course_tp,
-            teacher=self.teacher,
-            room=self.room,
-            class_group=self.class_group,
-            start_time=datetime(2024, 1, 12, 10, 15, 0),
-            end_time=datetime(2024, 1, 12, 12, 15, 0),
-        )
-        tp_session.attendees = [self.class_group]
-        db.session.add_all([cm_session, tp_session])
+        db.session.add(cm_session)
         db.session.commit()
 
-    def test_validation_blocks_td_before_cm(self) -> None:
         start_dt = datetime(2024, 1, 9, 8, 0, 0)
         end_dt = datetime(2024, 1, 9, 10, 0, 0)
         error = _validate_session_constraints(
@@ -716,9 +710,21 @@ class ChronologyValidationTestCase(DatabaseTestCase):
             end_dt,
         )
         self.assertIsNotNone(error)
-        self.assertIn("chronologie", error)
+        self.assertIn("déjà planifiée", error)
 
     def test_validation_blocks_eval_before_tp(self) -> None:
+        tp_session = Session(
+            course=self.course_tp,
+            teacher=self.teacher,
+            room=self.room,
+            class_group=self.class_group,
+            start_time=datetime(2024, 1, 12, 10, 15, 0),
+            end_time=datetime(2024, 1, 12, 12, 15, 0),
+        )
+        tp_session.attendees = [self.class_group]
+        db.session.add(tp_session)
+        db.session.commit()
+
         start_dt = datetime(2024, 1, 11, 8, 0, 0)
         end_dt = datetime(2024, 1, 11, 10, 0, 0)
         error = _validate_session_constraints(
@@ -730,7 +736,7 @@ class ChronologyValidationTestCase(DatabaseTestCase):
             end_dt,
         )
         self.assertIsNotNone(error)
-        self.assertIn("chronologie", error)
+        self.assertIn("déjà planifiée", error)
 
     def test_validation_allows_ordered_sequence(self) -> None:
         start_dt = datetime(2024, 1, 12, 8, 0, 0)
@@ -850,6 +856,96 @@ class EquipmentValidationTestCase(DatabaseTestCase):
             end_dt,
         )
         self.assertIsNone(error)
+
+
+class WeeklyLimitTestCase(DatabaseTestCase):
+    def _create_course(self) -> tuple[Course, ClassGroup, Room]:
+        base_name = CourseName(name="Algorithmes")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=28)
+        link = CourseClassLink(class_group=class_group, group_count=1)
+        course.class_links.append(link)
+        room = Room(name="B301", capacity=30)
+        db.session.add_all([course, class_group, base_name, room])
+        db.session.commit()
+        return course, class_group, room
+
+    def _create_teacher(self) -> Teacher:
+        teacher = Teacher(name="Alice")
+        db.session.add(teacher)
+        db.session.commit()
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in (0, 2)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+        return teacher
+
+    def test_validation_rejects_second_session_in_same_week(self) -> None:
+        course, class_group, room = self._create_course()
+        teacher = self._create_teacher()
+
+        first_start = datetime(2024, 1, 8, 8, 0, 0)
+        first_end = datetime(2024, 1, 8, 10, 0, 0)
+        first_session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=first_start,
+            end_time=first_end,
+        )
+        first_session.attendees = [class_group]
+        db.session.add(first_session)
+        db.session.commit()
+
+        second_start = datetime(2024, 1, 10, 8, 0, 0)
+        second_end = datetime(2024, 1, 10, 10, 0, 0)
+        error = _validate_session_constraints(
+            course,
+            teacher,
+            room,
+            [class_group],
+            second_start,
+            second_end,
+        )
+        self.assertIsNotNone(error)
+        self.assertIn("semaine", error)
+
+        next_week_start = second_start + timedelta(days=7)
+        next_week_end = second_end + timedelta(days=7)
+        self.assertIsNone(
+            _validate_session_constraints(
+                course,
+                teacher,
+                room,
+                [class_group],
+                next_week_start,
+                next_week_end,
+            )
+        )
+
+        self.assertFalse(
+            has_weekly_course_conflict(
+                course,
+                class_group,
+                second_start,
+                ignore_session_id=first_session.id,
+            )
+        )
 
 
 if __name__ == "__main__":
