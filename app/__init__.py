@@ -325,6 +325,7 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
             return
 
     statements: list[str] = []
+    mysql_recreated = False
 
     def _drop_index(name: str) -> None:
         if dialect == "mysql":
@@ -349,16 +350,24 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
     for kind, name in legacy_targets:
         if not name:
             continue
+        if dialect == "mysql" and name == "uq_class_start_time":
+            statements.append(
+                "ALTER TABLE session DROP INDEX `uq_class_start_time`, "
+                "ADD UNIQUE INDEX `uq_class_start_time` "
+                "(class_group_id, subgroup_label, start_time)"
+            )
+            mysql_recreated = True
+            continue
         if kind == "index":
             _drop_index(name)
         else:
             _drop_constraint(name)
 
-    if not has_desired:
+    if not has_desired and not mysql_recreated:
         if dialect == "mysql":
             statements.append(
-                "ALTER TABLE session ADD CONSTRAINT "
-                "uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)"
+                "ALTER TABLE session ADD UNIQUE INDEX "
+                "uq_class_start_time (class_group_id, subgroup_label, start_time)"
             )
         elif dialect == "postgresql":
             statements.append(

@@ -218,9 +218,8 @@ class SubgroupParallelismTestCase(DatabaseTestCase):
                         engine.dialect.name = original_name
 
         executed = [call.args[0].text for call in begin_connection.execute.call_args_list]
-        self.assertIn("ALTER TABLE session DROP INDEX `uq_class_start_time`", executed)
         self.assertIn(
-            "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)",
+            "ALTER TABLE session DROP INDEX `uq_class_start_time`, ADD UNIQUE INDEX `uq_class_start_time` (class_group_id, subgroup_label, start_time)",
             executed,
         )
 
@@ -251,9 +250,8 @@ class SubgroupParallelismTestCase(DatabaseTestCase):
                         engine.dialect.name = original_name
 
         executed = [call.args[0].text for call in begin_connection.execute.call_args_list]
-        self.assertIn("ALTER TABLE session DROP INDEX `uq_class_start_time`", executed)
         self.assertIn(
-            "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)",
+            "ALTER TABLE session DROP INDEX `uq_class_start_time`, ADD UNIQUE INDEX `uq_class_start_time` (class_group_id, subgroup_label, start_time)",
             executed,
         )
 
@@ -285,7 +283,7 @@ class SubgroupParallelismTestCase(DatabaseTestCase):
         executed = [call.args[0].text for call in begin_connection.execute.call_args_list]
         self.assertIn("ALTER TABLE session DROP INDEX `legacy_unique`", executed)
         self.assertIn(
-            "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)",
+            "ALTER TABLE session ADD UNIQUE INDEX uq_class_start_time (class_group_id, subgroup_label, start_time)",
             executed,
         )
 
@@ -346,9 +344,8 @@ class SubgroupParallelismTestCase(DatabaseTestCase):
                         engine.dialect.name = original_name
 
         executed = [call.args[0].text for call in begin_connection.execute.call_args_list]
-        self.assertIn("ALTER TABLE session DROP INDEX `uq_class_start_time`", executed)
         self.assertIn(
-            "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)",
+            "ALTER TABLE session DROP INDEX `uq_class_start_time`, ADD UNIQUE INDEX `uq_class_start_time` (class_group_id, subgroup_label, start_time)",
             executed,
         )
 
