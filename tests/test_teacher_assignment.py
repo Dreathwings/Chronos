@@ -15,6 +15,7 @@ from app.models import (
     Session,
     Teacher,
 )
+from sqlalchemy import text
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -302,6 +303,91 @@ class SubgroupParallelismTestCase(DatabaseTestCase):
                     engine.dialect.name = original_name
 
         self.assertFalse(connection.execute.call_args_list)
+
+    def test_uniqueness_constraint_upgrade_rebuilds_sqlite_legacy(self) -> None:
+        engine = db.engine
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE IF EXISTS session"))
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE session (
+                        id INTEGER PRIMARY KEY,
+                        course_id INTEGER NOT NULL,
+                        teacher_id INTEGER NOT NULL,
+                        room_id INTEGER NOT NULL,
+                        class_group_id INTEGER NOT NULL,
+                        subgroup_label VARCHAR(1),
+                        start_time DATETIME NOT NULL,
+                        end_time DATETIME NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        UNIQUE(class_group_id, start_time),
+                        UNIQUE(room_id, start_time)
+                    )
+                    """
+                )
+            )
+
+        course, link, class_group = self._create_tp_course()
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        room_a = Room(name="A101", capacity=24)
+        room_b = Room(name="B202", capacity=24)
+        db.session.add_all([teacher_a, teacher_b, room_a, room_b])
+        db.session.commit()
+
+        link.teacher_a = teacher_a
+        link.teacher_b = teacher_b
+        db.session.commit()
+
+        _ensure_session_subgroup_uniqueness_constraint()
+
+        start = datetime(2025, 9, 17, 13, 30)
+        end = datetime(2025, 9, 17, 15, 30)
+
+        session_a = Session(
+            course=course,
+            teacher=teacher_a,
+            room=room_a,
+            class_group=class_group,
+            subgroup_label="A",
+            start_time=start,
+            end_time=end,
+        )
+        session_b = Session(
+            course=course,
+            teacher=teacher_b,
+            room=room_b,
+            class_group=class_group,
+            subgroup_label="B",
+            start_time=start,
+            end_time=end,
+        )
+        db.session.add_all([session_a, session_b])
+        db.session.commit()
+
+        with engine.connect() as connection:
+            index_rows = connection.execute(
+                text("PRAGMA index_list('session')")
+            ).mappings().all()
+
+        unique_indexes = [row for row in index_rows if row["unique"]]
+        self.assertTrue(unique_indexes)
+
+        def index_columns(name: str) -> list[str]:
+            with engine.connect() as connection:
+                return [
+                    row["name"]
+                    for row in connection.execute(
+                        text(f"PRAGMA index_info('{name}')")
+                    ).mappings()
+                ]
+
+        self.assertIn(
+            ["class_group_id", "subgroup_label", "start_time"],
+            [index_columns(row["name"]) for row in unique_indexes],
+        )
 
     def test_parallel_tp_sessions_for_distinct_subgroups(self) -> None:
         class_group = ClassGroup(name="INFO1", size=24)

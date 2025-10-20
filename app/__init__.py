@@ -266,6 +266,12 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
     ]
 
     dialect = engine.dialect.name
+
+    if legacy_targets and all(name is None for _, name in legacy_targets):
+        if dialect == "sqlite":
+            _rebuild_sqlite_session_table(engine)
+            return
+
     statements: list[str] = []
 
     def _drop_index(name: str) -> None:
@@ -326,6 +332,55 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
             "Unable to realign session subgroup uniqueness constraint: %s", exc
         )
 
+
+def _rebuild_sqlite_session_table(engine) -> None:
+    """Rebuild the session table with the desired unique constraint on SQLite."""
+
+    from .models import Session
+
+    temp_table = "session_legacy_backup"
+
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=OFF"))
+        renamed = False
+        try:
+            legacy_columns = [
+                row["name"]
+                for row in connection.execute(
+                    text("PRAGMA table_info('session')")
+                ).mappings()
+            ]
+            if not legacy_columns:
+                return
+
+            connection.execute(text(f"ALTER TABLE session RENAME TO {temp_table}"))
+            renamed = True
+
+            Session.__table__.create(bind=connection)
+
+            current_columns = [column.name for column in Session.__table__.columns]
+            transferable = [
+                column
+                for column in current_columns
+                if column in legacy_columns
+            ]
+
+            if transferable:
+                column_list = ", ".join(transferable)
+                connection.execute(
+                    text(
+                        f"INSERT INTO session ({column_list}) "
+                        f"SELECT {column_list} FROM {temp_table}"
+                    )
+                )
+
+            connection.execute(text(f"DROP TABLE {temp_table}"))
+        except SQLAlchemyError:
+            if renamed:
+                connection.execute(text(f"ALTER TABLE {temp_table} RENAME TO session"))
+            raise
+        finally:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
 
 def _ensure_course_class_teacher_columns() -> None:
     engine = db.engine
