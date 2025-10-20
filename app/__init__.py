@@ -1,4 +1,6 @@
 import click
+from collections import defaultdict
+from typing import Optional
 from flask import Flask, current_app
 from flask.cli import with_appcontext
 from flask_migrate import Migrate
@@ -88,6 +90,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         db.create_all()
         _ensure_session_class_group_column()
         _ensure_session_subgroup_column()
+        _ensure_session_subgroup_uniqueness_constraint()
         _ensure_course_class_group_count_column()
         _ensure_course_class_subgroup_name_columns()
         _ensure_course_class_teacher_columns()
@@ -232,6 +235,217 @@ def _ensure_session_subgroup_column() -> None:
     except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
         current_app.logger.warning("Unable to add subgroup_label column to session: %s", exc)
 
+
+def _quote_mysql_identifier(identifier: str) -> str:
+    """Return a MySQL-safe quoted identifier."""
+
+    escaped = identifier.replace("`", "``")
+    return f"`{escaped}`"
+
+
+def _ensure_session_subgroup_uniqueness_constraint() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "session" not in inspector.get_table_names():
+        return
+
+    desired_columns = {"class_group_id", "subgroup_label", "start_time"}
+    legacy_columns = {"class_group_id", "start_time"}
+
+    unique_structures: list[tuple[str, Optional[str], set[str]]] = []
+    seen_structures: set[tuple[str, Optional[str], tuple[str, ...]]] = set()
+
+    def _register_structure(kind: str, name: Optional[str], columns: list[str]) -> None:
+        column_names = [col for col in columns if col]
+        if not column_names:
+            return
+        key = (kind, name, tuple(column_names))
+        if key in seen_structures:
+            return
+        seen_structures.add(key)
+        unique_structures.append((kind, name, set(column_names)))
+
+    for constraint in inspector.get_unique_constraints("session"):
+        column_names = constraint.get("column_names") or []
+        _register_structure("constraint", constraint.get("name"), column_names)
+
+    for index in inspector.get_indexes("session"):
+        if not index.get("unique"):
+            continue
+        column_names = index.get("column_names") or []
+        _register_structure("index", index.get("name"), column_names)
+
+    has_desired = any(columns == desired_columns for _, _, columns in unique_structures)
+    legacy_targets = [
+        (kind, name)
+        for kind, name, columns in unique_structures
+        if columns == legacy_columns
+    ]
+
+    dialect = engine.dialect.name
+
+    if dialect == "mysql":
+        with engine.connect() as connection:
+            stats_rows = connection.execute(
+                text(
+                    """
+                    SELECT INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX
+                    FROM INFORMATION_SCHEMA.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'session'
+                      AND NON_UNIQUE = 0
+                    ORDER BY INDEX_NAME, SEQ_IN_INDEX
+                    """
+                )
+            ).mappings().all()
+
+        ordered_indexes: dict[str, list[str]] = defaultdict(list)
+        for row in stats_rows:
+            index_name = row.get("INDEX_NAME")
+            if not index_name or index_name.upper() == "PRIMARY":
+                continue
+            column_name = row.get("COLUMN_NAME")
+            if not column_name:
+                continue
+            ordered_indexes[index_name].append(column_name)
+
+        for name, columns in ordered_indexes.items():
+            _register_structure("index", name, columns)
+
+        legacy_targets = [
+            (kind, name)
+            for kind, name, columns in unique_structures
+            if columns == legacy_columns
+        ]
+        has_desired = any(columns == desired_columns for _, _, columns in unique_structures)
+
+    if legacy_targets and all(name is None for _, name in legacy_targets):
+        if dialect == "sqlite":
+            _rebuild_sqlite_session_table(engine)
+            return
+
+    statements: list[str] = []
+    mysql_recreated = False
+
+    def _drop_index(name: str) -> None:
+        if dialect == "mysql":
+            statements.append(
+                f"ALTER TABLE session DROP INDEX {_quote_mysql_identifier(name)}"
+            )
+        elif dialect in {"postgresql", "sqlite"}:
+            statements.append(f"DROP INDEX IF EXISTS {name}")
+        else:
+            statements.append(f"DROP INDEX {name}")
+
+    def _drop_constraint(name: str) -> None:
+        if dialect == "mysql":
+            statements.append(
+                f"ALTER TABLE session DROP INDEX {_quote_mysql_identifier(name)}"
+            )
+        elif dialect == "postgresql":
+            statements.append(f"ALTER TABLE session DROP CONSTRAINT IF EXISTS {name}")
+        else:
+            statements.append(f"ALTER TABLE session DROP CONSTRAINT {name}")
+
+    for kind, name in legacy_targets:
+        if not name:
+            continue
+        if dialect == "mysql" and name == "uq_class_start_time":
+            statements.append(
+                "ALTER TABLE session DROP INDEX `uq_class_start_time`, "
+                "ADD UNIQUE INDEX `uq_class_start_time` "
+                "(class_group_id, subgroup_label, start_time)"
+            )
+            mysql_recreated = True
+            continue
+        if kind == "index":
+            _drop_index(name)
+        else:
+            _drop_constraint(name)
+
+    if not has_desired and not mysql_recreated:
+        if dialect == "mysql":
+            statements.append(
+                "ALTER TABLE session ADD UNIQUE INDEX "
+                "uq_class_start_time (class_group_id, subgroup_label, start_time)"
+            )
+        elif dialect == "postgresql":
+            statements.append(
+                "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE "
+                "(class_group_id, subgroup_label, start_time)"
+            )
+        elif dialect == "sqlite":
+            statements.append(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_class_start_time ON session "
+                "(class_group_id, subgroup_label, start_time)"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE "
+                "(class_group_id, subgroup_label, start_time)"
+            )
+
+    if not statements:
+        return
+
+    try:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        current_app.logger.warning(
+            "Unable to realign session subgroup uniqueness constraint: %s", exc
+        )
+
+
+def _rebuild_sqlite_session_table(engine) -> None:
+    """Rebuild the session table with the desired unique constraint on SQLite."""
+
+    from .models import Session
+
+    temp_table = "session_legacy_backup"
+
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=OFF"))
+        renamed = False
+        try:
+            legacy_columns = [
+                row["name"]
+                for row in connection.execute(
+                    text("PRAGMA table_info('session')")
+                ).mappings()
+            ]
+            if not legacy_columns:
+                return
+
+            connection.execute(text(f"ALTER TABLE session RENAME TO {temp_table}"))
+            renamed = True
+
+            Session.__table__.create(bind=connection)
+
+            current_columns = [column.name for column in Session.__table__.columns]
+            transferable = [
+                column
+                for column in current_columns
+                if column in legacy_columns
+            ]
+
+            if transferable:
+                column_list = ", ".join(transferable)
+                connection.execute(
+                    text(
+                        f"INSERT INTO session ({column_list}) "
+                        f"SELECT {column_list} FROM {temp_table}"
+                    )
+                )
+
+            connection.execute(text(f"DROP TABLE {temp_table}"))
+        except SQLAlchemyError:
+            if renamed:
+                connection.execute(text(f"ALTER TABLE {temp_table} RENAME TO session"))
+            raise
+        finally:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
 
 def _ensure_course_class_teacher_columns() -> None:
     engine = db.engine

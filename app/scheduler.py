@@ -60,7 +60,23 @@ EXTENDED_BREAKS = _build_extended_breaks()
 
 START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
 
-COURSE_TYPE_CHRONOLOGY: dict[str, int] = {"CM": 0, "TD": 1, "TP": 2, "TEST": 3}
+COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
+    "CM": 0,
+    "TD": 1,
+    "TP": 2,
+    "TEST": 3,
+    "EVAL": 3,
+    "Eval": 3,
+}
+
+
+def _course_type_priority(course_type: str | None) -> int | None:
+    if not course_type:
+        return None
+    priority = COURSE_TYPE_CHRONOLOGY.get(course_type)
+    if priority is not None:
+        return priority
+    return COURSE_TYPE_CHRONOLOGY.get(course_type.upper())
 
 
 def _closed_days_between(start: date, end: date) -> set[date]:
@@ -521,6 +537,7 @@ def _class_sessions_in_week(
     pending_sessions: Iterable[Session] = (),
     *,
     subgroup_label: str | None = None,
+    ignore_session_id: int | None = None,
 ) -> Iterable[Session]:
     target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
 
@@ -536,6 +553,8 @@ def _class_sessions_in_week(
 
     seen: set[int] = set()
     for session in class_group.all_sessions:
+        if ignore_session_id is not None and session.id == ignore_session_id:
+            continue
         marker = id(session)
         if marker in seen:
             continue
@@ -546,6 +565,8 @@ def _class_sessions_in_week(
             seen.add(marker)
             yield session
     for session in pending_sessions:
+        if ignore_session_id is not None and session.id == ignore_session_id:
+            continue
         marker = id(session)
         if marker in seen:
             continue
@@ -557,6 +578,17 @@ def _class_sessions_in_week(
             yield session
 
 
+def _course_family_key(course: Course) -> tuple[str, int | str]:
+    if course.course_name_id is not None:
+        return ("course-name-id", course.course_name_id)
+    configured = course.configured_name
+    if configured is not None and configured.name:
+        return ("course-name", configured.name.lower())
+    if course.id is not None:
+        return ("course-id", course.id)
+    return ("course-name", (course.name or "").lower())
+
+
 def _day_respects_chronology(
     course: Course,
     class_group: ClassGroup,
@@ -564,10 +596,12 @@ def _day_respects_chronology(
     pending_sessions: Iterable[Session] = (),
     *,
     subgroup_label: str | None = None,
+    ignore_session_id: int | None = None,
 ) -> bool:
-    priority = COURSE_TYPE_CHRONOLOGY.get(course.course_type)
+    priority = _course_type_priority(course.course_type)
     if priority is None:
         return True
+    family_key = _course_family_key(course)
     week_start, week_end = _week_bounds(day)
     for session in _class_sessions_in_week(
         class_group,
@@ -575,8 +609,11 @@ def _day_respects_chronology(
         week_end,
         pending_sessions,
         subgroup_label=subgroup_label,
+        ignore_session_id=ignore_session_id,
     ):
-        other_priority = COURSE_TYPE_CHRONOLOGY.get(session.course.course_type)
+        if _course_family_key(session.course) != family_key:
+            continue
+        other_priority = _course_type_priority(session.course.course_type)
         if other_priority is None or other_priority == priority:
             continue
         session_day = session.start_time.date()
@@ -585,6 +622,26 @@ def _day_respects_chronology(
         if other_priority > priority and session_day < day:
             return False
     return True
+
+
+def respects_weekly_chronology(
+    course: Course,
+    class_group: ClassGroup,
+    start: datetime | date,
+    *,
+    subgroup_label: str | None = None,
+    pending_sessions: Iterable[Session] = (),
+    ignore_session_id: int | None = None,
+) -> bool:
+    target_day = start.date() if isinstance(start, datetime) else start
+    return _day_respects_chronology(
+        course,
+        class_group,
+        target_day,
+        pending_sessions,
+        subgroup_label=subgroup_label,
+        ignore_session_id=ignore_session_id,
+    )
 
 
 def _describe_class_unavailability(
@@ -946,7 +1003,9 @@ def _try_full_block(
         end_dt = start_dt + timedelta(hours=desired_hours)
         if not fits_in_windows(start_dt.time(), end_dt.time()):
             continue
-        if not class_group.is_available_during(start_dt, end_dt):
+        if not class_group.is_available_during(
+            start_dt, end_dt, subgroup_label=subgroup_label
+        ):
             if diagnostics is not None:
                 diagnostics.add_class(
                     _describe_class_unavailability(class_group, start_dt, end_dt)
@@ -1049,12 +1108,20 @@ def _try_split_block(
         start_dt = segment_datetimes[0][0]
         end_dt = segment_datetimes[-1][1]
         if not all(
-            class_group.is_available_during(segment_start, segment_end)
+            class_group.is_available_during(
+                segment_start,
+                segment_end,
+                subgroup_label=subgroup_label,
+            )
             for segment_start, segment_end in segment_datetimes
         ):
             if diagnostics is not None:
                 for segment_start, segment_end in segment_datetimes:
-                    if not class_group.is_available_during(segment_start, segment_end):
+                    if not class_group.is_available_during(
+                        segment_start,
+                        segment_end,
+                        subgroup_label=subgroup_label,
+                    ):
                         diagnostics.add_class(
                             _describe_class_unavailability(
                                 class_group,
