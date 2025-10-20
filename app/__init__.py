@@ -1,5 +1,6 @@
 import click
 from collections import defaultdict
+from typing import Optional
 from flask import Flask, current_app
 from flask.cli import with_appcontext
 from flask_migrate import Migrate
@@ -251,10 +252,10 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
     desired_columns = {"class_group_id", "subgroup_label", "start_time"}
     legacy_columns = {"class_group_id", "start_time"}
 
-    unique_structures: list[tuple[str, str | None, set[str]]] = []
-    seen_structures: set[tuple[str, str | None, tuple[str, ...]]] = set()
+    unique_structures: list[tuple[str, Optional[str], set[str]]] = []
+    seen_structures: set[tuple[str, Optional[str], tuple[str, ...]]] = set()
 
-    def _register_structure(kind: str, name: str | None, columns: list[str]) -> None:
+    def _register_structure(kind: str, name: Optional[str], columns: list[str]) -> None:
         column_names = [col for col in columns if col]
         if not column_names:
             return
