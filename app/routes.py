@@ -935,8 +935,42 @@ def dashboard():
             else:
                 flash("Aucune séance n'était planifiée pour ce cours.", "info")
             return redirect(url_for("main.dashboard"))
+        elif request.form.get("form") == "clear-all-sessions":
+            total_removed_sessions = 0
+            total_removed_logs = 0
+            for course in courses:
+                removed_sessions, removed_logs = _clear_course_schedule(course)
+                total_removed_sessions += removed_sessions
+                total_removed_logs += removed_logs
 
-    events = sessions_to_grouped_events(Session.query.all())
+            db.session.commit()
+
+            if total_removed_sessions or total_removed_logs:
+                message_parts: list[str] = []
+                if total_removed_sessions:
+                    message_parts.append(
+                        f"{total_removed_sessions} séance(s) planifiée(s)"
+                    )
+                if total_removed_logs:
+                    message_parts.append(
+                        f"{total_removed_logs} journal(aux) de génération"
+                    )
+                detail = " et ".join(message_parts)
+                flash(
+                    f"{detail} supprimé(s) pour l'ensemble des cours.",
+                    "success",
+                )
+            else:
+                flash(
+                    "Aucune séance planifiée ni journal de génération à supprimer.",
+                    "info",
+                )
+
+            return redirect(url_for("main.dashboard"))
+
+    all_sessions = Session.query.all()
+    events = sessions_to_grouped_events(all_sessions)
+    has_any_scheduled_sessions = len(all_sessions) > 0
     course_summaries: list[dict[str, object]] = []
     for course in courses:
         required_total = course.total_required_hours
@@ -979,6 +1013,7 @@ def dashboard():
         course_type_labels=COURSE_TYPE_LABELS,
         global_search_index_json=json.dumps(global_search_index, ensure_ascii=False),
         status_labels=GENERATION_STATUS_LABELS,
+        has_any_scheduled_sessions=has_any_scheduled_sessions,
     )
 
 

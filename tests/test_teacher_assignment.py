@@ -11,6 +11,7 @@ from app.models import (
     Course,
     CourseClassLink,
     CourseName,
+    CourseScheduleLog,
     Room,
     Session,
     Teacher,
@@ -173,6 +174,95 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         teachers = event["extendedProps"]["teachers"]
         self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
+
+
+class DashboardActionsTestCase(DatabaseTestCase):
+    def test_clear_all_sessions_removes_every_course_schedule(self) -> None:
+        base_name_a = CourseName(name="Analyse")
+        base_name_b = CourseName(name="Algèbre")
+
+        course_a = Course(
+            name=Course.compose_name("CM", base_name_a.name, "S1"),
+            course_type="CM",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name_a,
+        )
+        course_b = Course(
+            name=Course.compose_name("TD", base_name_b.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name_b,
+        )
+
+        class_a = ClassGroup(name="INFO2", size=24)
+        class_b = ClassGroup(name="INFO3", size=24)
+        link_a = CourseClassLink(class_group=class_a)
+        link_b = CourseClassLink(class_group=class_b)
+        course_a.class_links.append(link_a)
+        course_b.class_links.append(link_b)
+
+        teacher = Teacher(name="Claire")
+        room = Room(name="B103", capacity=30)
+
+        session_a = Session(
+            course=course_a,
+            teacher=teacher,
+            room=room,
+            class_group=class_a,
+            start_time=datetime(2024, 1, 8, 8, 0, 0),
+            end_time=datetime(2024, 1, 8, 10, 0, 0),
+        )
+        session_a.attendees = [class_a]
+
+        session_b = Session(
+            course=course_b,
+            teacher=teacher,
+            room=room,
+            class_group=class_b,
+            start_time=datetime(2024, 1, 9, 10, 0, 0),
+            end_time=datetime(2024, 1, 9, 12, 0, 0),
+        )
+        session_b.attendees = [class_b]
+
+        log_a = CourseScheduleLog(course=course_a, status="success", summary="OK")
+        log_b = CourseScheduleLog(course=course_b, status="warning", summary="Warn")
+
+        db.session.add_all(
+            [
+                base_name_a,
+                base_name_b,
+                course_a,
+                course_b,
+                class_a,
+                class_b,
+                teacher,
+                room,
+                session_a,
+                session_b,
+                log_a,
+                log_b,
+            ]
+        )
+        db.session.commit()
+
+        self.assertEqual(Session.query.count(), 2)
+        self.assertEqual(CourseScheduleLog.query.count(), 2)
+
+        client = self.app.test_client()
+        base_path = self.app.config.get("URL_PREFIX", "") or ""
+        response = client.post(
+            f"{base_path}/",
+            data={"form": "clear-all-sessions"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Session.query.count(), 0)
+        self.assertEqual(CourseScheduleLog.query.count(), 0)
 
 
 class SubgroupParallelismTestCase(DatabaseTestCase):
