@@ -4,7 +4,10 @@ import json
 import logging
 from collections import Counter
 from datetime import date, datetime, time, timedelta
-from typing import Iterable, List, Optional, Set
+from itertools import permutations
+from typing import Iterable, List, Optional, Sequence, Set
+
+from sqlalchemy import inspect
 
 from flask import current_app
 
@@ -1510,7 +1513,7 @@ def _resolve_schedule_window(
     return start, end
 
 
-def generate_schedule(
+def _generate_schedule_attempt(
     course: Course,
     *,
     window_start: date | None = None,
@@ -2049,6 +2052,186 @@ def generate_schedule(
                     f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
                 )
     reporter.info(f"Total de séances générées : {len(created_sessions)}")
-    progress.complete(f"{len(created_sessions)} séance(s) générée(s)")
     reporter.finalise(len(created_sessions))
     return created_sessions
+
+
+def _snapshot_teacher_assignments(
+    course: Course,
+) -> list[tuple[CourseClassLink, str | None, Teacher | None]]:
+    assignments: list[tuple[CourseClassLink, str | None, Teacher | None]] = []
+    for link in sorted(course.class_links, key=lambda l: l.class_group.name.lower()):
+        if link.group_count == 2:
+            assignments.append((link, "A", link.teacher_a))
+            assignments.append((link, "B", link.teacher_b))
+        else:
+            assignments.append((link, None, link.teacher_a or link.teacher_b))
+    return assignments
+
+
+def _apply_teacher_assignment(
+    assignment: tuple[CourseClassLink, str | None, Teacher | None],
+    teacher: Teacher | None,
+) -> None:
+    link, label, _ = assignment
+    if link.group_count == 2:
+        if label == "B":
+            link.teacher_b = teacher
+        else:
+            # Default to subgroup A when the label is None or explicitly "A"
+            link.teacher_a = teacher
+    else:
+        link.teacher_a = teacher
+        link.teacher_b = None
+
+
+def _restore_teacher_assignments(
+    assignments: Sequence[tuple[CourseClassLink, str | None, Teacher | None]]
+) -> None:
+    for assignment in assignments:
+        _apply_teacher_assignment(assignment, assignment[2])
+
+
+def _backup_course_sessions(course: Course) -> list[dict[str, object]]:
+    backups: list[dict[str, object]] = []
+    for session in list(course.sessions):
+        backups.append(
+            {
+                "teacher": session.teacher,
+                "room": session.room,
+                "class_group": session.class_group,
+                "subgroup_label": session.subgroup_label,
+                "start_time": session.start_time,
+                "end_time": session.end_time,
+                "attendees": list(session.attendees or []),
+            }
+        )
+    return backups
+
+
+def _restore_course_sessions(course: Course, backups: list[dict[str, object]]) -> None:
+    for payload in backups:
+        session = Session(
+            course=course,
+            teacher=payload.get("teacher"),
+            room=payload.get("room"),
+            class_group=payload.get("class_group"),
+            subgroup_label=payload.get("subgroup_label"),
+            start_time=payload["start_time"],
+            end_time=payload["end_time"],
+        )
+        session.attendees = list(payload.get("attendees", []))
+        db.session.add(session)
+    db.session.flush()
+
+
+def _remove_course_sessions(course: Course) -> None:
+    for session in list(course.sessions):
+        state = inspect(session)
+        if state.detached or state.deleted:
+            continue
+        db.session.delete(session)
+    db.session.flush()
+
+
+def _iter_teacher_permutations(
+    assignments: Sequence[tuple[CourseClassLink, str | None, Teacher | None]]
+) -> list[tuple[Teacher, ...]]:
+    teachers = [teacher for _, _, teacher in assignments if teacher is not None]
+    if len(teachers) <= 1:
+        return []
+    original_order = tuple(teacher.id for teacher in teachers)
+    seen: set[tuple[int | None, ...]] = set()
+    variants: list[tuple[Teacher, ...]] = []
+    for perm in permutations(teachers):
+        perm_signature = tuple(teacher.id for teacher in perm)
+        if perm_signature == original_order:
+            continue
+        if perm_signature in seen:
+            continue
+        seen.add(perm_signature)
+        variants.append(perm)
+    return variants
+
+
+def generate_schedule(
+    course: Course,
+    *,
+    window_start: date | None = None,
+    window_end: date | None = None,
+    allowed_weeks: Iterable[tuple[date, date]] | None = None,
+    progress: ScheduleProgress | None = None,
+    allow_teacher_permutations: bool = True,
+) -> list[Session]:
+    progress = progress or NullScheduleProgress()
+    logs_before = {log.id for log in course.generation_logs if log.id is not None}
+    created_sessions = _generate_schedule_attempt(
+        course,
+        window_start=window_start,
+        window_end=window_end,
+        allowed_weeks=allowed_weeks,
+        progress=progress,
+    )
+    if created_sessions:
+        return created_sessions
+    logs_after_first = {log.id for log in course.generation_logs if log.id is not None}
+    first_attempt_log_ids = {
+        log_id for log_id in logs_after_first if log_id not in logs_before
+    }
+
+    if not allow_teacher_permutations:
+        return created_sessions
+    missing_hours = max(course.total_required_hours - course.scheduled_hours, 0)
+    if missing_hours <= 0:
+        return created_sessions
+    assignments = _snapshot_teacher_assignments(course)
+    permutations_to_try = _iter_teacher_permutations(assignments)
+    if not permutations_to_try:
+        return created_sessions
+    original_assignments = list(assignments)
+    session_backups = _backup_course_sessions(course)
+    # remove sessions before attempting permutations
+    _remove_course_sessions(course)
+    success_sessions: list[Session] | None = None
+    try:
+        for variant in permutations_to_try:
+            # restore assignments baseline before applying permutation
+            _restore_teacher_assignments(original_assignments)
+            variant_iter = iter(variant)
+            for entry in assignments:
+                if entry[2] is None:
+                    _apply_teacher_assignment(entry, None)
+                    continue
+                teacher = next(variant_iter)
+                _apply_teacher_assignment(entry, teacher)
+            # ensure no sessions remain from previous attempt
+            _remove_course_sessions(course)
+            attempt_logs_before = {
+                log.id for log in course.generation_logs if log.id is not None
+            }
+            candidate_sessions = _generate_schedule_attempt(
+                course,
+                window_start=window_start,
+                window_end=window_end,
+                allowed_weeks=allowed_weeks,
+                progress=progress,
+            )
+            if candidate_sessions:
+                success_sessions = candidate_sessions
+                break
+            # remove logs produced by failed attempt
+            for log in list(course.generation_logs):
+                if log.id is None or log.id not in attempt_logs_before:
+                    db.session.delete(log)
+            _remove_course_sessions(course)
+    finally:
+        if success_sessions is None:
+            # restore original assignments and sessions if no permutation succeeded
+            _restore_teacher_assignments(original_assignments)
+            _remove_course_sessions(course)
+            _restore_course_sessions(course, session_backups)
+    if success_sessions is not None and first_attempt_log_ids:
+        for log in list(course.generation_logs):
+            if log.id is not None and log.id in first_attempt_log_ids:
+                db.session.delete(log)
+    return success_sessions or created_sessions

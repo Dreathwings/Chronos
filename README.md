@@ -98,6 +98,22 @@ Pour utiliser la génération automatique depuis la fiche d'un cours (`/matiere/
 
 En cas d'échec (séances restantes), un avertissement est consigné dans les logs et vous pouvez compléter la planification manuellement à l'aide du formulaire « Ajouter une séance manuelle ».
 
+## Critères vérifiés lors de la génération automatique
+
+La génération automatique et la validation des séances appliquent les règles suivantes :
+
+- les séances sont positionnées uniquement du **lundi au vendredi** ;
+- les **périodes de fermeture** déclarées bloquent tout créneau recoupant ces dates ;
+- chaque séance doit tenir dans les **fenêtres horaires de travail** configurées (08 h–18 h avec les pauses définies) ;
+- l'enseignant affecté doit être **disponible sur la plage horaire** (créneaux hebdomadaires et absences exceptionnelles) et ne pas déjà animer une autre séance en conflit ;
+- les classes/groupe(s) présents doivent être **disponibles sur le créneau** (prise en compte des indisponibilités et de l'appartenance à un sous-groupe) sans chevauchement avec d'autres séances ;
+- la **chronologie CM → TD → TP → Éval** est respectée sur la semaine pour chaque classe ;
+- la salle retenue doit offrir une **capacité suffisante** pour l'effectif cumulé ;
+- lorsque des postes informatiques sont requis, la salle doit disposer d'un **nombre de postes au moins égal** à la demande ;
+- tous les **équipements matériels obligatoires** du cours doivent être présents dans la salle sélectionnée ;
+- les logiciels requis sont privilégiés et toute incompatibilité restante est signalée dans les diagnostics de génération ;
+- les contraintes de **fenêtres de semestre** et de semaines autorisées sont prises en compte avant toute planification.
+
 ## Modifier le comportement de l'algorithme
 
 L'algorithme de génération automatique est centralisé dans [`app/scheduler.py`](app/scheduler.py). Les principales zones à ajuster sont :
