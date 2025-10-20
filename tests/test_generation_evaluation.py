@@ -172,6 +172,79 @@ class GenerationEvaluationTestCase(DatabaseTestCase):
             any("Affectation ajustée" in message for message in result["messages"])
         )
 
+    def test_tp_missing_td_marks_error(self) -> None:
+        base_name = CourseName(name="Physique")
+        class_group = ClassGroup(name="INFO2", size=24)
+        td_course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        tp_course = Course(
+            name=Course.compose_name("TP", base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        td_course.class_links.append(CourseClassLink(class_group=class_group, group_count=2))
+        tp_course.class_links.append(CourseClassLink(class_group=class_group, group_count=2))
+
+        teacher = Teacher(name="Paul")
+        room = Room(name="C101", capacity=28)
+
+        db.session.add_all([base_name, class_group, td_course, tp_course, teacher, room])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        td_session = Session(
+            course=td_course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            subgroup_label="A",
+            start_time=datetime(2024, 1, 8, 8, 0, 0),
+            end_time=datetime(2024, 1, 8, 10, 0, 0),
+        )
+        td_session.attendees = [class_group]
+
+        tp_session = Session(
+            course=tp_course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            subgroup_label="A",
+            start_time=datetime(2024, 1, 10, 10, 15, 0),
+            end_time=datetime(2024, 1, 10, 12, 15, 0),
+        )
+        tp_session.attendees = [class_group]
+
+        db.session.add_all([td_session, tp_session])
+        db.session.commit()
+
+        refreshed = db.session.get(Course, tp_course.id)
+        result = _evaluate_course_generation(refreshed)
+
+        self.assertEqual(result["status"], "error")
+        self.assertTrue(
+            any("TD des deux demi-groupes" in message for message in result["messages"])
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

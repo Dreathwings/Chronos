@@ -48,6 +48,7 @@ from .scheduler import (
     generate_schedule,
     overlaps,
     respects_weekly_chronology,
+    tp_groups_have_completed_td,
 )
 from .utils import (
     parse_unavailability_ranges,
@@ -660,6 +661,19 @@ def _validate_session_constraints(
                 "La séance ne respecte pas la chronologie CM → TD → TP → Eval "
                 "sur la semaine."
             )
+        prerequisites_met, missing_labels = tp_groups_have_completed_td(
+            course,
+            class_group,
+            start_dt,
+            subgroup_label=subgroup_label,
+            ignore_session_id=ignore_session_id,
+        )
+        if not prerequisites_met:
+            detail = ", ".join(missing_labels)
+            return (
+                "Les TD des deux demi-groupes doivent précéder les TP "
+                f"(manquants : {detail})."
+            )
     required_capacity = sum(course.capacity_needed_for(group) for group in class_groups)
     if room.capacity < required_capacity:
         return (
@@ -735,6 +749,29 @@ def _evaluate_course_generation(course: Course) -> dict[str, object]:
                 status = "error"
                 timestamp = session.start_time.strftime("%d/%m/%Y %H:%M")
                 messages.append(f"{timestamp} — {error}")
+                continue
+            missing_by_group: list[str] = []
+            timestamp = session.start_time.strftime("%d/%m/%Y %H:%M")
+            for class_group in class_groups:
+                prerequisites_met, missing_labels = tp_groups_have_completed_td(
+                    course,
+                    class_group,
+                    session.start_time,
+                    subgroup_label=class_group_labels.get(class_group.id)
+                    if class_group_labels and class_group.id is not None
+                    else None,
+                    ignore_session_id=session.id,
+                )
+                if not prerequisites_met:
+                    detail = ", ".join(missing_labels)
+                    missing_by_group.append(f"{class_group.name} ({detail})")
+            if missing_by_group:
+                status = "error"
+                detail = ", ".join(missing_by_group)
+                messages.append(
+                    "{} — Les TD des deux demi-groupes doivent précéder les TP "
+                    "(manquants : {}).".format(timestamp, detail)
+                )
     elif required_total > 0:
         status = "warning"
         messages.append("Aucune séance n'est planifiée pour ce cours.")

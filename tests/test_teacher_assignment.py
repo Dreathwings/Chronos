@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import datetime, time
 from unittest.mock import MagicMock, patch
@@ -20,6 +21,7 @@ from app.models import (
 )
 from sqlalchemy import text
 from app.routes import _validate_session_constraints
+from app.scheduler import generate_schedule
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -779,6 +781,124 @@ class ChronologyValidationTestCase(DatabaseTestCase):
             end_dt,
         )
         self.assertIsNone(error)
+
+
+class TpTdPrerequisiteValidationTestCase(DatabaseTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.class_group = ClassGroup(name="INFO4", size=26)
+        self.teacher = Teacher(name="Emma")
+        self.room = Room(name="D101", capacity=30)
+        self.base_name = CourseName(name="Programmation avancée")
+        self.course_td = Course(
+            name=Course.compose_name("TD", self.base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=self.base_name,
+        )
+        self.course_tp = Course(
+            name=Course.compose_name("TP", self.base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=self.base_name,
+        )
+        self.td_link = CourseClassLink(class_group=self.class_group, group_count=2)
+        self.tp_link = CourseClassLink(class_group=self.class_group, group_count=2)
+        self.course_td.class_links.append(self.td_link)
+        self.course_tp.class_links.append(self.tp_link)
+        self.course_tp.teachers.append(self.teacher)
+
+        db.session.add_all(
+            [
+                self.class_group,
+                self.teacher,
+                self.room,
+                self.base_name,
+                self.course_td,
+                self.course_tp,
+            ]
+        )
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=self.teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+    def _create_td_session(self, subgroup_label: str, day: int) -> None:
+        start = datetime(2024, 1, day, 8, 0, 0)
+        end = datetime(2024, 1, day, 10, 0, 0)
+        session = Session(
+            course=self.course_td,
+            teacher=self.teacher,
+            room=self.room,
+            class_group=self.class_group,
+            subgroup_label=subgroup_label,
+            start_time=start,
+            end_time=end,
+        )
+        session.attendees = [self.class_group]
+        db.session.add(session)
+        db.session.commit()
+
+    def test_validation_blocks_tp_when_only_one_td_completed(self) -> None:
+        self._create_td_session("A", 8)
+
+        start_dt = datetime(2024, 1, 10, 10, 15, 0)
+        end_dt = datetime(2024, 1, 10, 12, 15, 0)
+        error = _validate_session_constraints(
+            self.course_tp,
+            self.teacher,
+            self.room,
+            [self.class_group],
+            start_dt,
+            end_dt,
+            class_group_labels={self.class_group.id: "A"},
+        )
+        self.assertIsNotNone(error)
+        self.assertIn("TD des deux demi-groupes", error)
+
+    def test_validation_allows_tp_once_both_td_completed(self) -> None:
+        self._create_td_session("A", 8)
+        self._create_td_session("B", 9)
+
+        start_dt = datetime(2024, 1, 15, 10, 15, 0)
+        end_dt = datetime(2024, 1, 15, 12, 15, 0)
+        error = _validate_session_constraints(
+            self.course_tp,
+            self.teacher,
+            self.room,
+            [self.class_group],
+            start_dt,
+            end_dt,
+            class_group_labels={self.class_group.id: "B"},
+        )
+        self.assertIsNone(error)
+
+    def test_generation_blocks_until_both_td_completed(self) -> None:
+        self.tp_link.teacher_a = self.teacher
+        db.session.commit()
+
+        created = generate_schedule(self.course_tp)
+
+        self.assertEqual(len(created), 0)
+        log = self.course_tp.latest_generation_log
+        self.assertIsNotNone(log)
+        entries = json.loads(log.messages or "[]")
+        self.assertTrue(
+            any("TD manquant" in (entry.get("message") or "") for entry in entries)
+        )
 
 
 class EquipmentValidationTestCase(DatabaseTestCase):

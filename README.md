@@ -108,6 +108,7 @@ La génération automatique et la validation des séances appliquent les règles
 - l'enseignant affecté doit être **disponible sur la plage horaire** (créneaux hebdomadaires et absences exceptionnelles) et ne pas déjà animer une autre séance en conflit ;
 - les classes/groupe(s) présents doivent être **disponibles sur le créneau** (prise en compte des indisponibilités et de l'appartenance à un sous-groupe) sans chevauchement avec d'autres séances ;
 - la **chronologie CM → TD → TP → Éval** est respectée sur la semaine pour chaque classe ;
+- pour les TP organisés en deux demi-groupes, les **deux TD correspondants doivent avoir eu lieu** avant toute séance de TP ;
 - la salle retenue doit offrir une **capacité suffisante** pour l'effectif cumulé ;
 - lorsque des postes informatiques sont requis, la salle doit disposer d'un **nombre de postes au moins égal** à la demande ;
 - tous les **équipements matériels obligatoires** du cours doivent être présents dans la salle sélectionnée ;

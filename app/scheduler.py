@@ -592,6 +592,85 @@ def _course_family_key(course: Course) -> tuple[str, int | str]:
     return ("course-name", (course.name or "").lower())
 
 
+def tp_groups_have_completed_td(
+    course: Course,
+    class_group: ClassGroup,
+    reference_start: datetime,
+    *,
+    subgroup_label: str | None = None,
+    pending_sessions: Iterable[Session] = (),
+    ignore_session_id: int | None = None,
+) -> tuple[bool, list[str]]:
+    """Return whether every TP subgroup has completed a TD before ``reference_start``.
+
+    The rule applies only when the course corresponds to TP sessions split in two
+    subgroups.  It inspects the sessions linked to the same course family to ensure
+    both TD subgroups (or a whole-class TD) occurred before the TP slot.
+    """
+
+    if not course.is_tp:
+        return True, []
+    link = course.class_link_for(class_group)
+    if link is None or link.group_count < 2:
+        return True, []
+
+    raw_labels = link.group_labels()
+    required_labels: list[str | None] = []
+    for label in raw_labels:
+        normalised = _normalise_label(label) or None
+        if normalised not in required_labels:
+            required_labels.append(normalised)
+    if not required_labels:
+        return True, []
+
+    family_key = _course_family_key(course)
+    completed: set[str | None] = set()
+
+    def _consider(session: Session) -> None:
+        if ignore_session_id is not None and session.id == ignore_session_id:
+            return
+        if session.start_time >= reference_start:
+            return
+        if not _session_involves_class(session, class_group):
+            return
+        if _course_family_key(session.course) != family_key:
+            return
+        if _course_type_priority(session.course.course_type) != _course_type_priority("TD"):
+            return
+        label = _normalise_label(session.subgroup_label) or None
+        if label is None:
+            completed.update(required_labels)
+        else:
+            completed.add(label)
+
+    seen: set[int] = set()
+    for session in class_group.all_sessions:
+        marker = id(session)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        _consider(session)
+
+    pending_seen: set[int] = set()
+    for session in pending_sessions:
+        marker = id(session)
+        if marker in pending_seen:
+            continue
+        pending_seen.add(marker)
+        _consider(session)
+
+    missing = [label for label in required_labels if label not in completed]
+    if not missing:
+        return True, []
+
+    def _label_display(label: str | None) -> str:
+        if label is None:
+            return "classe entière"
+        return f"groupe {label}"
+
+    return False, [_label_display(label) for label in missing]
+
+
 def _day_respects_chronology(
     course: Course,
     class_group: ClassGroup,
@@ -940,6 +1019,7 @@ def _schedule_block_for_day(
     desired_hours: int,
     base_offset: int,
     reporter: ScheduleReporter | None = None,
+    pending_sessions: Iterable[Session] = (),
 ) -> list[Session] | None:
     diagnostics = PlacementDiagnostics()
     context = class_group.name
@@ -954,6 +1034,7 @@ def _schedule_block_for_day(
         desired_hours=desired_hours,
         base_offset=base_offset,
         diagnostics=diagnostics,
+        pending_sessions=pending_sessions,
     )
     if placement:
         return placement
@@ -973,6 +1054,7 @@ def _schedule_block_for_day(
         desired_hours=desired_hours,
         base_offset=base_offset,
         diagnostics=diagnostics,
+        pending_sessions=pending_sessions,
     )
     if placement:
         return placement
@@ -994,6 +1076,7 @@ def _try_full_block(
     desired_hours: int,
     base_offset: int,
     diagnostics: PlacementDiagnostics | None = None,
+    pending_sessions: Iterable[Session] = (),
 ) -> list[Session] | None:
     required_capacity = course.capacity_needed_for(class_group)
     target_class_ids = (
@@ -1051,6 +1134,20 @@ def _try_full_block(
                     )
                 )
             continue
+        prerequisites_met, missing_labels = tp_groups_have_completed_td(
+            course,
+            class_group,
+            start_dt,
+            subgroup_label=subgroup_label,
+            pending_sessions=pending_sessions,
+        )
+        if not prerequisites_met:
+            if diagnostics is not None:
+                detail = ", ".join(missing_labels)
+                diagnostics.add_other(
+                    "TD manquant avant TP pour " f"{detail}"
+                )
+            continue
         session = Session(
             course=course,
             teacher=teacher,
@@ -1081,6 +1178,7 @@ def _try_split_block(
     desired_hours: int,
     base_offset: int,
     diagnostics: PlacementDiagnostics | None = None,
+    pending_sessions: Iterable[Session] = (),
 ) -> list[Session] | None:
     segment_lengths = [2, 2] if desired_hours == 4 else [1] * desired_hours
     segment_count = sum(segment_lengths)
@@ -1190,6 +1288,20 @@ def _try_split_block(
         if not valid:
             continue
         sessions: list[Session] = []
+        prerequisites_met, missing_labels = tp_groups_have_completed_td(
+            course,
+            class_group,
+            segment_datetimes[0][0],
+            subgroup_label=subgroup_label,
+            pending_sessions=pending_sessions,
+        )
+        if not prerequisites_met:
+            if diagnostics is not None:
+                detail = ", ".join(missing_labels)
+                diagnostics.add_other(
+                    "TD manquant avant TP pour " f"{detail}"
+                )
+            continue
         for idx, (seg_start, seg_end) in enumerate(segment_datetimes):
             session = Session(
                 course=course,
@@ -2003,6 +2115,7 @@ def _generate_schedule_attempt(
                             desired_hours=desired_hours,
                             base_offset=base_offset,
                             reporter=reporter,
+                            pending_sessions=created_sessions,
                         )
                         if not block_sessions:
                             continue
