@@ -901,6 +901,108 @@ class TpTdPrerequisiteValidationTestCase(DatabaseTestCase):
         )
 
 
+class TpPrerequisiteOptionalTestCase(DatabaseTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.class_group = ClassGroup(name="INFO5", size=22)
+        self.teacher = Teacher(name="Léa")
+        self.room = Room(name="E101", capacity=28)
+        self.base_name = CourseName(name="Robotique")
+        self.course_tp = Course(
+            name=Course.compose_name("TP", self.base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=self.base_name,
+        )
+        self.tp_link = CourseClassLink(class_group=self.class_group, group_count=2)
+        self.course_tp.class_links.append(self.tp_link)
+        self.course_tp.teachers.append(self.teacher)
+
+        db.session.add_all(
+            [
+                self.class_group,
+                self.teacher,
+                self.room,
+                self.base_name,
+                self.course_tp,
+            ]
+        )
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=self.teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+    def test_validation_allows_tp_without_td_course(self) -> None:
+        start_dt = datetime(2024, 1, 9, 10, 15, 0)
+        end_dt = datetime(2024, 1, 9, 12, 15, 0)
+        error = _validate_session_constraints(
+            self.course_tp,
+            self.teacher,
+            self.room,
+            [self.class_group],
+            start_dt,
+            end_dt,
+            class_group_labels={self.class_group.id: "A"},
+        )
+        self.assertIsNone(error)
+
+    def test_generation_allows_tp_when_no_matching_td_exists(self) -> None:
+        self.tp_link.teacher_a = self.teacher
+        db.session.commit()
+
+        created = generate_schedule(self.course_tp)
+
+        self.assertGreater(len(created), 0)
+        log = self.course_tp.latest_generation_log
+        if log is not None:
+            entries = json.loads(log.messages or "[]")
+            self.assertFalse(
+                any(
+                    isinstance(entry, dict)
+                    and "TD manquant" in (entry.get("message") or "")
+                    for entry in entries
+                )
+            )
+
+    def test_prerequisite_ignored_for_other_semester_td(self) -> None:
+        other_td = Course(
+            name=Course.compose_name("TD", self.base_name.name, "S2"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S2",
+            configured_name=self.base_name,
+        )
+        other_link = CourseClassLink(class_group=self.class_group, group_count=2)
+        other_td.class_links.append(other_link)
+        db.session.add(other_td)
+        db.session.commit()
+
+        start_dt = datetime(2024, 1, 11, 10, 15, 0)
+        end_dt = datetime(2024, 1, 11, 12, 15, 0)
+        error = _validate_session_constraints(
+            self.course_tp,
+            self.teacher,
+            self.room,
+            [self.class_group],
+            start_dt,
+            end_dt,
+            class_group_labels={self.class_group.id: "B"},
+        )
+        self.assertIsNone(error)
+
+
 class EquipmentValidationTestCase(DatabaseTestCase):
     def setUp(self) -> None:
         super().setUp()

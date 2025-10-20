@@ -245,6 +245,58 @@ class GenerationEvaluationTestCase(DatabaseTestCase):
             any("TD des deux demi-groupes" in message for message in result["messages"])
         )
 
+    def test_tp_without_td_course_is_allowed(self) -> None:
+        base_name = CourseName(name="Chimie")
+        class_group = ClassGroup(name="INFO3", size=24)
+        tp_course = Course(
+            name=Course.compose_name("TP", base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        tp_course.class_links.append(CourseClassLink(class_group=class_group, group_count=2))
+
+        teacher = Teacher(name="Zoé")
+        room = Room(name="D201", capacity=28)
+
+        db.session.add_all([base_name, class_group, tp_course, teacher, room])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        session = Session(
+            course=tp_course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            subgroup_label="A",
+            start_time=datetime(2024, 1, 15, 8, 0, 0),
+            end_time=datetime(2024, 1, 15, 10, 0, 0),
+        )
+        session.attendees = [class_group]
+        db.session.add(session)
+        db.session.commit()
+
+        refreshed = db.session.get(Course, tp_course.id)
+        result = _evaluate_course_generation(refreshed)
+
+        self.assertNotEqual(result["status"], "error")
+        self.assertFalse(
+            any("TD des deux demi-groupes" in message for message in result["messages"])
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

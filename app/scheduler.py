@@ -592,6 +592,32 @@ def _course_family_key(course: Course) -> tuple[str, int | str]:
     return ("course-name", (course.name or "").lower())
 
 
+def _tp_prerequisite_applies(course: Course, class_group: ClassGroup) -> bool:
+    """Return whether the TD-before-TP prerequisite applies to this course/class."""
+
+    if not course.is_tp:
+        return False
+
+    td_priority = _course_type_priority("TD")
+    if td_priority is None:
+        return False
+
+    family_key = _course_family_key(course)
+    for link in class_group.course_links:
+        other_course = getattr(link, "course", None)
+        if other_course is None:
+            continue
+        if other_course.id == course.id:
+            continue
+        if other_course.semester and course.semester and other_course.semester != course.semester:
+            continue
+        if _course_family_key(other_course) != family_key:
+            continue
+        if _course_type_priority(other_course.course_type) == td_priority:
+            return True
+    return False
+
+
 def tp_groups_have_completed_td(
     course: Course,
     class_group: ClassGroup,
@@ -604,11 +630,12 @@ def tp_groups_have_completed_td(
     """Return whether every TP subgroup has completed a TD before ``reference_start``.
 
     The rule applies only when the course corresponds to TP sessions split in two
-    subgroups.  It inspects the sessions linked to the same course family to ensure
-    both TD subgroups (or a whole-class TD) occurred before the TP slot.
+    subgroups and an associated TD exists in the same semester.  It inspects the
+    sessions linked to the same course family to ensure both TD subgroups (or a
+    whole-class TD) occurred before the TP slot.
     """
 
-    if not course.is_tp:
+    if not _tp_prerequisite_applies(course, class_group):
         return True, []
     link = course.class_link_for(class_group)
     if link is None or link.group_count < 2:
