@@ -185,6 +185,41 @@ class SubgroupParallelismTestCase(DatabaseTestCase):
         inspector.get_unique_constraints.return_value = [
             {"name": "uq_class_start_time", "column_names": ["class_group_id", "start_time"]}
         ]
+        inspector.get_indexes.return_value = []
+
+        original_name = engine.dialect.name
+        with patch("app.inspect", return_value=inspector):
+            with patch.object(engine, "begin", return_value=begin_cm):
+                engine.dialect.name = "mysql"
+                try:
+                    _ensure_session_subgroup_uniqueness_constraint()
+                finally:
+                    engine.dialect.name = original_name
+
+        executed = [call.args[0].text for call in connection.execute.call_args_list]
+        self.assertIn("ALTER TABLE session DROP INDEX uq_class_start_time", executed)
+        self.assertIn(
+            "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)",
+            executed,
+        )
+
+    def test_uniqueness_constraint_upgrade_drops_unique_index(self) -> None:
+        engine = db.engine
+        connection = MagicMock()
+        begin_cm = MagicMock()
+        begin_cm.__enter__.return_value = connection
+        begin_cm.__exit__.return_value = False
+
+        inspector = MagicMock()
+        inspector.get_table_names.return_value = ["session"]
+        inspector.get_unique_constraints.return_value = []
+        inspector.get_indexes.return_value = [
+            {
+                "name": "uq_class_start_time",
+                "column_names": ["class_group_id", "start_time"],
+                "unique": True,
+            }
+        ]
 
         original_name = engine.dialect.name
         with patch("app.inspect", return_value=inspector):

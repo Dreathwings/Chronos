@@ -242,14 +242,35 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
 
     desired_columns = {"class_group_id", "subgroup_label", "start_time"}
     unique_constraints = inspector.get_unique_constraints("session")
-    constraint = next((uc for uc in unique_constraints if uc.get("name") == "uq_class_start_time"), None)
-    if constraint and set(constraint.get("column_names", [])) == desired_columns:
+    constraint = next(
+        (uc for uc in unique_constraints if uc.get("name") == "uq_class_start_time"),
+        None,
+    )
+
+    index = next(
+        (
+            idx
+            for idx in inspector.get_indexes("session")
+            if idx.get("name") == "uq_class_start_time" and idx.get("unique")
+        ),
+        None,
+    )
+
+    existing_columns = None
+    if constraint and constraint.get("column_names"):
+        existing_columns = set(constraint["column_names"])
+    elif index and index.get("column_names"):
+        existing_columns = set(index["column_names"])
+
+    if existing_columns == desired_columns:
         return
 
     dialect = engine.dialect.name
     statements: list[str] = []
+    drop_mysql_index = constraint is not None or index is not None
+
     if dialect == "mysql":
-        if constraint:
+        if drop_mysql_index:
             statements.append("ALTER TABLE session DROP INDEX uq_class_start_time")
         statements.append("ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)")
     elif dialect == "postgresql":
