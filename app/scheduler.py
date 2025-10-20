@@ -578,6 +578,17 @@ def _class_sessions_in_week(
             yield session
 
 
+def _course_family_key(course: Course) -> tuple[str, int | str]:
+    if course.course_name_id is not None:
+        return ("course-name-id", course.course_name_id)
+    configured = course.configured_name
+    if configured is not None and configured.name:
+        return ("course-name", configured.name.lower())
+    if course.id is not None:
+        return ("course-id", course.id)
+    return ("course-name", (course.name or "").lower())
+
+
 def _day_respects_chronology(
     course: Course,
     class_group: ClassGroup,
@@ -590,6 +601,7 @@ def _day_respects_chronology(
     priority = _course_type_priority(course.course_type)
     if priority is None:
         return True
+    family_key = _course_family_key(course)
     week_start, week_end = _week_bounds(day)
     for session in _class_sessions_in_week(
         class_group,
@@ -599,6 +611,8 @@ def _day_respects_chronology(
         subgroup_label=subgroup_label,
         ignore_session_id=ignore_session_id,
     ):
+        if _course_family_key(session.course) != family_key:
+            continue
         other_priority = _course_type_priority(session.course.course_type)
         if other_priority is None or other_priority == priority:
             continue

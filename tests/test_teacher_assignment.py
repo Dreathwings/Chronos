@@ -12,6 +12,7 @@ from app.models import (
     CourseClassLink,
     CourseName,
     CourseScheduleLog,
+    Equipment,
     Room,
     Session,
     Teacher,
@@ -738,6 +739,112 @@ class ChronologyValidationTestCase(DatabaseTestCase):
             self.course_td,
             self.teacher,
             self.room,
+            [self.class_group],
+            start_dt,
+            end_dt,
+        )
+        self.assertIsNone(error)
+
+    def test_validation_ignores_other_subject_sessions(self) -> None:
+        other_name = CourseName(name="Mathématiques")
+        other_cm = Course(
+            name=Course.compose_name("CM", other_name.name, "S1"),
+            course_type="CM",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=other_name,
+        )
+        other_cm.class_links.append(CourseClassLink(class_group=self.class_group))
+        other_session = Session(
+            course=other_cm,
+            teacher=self.teacher,
+            room=self.room,
+            class_group=self.class_group,
+            start_time=datetime(2024, 1, 12, 13, 30, 0),
+            end_time=datetime(2024, 1, 12, 15, 30, 0),
+        )
+        other_session.attendees = [self.class_group]
+        db.session.add_all([other_name, other_cm, other_session])
+        db.session.commit()
+
+        start_dt = datetime(2024, 1, 12, 8, 0, 0)
+        end_dt = datetime(2024, 1, 12, 10, 0, 0)
+        error = _validate_session_constraints(
+            self.course_td,
+            self.teacher,
+            self.room,
+            [self.class_group],
+            start_dt,
+            end_dt,
+        )
+        self.assertIsNone(error)
+
+
+class EquipmentValidationTestCase(DatabaseTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.class_group = ClassGroup(name="INFO3", size=20)
+        self.teacher = Teacher(name="Didier")
+        self.room_without_equipment = Room(name="B101", capacity=24)
+        self.room_with_equipment = Room(name="B102", capacity=24)
+        self.projector = Equipment(name="Vidéoprojecteur")
+        self.course = Course(
+            name="TP - Audiovisuel - S1",
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+        )
+        self.course.class_links.append(CourseClassLink(class_group=self.class_group))
+        self.course.equipments.append(self.projector)
+        self.room_with_equipment.equipments.append(self.projector)
+
+        db.session.add_all(
+            [
+                self.class_group,
+                self.teacher,
+                self.room_without_equipment,
+                self.room_with_equipment,
+                self.projector,
+                self.course,
+            ]
+        )
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=self.teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+    def test_validation_blocks_room_missing_equipment(self) -> None:
+        start_dt = datetime(2024, 1, 8, 8, 0, 0)
+        end_dt = datetime(2024, 1, 8, 10, 0, 0)
+        error = _validate_session_constraints(
+            self.course,
+            self.teacher,
+            self.room_without_equipment,
+            [self.class_group],
+            start_dt,
+            end_dt,
+        )
+        self.assertIsNotNone(error)
+        self.assertIn("équipement", error.lower())
+
+    def test_validation_allows_room_with_required_equipment(self) -> None:
+        start_dt = datetime(2024, 1, 8, 10, 15, 0)
+        end_dt = datetime(2024, 1, 8, 12, 15, 0)
+        error = _validate_session_constraints(
+            self.course,
+            self.teacher,
+            self.room_with_equipment,
             [self.class_group],
             start_dt,
             end_dt,
