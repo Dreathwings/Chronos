@@ -610,6 +610,7 @@ def _validate_session_constraints(
     end_dt: datetime,
     *,
     ignore_session_id: int | None = None,
+    class_group_labels: dict[int, str | None] | None = None,
 ) -> str | None:
     if start_dt.weekday() >= 5:
         return "Les séances doivent être planifiées du lundi au vendredi."
@@ -624,8 +625,14 @@ def _validate_session_constraints(
     if _has_conflict(room.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "La salle est déjà réservée sur ce créneau."
     for class_group in class_groups:
+        subgroup_label: str | None = None
+        if class_group_labels is not None and class_group.id is not None:
+            subgroup_label = class_group_labels.get(class_group.id)
         if not class_group.is_available_during(
-            start_dt, end_dt, ignore_session_id=ignore_session_id
+            start_dt,
+            end_dt,
+            ignore_session_id=ignore_session_id,
+            subgroup_label=subgroup_label,
         ):
             return "La classe est indisponible sur ce créneau."
     required_capacity = sum(course.capacity_needed_for(group) for group in class_groups)
@@ -790,6 +797,7 @@ def dashboard():
             end_dt = start_dt + timedelta(hours=duration)
             class_choice_raw = request.form.get("class_group_choice")
 
+            class_group_labels: dict[int, str | None] | None = None
             if course.is_cm:
                 if not class_choice_raw:
                     flash("Sélectionnez les classes pour la séance", "danger")
@@ -820,9 +828,16 @@ def dashboard():
                     return redirect(url_for("main.dashboard"))
                 class_groups = [class_group]
                 primary_class = class_group
+                class_group_labels = {class_group.id: subgroup_label}
 
             error_message = _validate_session_constraints(
-                course, teacher, room, class_groups, start_dt, end_dt
+                course,
+                teacher,
+                room,
+                class_groups,
+                start_dt,
+                end_dt,
+                class_group_labels=class_group_labels,
             )
             if error_message:
                 flash(error_message, "danger")
@@ -1707,6 +1722,7 @@ def course_detail(course_id: int):
             end_dt = start_dt + timedelta(hours=duration)
             teacher = Teacher.query.get_or_404(teacher_id)
             room = Room.query.get_or_404(room_id)
+            class_group_labels: dict[int, str | None] | None = None
             if course.is_cm:
                 if not class_choice_raw:
                     flash("Sélectionnez les classes pour la séance", "danger")
@@ -1737,6 +1753,7 @@ def course_detail(course_id: int):
                     return redirect(url_for("main.course_detail", course_id=course_id))
                 class_groups = [class_group]
                 primary_class = class_group
+                class_group_labels = {class_group.id: subgroup_label}
             error_message = _validate_session_constraints(
                 course,
                 teacher,
@@ -1744,6 +1761,7 @@ def course_detail(course_id: int):
                 class_groups,
                 start_dt,
                 end_dt,
+                class_group_labels=class_group_labels,
             )
             if error_message:
                 flash(error_message, "danger")
@@ -1887,6 +1905,13 @@ def move_session(session_id: int):
         return {"error": "L'heure de fin doit être postérieure à l'heure de début"}, 400
 
     attendee_classes = list(session.attendees) or [session.class_group]
+    class_group_labels: dict[int, str | None] = {}
+    if session.class_group_id is not None:
+        class_group_labels[session.class_group_id] = session.subgroup_label
+    for attendee in attendee_classes:
+        if attendee is None or attendee.id is None:
+            continue
+        class_group_labels.setdefault(attendee.id, None)
     error_message = _validate_session_constraints(
         session.course,
         session.teacher,
@@ -1895,6 +1920,7 @@ def move_session(session_id: int):
         start_dt,
         end_dt,
         ignore_session_id=session.id,
+        class_group_labels=class_group_labels or None,
     )
     if error_message:
         return {"error": error_message}, 400

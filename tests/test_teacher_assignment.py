@@ -14,7 +14,7 @@ from app.models import (
 )
 
 
-class TeacherAssignmentTestCase(unittest.TestCase):
+class DatabaseTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.app = create_app(TestConfig)
         self.app_context = self.app.app_context()
@@ -43,6 +43,8 @@ class TeacherAssignmentTestCase(unittest.TestCase):
         db.session.commit()
         return course, link, class_group
 
+
+class TeacherAssignmentTestCase(DatabaseTestCase):
     def test_preferred_teachers_follow_subgroup_assignment(self) -> None:
         course, link, _ = self._create_tp_course()
         teacher_a = Teacher(name="Alice")
@@ -165,6 +167,90 @@ class TeacherAssignmentTestCase(unittest.TestCase):
         teachers = event["extendedProps"]["teachers"]
         self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
+
+
+class SubgroupParallelismTestCase(DatabaseTestCase):
+    def test_parallel_tp_sessions_for_distinct_subgroups(self) -> None:
+        class_group = ClassGroup(name="INFO1", size=24)
+        base_name_a = CourseName(name="Électronique")
+        base_name_b = CourseName(name="Automatique")
+        course_a = Course(
+            name=Course.compose_name("TP", base_name_a.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name_a,
+        )
+        course_b = Course(
+            name=Course.compose_name("TP", base_name_b.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name_b,
+        )
+        link_a = CourseClassLink(class_group=class_group, group_count=2)
+        link_b = CourseClassLink(class_group=class_group, group_count=2)
+        course_a.class_links.append(link_a)
+        course_b.class_links.append(link_b)
+
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        room_a = Room(name="Labo A", capacity=24)
+        room_b = Room(name="Labo B", capacity=24)
+
+        db.session.add_all(
+            [
+                class_group,
+                base_name_a,
+                base_name_b,
+                course_a,
+                course_b,
+                teacher_a,
+                teacher_b,
+                room_a,
+                room_b,
+            ]
+        )
+        db.session.commit()
+
+        start = datetime(2024, 1, 8, 8, 0, 0)
+        end = datetime(2024, 1, 8, 10, 0, 0)
+
+        session_a = Session(
+            course=course_a,
+            teacher=teacher_a,
+            room=room_a,
+            class_group=class_group,
+            subgroup_label="A",
+            start_time=start,
+            end_time=end,
+        )
+        session_a.attendees = [class_group]
+        db.session.add(session_a)
+        db.session.commit()
+
+        self.assertFalse(class_group.is_available_during(start, end, subgroup_label="A"))
+        self.assertTrue(class_group.is_available_during(start, end, subgroup_label="B"))
+        self.assertFalse(class_group.is_available_during(start, end))
+
+        session_b = Session(
+            course=course_b,
+            teacher=teacher_b,
+            room=room_b,
+            class_group=class_group,
+            subgroup_label="B",
+            start_time=start,
+            end_time=end,
+        )
+        session_b.attendees = [class_group]
+        db.session.add(session_b)
+        db.session.commit()
+
+        self.assertEqual(Session.query.count(), 2)
+        self.assertFalse(class_group.is_available_during(start, end, subgroup_label="B"))
+        self.assertFalse(class_group.is_available_during(start, end))
 
 
 if __name__ == "__main__":

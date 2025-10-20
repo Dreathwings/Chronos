@@ -946,7 +946,9 @@ def _try_full_block(
         end_dt = start_dt + timedelta(hours=desired_hours)
         if not fits_in_windows(start_dt.time(), end_dt.time()):
             continue
-        if not class_group.is_available_during(start_dt, end_dt):
+        if not class_group.is_available_during(
+            start_dt, end_dt, subgroup_label=subgroup_label
+        ):
             if diagnostics is not None:
                 diagnostics.add_class(
                     _describe_class_unavailability(class_group, start_dt, end_dt)
@@ -1049,12 +1051,20 @@ def _try_split_block(
         start_dt = segment_datetimes[0][0]
         end_dt = segment_datetimes[-1][1]
         if not all(
-            class_group.is_available_during(segment_start, segment_end)
+            class_group.is_available_during(
+                segment_start,
+                segment_end,
+                subgroup_label=subgroup_label,
+            )
             for segment_start, segment_end in segment_datetimes
         ):
             if diagnostics is not None:
                 for segment_start, segment_end in segment_datetimes:
-                    if not class_group.is_available_during(segment_start, segment_end):
+                    if not class_group.is_available_during(
+                        segment_start,
+                        segment_end,
+                        subgroup_label=subgroup_label,
+                    ):
                         diagnostics.add_class(
                             _describe_class_unavailability(
                                 class_group,

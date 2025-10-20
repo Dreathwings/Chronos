@@ -446,7 +446,12 @@ class Session(db.Model, TimeStampedModel):
     __table_args__ = (
         CheckConstraint("end_time > start_time", name="chk_session_time_order"),
         UniqueConstraint("room_id", "start_time", name="uq_room_start_time"),
-        UniqueConstraint("class_group_id", "start_time", name="uq_class_start_time"),
+        UniqueConstraint(
+            "class_group_id",
+            "subgroup_label",
+            "start_time",
+            name="uq_class_start_time",
+        ),
     )
 
     def attendee_ids(self) -> Set[int]:
@@ -811,19 +816,43 @@ class ClassGroup(db.Model, TimeStampedModel):
         return True
 
     def is_available_during(
-        self, start: datetime, end: datetime, *, ignore_session_id: Optional[int] = None
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        ignore_session_id: Optional[int] = None,
+        subgroup_label: Optional[str] = None,
     ) -> bool:
         if not self.is_available_on(start):
             return False
-        seen: set[int] = set()
+        target_label = (subgroup_label or "").strip().upper() or None
+        seen: set[int | None] = set()
         for session in self.sessions + self.attending_sessions:
             if session.id in seen:
                 continue
             if ignore_session_id and session.id == ignore_session_id:
                 seen.add(session.id)
                 continue
-            if self._overlaps(session.start_time, session.end_time, start, end):
-                return False
+            if not self._overlaps(session.start_time, session.end_time, start, end):
+                seen.add(session.id)
+                continue
+            session_label: str | None
+            if session.class_group_id == self.id:
+                session_label = (session.subgroup_label or "").strip().upper() or None
+            else:
+                attendees = session.attendees or []
+                if any(att.id == self.id for att in attendees):
+                    session_label = None
+                else:
+                    seen.add(session.id)
+                    continue
+            if target_label is not None:
+                if session_label is None:
+                    return False
+                if session_label != target_label:
+                    seen.add(session.id)
+                    continue
+            return False
             seen.add(session.id)
         return True
 
