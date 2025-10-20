@@ -710,7 +710,7 @@ class ChronologyValidationTestCase(DatabaseTestCase):
             end_dt,
         )
         self.assertIsNotNone(error)
-        self.assertIn("durée hebdomadaire", error)
+        self.assertIn("chronologie", error)
 
     def test_validation_blocks_eval_before_tp(self) -> None:
         tp_session = Session(
@@ -736,7 +736,7 @@ class ChronologyValidationTestCase(DatabaseTestCase):
             end_dt,
         )
         self.assertIsNotNone(error)
-        self.assertIn("durée hebdomadaire", error)
+        self.assertIn("chronologie", error)
 
     def test_validation_allows_ordered_sequence(self) -> None:
         start_dt = datetime(2024, 1, 12, 8, 0, 0)
@@ -969,6 +969,53 @@ class WeeklyLimitTestCase(DatabaseTestCase):
                 class_group,
                 third_start,
                 ignore_session_id=first_session.id,
+                additional_hours=1,
+            )
+        )
+
+    def test_weekly_limit_shared_between_course_classes(self) -> None:
+        course, primary_class, room = self._create_course()
+        teacher = self._create_teacher()
+
+        second_class = ClassGroup(name="INFO2", size=26)
+        second_link = CourseClassLink(class_group=second_class, group_count=1)
+        course.class_links.append(second_link)
+        db.session.add(second_class)
+        db.session.commit()
+
+        first_start = datetime(2024, 1, 8, 8, 0, 0)
+        first_end = datetime(2024, 1, 8, 10, 0, 0)
+        first_session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=primary_class,
+            start_time=first_start,
+            end_time=first_end,
+        )
+        first_session.attendees = [primary_class]
+        db.session.add(first_session)
+        db.session.commit()
+
+        overlap_start = datetime(2024, 1, 10, 8, 0, 0)
+        overlap_end = datetime(2024, 1, 10, 9, 0, 0)
+
+        error = _validate_session_constraints(
+            course,
+            teacher,
+            room,
+            [second_class],
+            overlap_start,
+            overlap_end,
+        )
+        self.assertIsNotNone(error)
+        self.assertIn("cours", error)
+
+        self.assertTrue(
+            has_weekly_course_conflict(
+                course,
+                second_class,
+                overlap_start,
                 additional_hours=1,
             )
         )

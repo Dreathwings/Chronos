@@ -716,17 +716,9 @@ def _validate_session_constraints(
             additional_hours=candidate_hours,
         ):
             week_start = start_dt.date() - timedelta(days=start_dt.weekday())
-            label = class_group.name
-            if subgroup_label:
-                subgroup_name = course.subgroup_name_for(class_group, subgroup_label)
-                clean_label = (subgroup_label or "").strip().upper()
-                if subgroup_name:
-                    label = f"{label} — {subgroup_name}"
-                elif clean_label:
-                    label = f"{label} — groupe {clean_label}"
             return (
-                "La durée hebdomadaire autorisée pour ce cours est déjà utilisée pour "
-                f"{label} sur la semaine du {week_start.strftime('%d/%m/%Y')}"
+                "La durée hebdomadaire autorisée pour ce cours est déjà atteinte "
+                f"sur la semaine du {week_start.strftime('%d/%m/%Y')}"
                 "."
             )
         if not respects_weekly_chronology(
