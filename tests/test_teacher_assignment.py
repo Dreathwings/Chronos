@@ -710,7 +710,7 @@ class ChronologyValidationTestCase(DatabaseTestCase):
             end_dt,
         )
         self.assertIsNotNone(error)
-        self.assertIn("déjà planifiée", error)
+        self.assertIn("durée hebdomadaire", error)
 
     def test_validation_blocks_eval_before_tp(self) -> None:
         tp_session = Session(
@@ -736,7 +736,7 @@ class ChronologyValidationTestCase(DatabaseTestCase):
             end_dt,
         )
         self.assertIsNotNone(error)
-        self.assertIn("déjà planifiée", error)
+        self.assertIn("durée hebdomadaire", error)
 
     def test_validation_allows_ordered_sequence(self) -> None:
         start_dt = datetime(2024, 1, 12, 8, 0, 0)
@@ -894,12 +894,12 @@ class WeeklyLimitTestCase(DatabaseTestCase):
         db.session.commit()
         return teacher
 
-    def test_validation_rejects_second_session_in_same_week(self) -> None:
+    def test_validation_limits_weekly_hours_to_session_length(self) -> None:
         course, class_group, room = self._create_course()
         teacher = self._create_teacher()
 
         first_start = datetime(2024, 1, 8, 8, 0, 0)
-        first_end = datetime(2024, 1, 8, 10, 0, 0)
+        first_end = datetime(2024, 1, 8, 9, 0, 0)
         first_session = Session(
             course=course,
             teacher=teacher,
@@ -913,20 +913,45 @@ class WeeklyLimitTestCase(DatabaseTestCase):
         db.session.commit()
 
         second_start = datetime(2024, 1, 10, 8, 0, 0)
-        second_end = datetime(2024, 1, 10, 10, 0, 0)
+        second_end = datetime(2024, 1, 10, 9, 0, 0)
+        self.assertIsNone(
+            _validate_session_constraints(
+                course,
+                teacher,
+                room,
+                [class_group],
+                second_start,
+                second_end,
+            )
+        )
+
+        second_session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=second_start,
+            end_time=second_end,
+        )
+        second_session.attendees = [class_group]
+        db.session.add(second_session)
+        db.session.commit()
+
+        third_start = datetime(2024, 1, 10, 13, 30, 0)
+        third_end = datetime(2024, 1, 10, 14, 30, 0)
         error = _validate_session_constraints(
             course,
             teacher,
             room,
             [class_group],
-            second_start,
-            second_end,
+            third_start,
+            third_end,
         )
         self.assertIsNotNone(error)
         self.assertIn("semaine", error)
 
-        next_week_start = second_start + timedelta(days=7)
-        next_week_end = second_end + timedelta(days=7)
+        next_week_start = third_start + timedelta(days=7)
+        next_week_end = third_end + timedelta(days=7)
         self.assertIsNone(
             _validate_session_constraints(
                 course,
@@ -942,8 +967,9 @@ class WeeklyLimitTestCase(DatabaseTestCase):
             has_weekly_course_conflict(
                 course,
                 class_group,
-                second_start,
+                third_start,
                 ignore_session_id=first_session.id,
+                additional_hours=1,
             )
         )
 

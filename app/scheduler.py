@@ -668,19 +668,19 @@ def _class_course_sessions_in_week(
             yield session
 
 
-def has_weekly_course_conflict(
+def _class_course_hours_in_week(
     course: Course,
     class_group: ClassGroup,
-    start: datetime | date,
+    week_start: date,
+    week_end: date,
+    pending_sessions: Iterable[Session] = (),
     *,
     subgroup_label: str | None = None,
-    pending_sessions: Iterable[Session] = (),
     ignore_session_id: int | None = None,
-) -> bool:
-    target_day = start.date() if isinstance(start, datetime) else start
-    week_start, week_end = _week_bounds(target_day)
-    return any(
-        _class_course_sessions_in_week(
+) -> int:
+    return sum(
+        session.duration_hours
+        for session in _class_course_sessions_in_week(
             course,
             class_group,
             week_start,
@@ -690,6 +690,36 @@ def has_weekly_course_conflict(
             ignore_session_id=ignore_session_id,
         )
     )
+
+
+def has_weekly_course_conflict(
+    course: Course,
+    class_group: ClassGroup,
+    start: datetime | date,
+    *,
+    subgroup_label: str | None = None,
+    pending_sessions: Iterable[Session] = (),
+    ignore_session_id: int | None = None,
+    additional_hours: int | None = None,
+) -> bool:
+    target_day = start.date() if isinstance(start, datetime) else start
+    week_start, week_end = _week_bounds(target_day)
+    weekly_limit = max(int(course.session_length_hours), 0)
+    if weekly_limit == 0:
+        return False
+    scheduled_hours = _class_course_hours_in_week(
+        course,
+        class_group,
+        week_start,
+        week_end,
+        pending_sessions,
+        subgroup_label=subgroup_label,
+        ignore_session_id=ignore_session_id,
+    )
+    extra_hours = (
+        weekly_limit if additional_hours is None else max(int(additional_hours), 0)
+    )
+    return scheduled_hours + extra_hours > weekly_limit
 
 
 def respects_weekly_chronology(
@@ -1570,6 +1600,7 @@ def generate_schedule(
                         group,
                         day,
                         pending_sessions=created_sessions,
+                        additional_hours=desired_hours,
                     ):
                         conflicts.append(group)
                 if conflicts:
@@ -1659,7 +1690,7 @@ def generate_schedule(
                 ):
                     label_display = ", ".join(sorted(labels))
                     reporter.warning(
-                        "Une séance est déjà planifiée pour "
+                        "La durée hebdomadaire autorisée est déjà utilisée pour "
                         f"{label_display} sur la semaine du "
                         f"{week_start.strftime('%d/%m/%Y')}"
                     )
@@ -1809,6 +1840,7 @@ def generate_schedule(
                         day,
                         subgroup_label=subgroup_label,
                         pending_sessions=created_sessions,
+                        additional_hours=desired_hours,
                     ):
                         label = _format_class_label(
                             class_group,
@@ -1899,7 +1931,7 @@ def generate_schedule(
                     ):
                         label_display = ", ".join(sorted(labels))
                         reporter.warning(
-                            "Une séance est déjà planifiée pour "
+                            "La durée hebdomadaire autorisée est déjà utilisée pour "
                             f"{label_display} sur la semaine du "
                             f"{week_start.strftime('%d/%m/%Y')}"
                         )

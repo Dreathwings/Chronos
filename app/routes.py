@@ -699,6 +699,7 @@ def _validate_session_constraints(
         subgroup_label: str | None = None
         if class_group_labels is not None and class_group.id is not None:
             subgroup_label = class_group_labels.get(class_group.id)
+        candidate_hours = max(int((end_dt - start_dt).total_seconds() // 3600), 0)
         if not class_group.is_available_during(
             start_dt,
             end_dt,
@@ -712,6 +713,7 @@ def _validate_session_constraints(
             start_dt,
             subgroup_label=subgroup_label,
             ignore_session_id=ignore_session_id,
+            additional_hours=candidate_hours,
         ):
             week_start = start_dt.date() - timedelta(days=start_dt.weekday())
             label = class_group.name
@@ -723,7 +725,7 @@ def _validate_session_constraints(
                 elif clean_label:
                     label = f"{label} — groupe {clean_label}"
             return (
-                "Une séance pour ce cours est déjà planifiée pour "
+                "La durée hebdomadaire autorisée pour ce cours est déjà utilisée pour "
                 f"{label} sur la semaine du {week_start.strftime('%d/%m/%Y')}"
                 "."
             )
