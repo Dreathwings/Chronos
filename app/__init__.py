@@ -1,4 +1,5 @@
 import click
+from collections import defaultdict
 from flask import Flask, current_app
 from flask.cli import with_appcontext
 from flask_migrate import Migrate
@@ -234,6 +235,13 @@ def _ensure_session_subgroup_column() -> None:
         current_app.logger.warning("Unable to add subgroup_label column to session: %s", exc)
 
 
+def _quote_mysql_identifier(identifier: str) -> str:
+    """Return a MySQL-safe quoted identifier."""
+
+    escaped = identifier.replace("`", "``")
+    return f"`{escaped}`"
+
+
 def _ensure_session_subgroup_uniqueness_constraint() -> None:
     engine = db.engine
     inspector = inspect(engine)
@@ -244,19 +252,27 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
     legacy_columns = {"class_group_id", "start_time"}
 
     unique_structures: list[tuple[str, str | None, set[str]]] = []
+    seen_structures: set[tuple[str, str | None, tuple[str, ...]]] = set()
+
+    def _register_structure(kind: str, name: str | None, columns: list[str]) -> None:
+        column_names = [col for col in columns if col]
+        if not column_names:
+            return
+        key = (kind, name, tuple(column_names))
+        if key in seen_structures:
+            return
+        seen_structures.add(key)
+        unique_structures.append((kind, name, set(column_names)))
+
     for constraint in inspector.get_unique_constraints("session"):
         column_names = constraint.get("column_names") or []
-        unique_structures.append(
-            ("constraint", constraint.get("name"), {col for col in column_names if col})
-        )
+        _register_structure("constraint", constraint.get("name"), column_names)
 
     for index in inspector.get_indexes("session"):
         if not index.get("unique"):
             continue
         column_names = index.get("column_names") or []
-        unique_structures.append(
-            ("index", index.get("name"), {col for col in column_names if col})
-        )
+        _register_structure("index", index.get("name"), column_names)
 
     has_desired = any(columns == desired_columns for _, _, columns in unique_structures)
     legacy_targets = [
@@ -267,6 +283,41 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
 
     dialect = engine.dialect.name
 
+    if dialect == "mysql":
+        with engine.connect() as connection:
+            stats_rows = connection.execute(
+                text(
+                    """
+                    SELECT INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX
+                    FROM INFORMATION_SCHEMA.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'session'
+                      AND NON_UNIQUE = 0
+                    ORDER BY INDEX_NAME, SEQ_IN_INDEX
+                    """
+                )
+            ).mappings().all()
+
+        ordered_indexes: dict[str, list[str]] = defaultdict(list)
+        for row in stats_rows:
+            index_name = row.get("INDEX_NAME")
+            if not index_name or index_name.upper() == "PRIMARY":
+                continue
+            column_name = row.get("COLUMN_NAME")
+            if not column_name:
+                continue
+            ordered_indexes[index_name].append(column_name)
+
+        for name, columns in ordered_indexes.items():
+            _register_structure("index", name, columns)
+
+        legacy_targets = [
+            (kind, name)
+            for kind, name, columns in unique_structures
+            if columns == legacy_columns
+        ]
+        has_desired = any(columns == desired_columns for _, _, columns in unique_structures)
+
     if legacy_targets and all(name is None for _, name in legacy_targets):
         if dialect == "sqlite":
             _rebuild_sqlite_session_table(engine)
@@ -276,7 +327,9 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
 
     def _drop_index(name: str) -> None:
         if dialect == "mysql":
-            statements.append(f"ALTER TABLE session DROP INDEX {name}")
+            statements.append(
+                f"ALTER TABLE session DROP INDEX {_quote_mysql_identifier(name)}"
+            )
         elif dialect in {"postgresql", "sqlite"}:
             statements.append(f"DROP INDEX IF EXISTS {name}")
         else:
@@ -284,7 +337,9 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
 
     def _drop_constraint(name: str) -> None:
         if dialect == "mysql":
-            statements.append(f"ALTER TABLE session DROP INDEX {name}")
+            statements.append(
+                f"ALTER TABLE session DROP INDEX {_quote_mysql_identifier(name)}"
+            )
         elif dialect == "postgresql":
             statements.append(f"ALTER TABLE session DROP CONSTRAINT IF EXISTS {name}")
         else:
@@ -301,8 +356,8 @@ def _ensure_session_subgroup_uniqueness_constraint() -> None:
     if not has_desired:
         if dialect == "mysql":
             statements.append(
-                "ALTER TABLE session ADD CONSTRAINT uq_class_start_time UNIQUE "
-                "(class_group_id, subgroup_label, start_time)"
+                "ALTER TABLE session ADD CONSTRAINT "
+                "uq_class_start_time UNIQUE (class_group_id, subgroup_label, start_time)"
             )
         elif dialect == "postgresql":
             statements.append(
