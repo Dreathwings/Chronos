@@ -2092,6 +2092,89 @@ def _restore_teacher_assignments(
         _apply_teacher_assignment(assignment, assignment[2])
 
 
+def _current_teacher_from_assignment(
+    assignment: tuple[CourseClassLink, str | None, Teacher | None]
+) -> Teacher | None:
+    link, label, _ = assignment
+    if link.group_count == 2:
+        return link.teacher_for_label(label)
+    return link.teacher_a or link.teacher_b
+
+
+def _record_teacher_permutation_alert(
+    course: Course,
+    baseline_assignments: Sequence[tuple[CourseClassLink, str | None, Teacher | None]],
+) -> None:
+    latest_log = course.latest_generation_log
+    if latest_log is None:
+        latest_log = CourseScheduleLog(
+            course=course,
+            status="warning",
+            summary="Permutation automatique des enseignants",
+            messages="[]",
+        )
+        db.session.add(latest_log)
+        existing_entries: list[dict[str, object]] = []
+    else:
+        try:
+            existing_entries = json.loads(latest_log.messages or "[]")
+        except (TypeError, ValueError):
+            existing_entries = []
+
+    if not isinstance(existing_entries, list):
+        existing_entries = []
+
+    seen_details: set[str] = {
+        str(entry.get("message"))
+        for entry in existing_entries
+        if isinstance(entry, dict) and entry.get("code") == "teacher-permutation"
+    }
+
+    changes: list[str] = []
+    for assignment in baseline_assignments:
+        link, label, original_teacher = assignment
+        current_teacher = _current_teacher_from_assignment(assignment)
+        original_id = original_teacher.id if original_teacher is not None else None
+        current_id = current_teacher.id if current_teacher is not None else None
+        if original_id == current_id:
+            continue
+        class_name = link.class_group.name if link.class_group else "Classe"
+        if link.group_count == 2:
+            subgroup_name = link.subgroup_name_for(label)
+        else:
+            subgroup_name = "Classe entière"
+        before_label = original_teacher.name if original_teacher else "Aucun enseignant"
+        after_label = current_teacher.name if current_teacher else "Aucun enseignant"
+        detail = f"{class_name} — {subgroup_name} : {before_label} → {after_label}"
+        if detail in seen_details:
+            continue
+        changes.append(detail)
+        seen_details.add(detail)
+
+    if not changes:
+        return
+
+    for detail in changes:
+        existing_entries.append(
+            {
+                "level": "warning",
+                "message": detail,
+                "code": "teacher-permutation",
+            }
+        )
+
+    latest_log.messages = json.dumps(existing_entries, ensure_ascii=False)
+    if latest_log.summary:
+        note = "Permutation automatique des enseignants"
+        if note not in latest_log.summary:
+            latest_log.summary = f"{latest_log.summary} — {note}"
+    else:
+        latest_log.summary = "Permutation automatique des enseignants"
+
+    if latest_log.status != "error":
+        latest_log.status = "warning"
+
+
 def _backup_course_sessions(course: Course) -> list[dict[str, object]]:
     backups: list[dict[str, object]] = []
     for session in list(course.sessions):
@@ -2217,6 +2300,7 @@ def generate_schedule(
                 progress=progress,
             )
             if candidate_sessions:
+                _record_teacher_permutation_alert(course, original_assignments)
                 success_sessions = candidate_sessions
                 break
             # remove logs produced by failed attempt

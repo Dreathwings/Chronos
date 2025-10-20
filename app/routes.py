@@ -739,6 +739,34 @@ def _evaluate_course_generation(course: Course) -> dict[str, object]:
         status = "warning"
         messages.append("Aucune séance n'est planifiée pour ce cours.")
 
+    latest_log = course.latest_generation_log
+    if latest_log is not None:
+        try:
+            raw_entries = json.loads(latest_log.messages or "[]")
+        except (TypeError, ValueError):
+            raw_entries = []
+        teacher_alerts: list[str] = []
+        if isinstance(raw_entries, list):
+            for entry in raw_entries:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("code") != "teacher-permutation":
+                    continue
+                detail = str(entry.get("message") or "").strip()
+                if not detail:
+                    continue
+                if detail in teacher_alerts:
+                    continue
+                teacher_alerts.append(detail)
+        if teacher_alerts:
+            if status == "success":
+                status = "warning"
+            messages.append(
+                "Permutation automatique des enseignants appliquée lors de la génération."
+            )
+            for detail in teacher_alerts:
+                messages.append(f"Affectation ajustée : {detail}")
+
     return {
         "course": course,
         "status": status,

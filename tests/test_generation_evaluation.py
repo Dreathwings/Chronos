@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import datetime, time
 
@@ -7,6 +8,7 @@ from app.models import (
     Course,
     CourseClassLink,
     CourseName,
+    CourseScheduleLog,
     Room,
     Session,
     Teacher,
@@ -122,6 +124,53 @@ class GenerationEvaluationTestCase(DatabaseTestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertTrue(any("lundi au vendredi" in message for message in result["messages"]))
+
+    def test_teacher_permutation_alert_included(self) -> None:
+        course = self._create_course_setup(sessions_required=1)
+        teacher = course.teachers[0]
+        room = Room.query.first()
+        class_group = course.class_links[0].class_group
+
+        session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=datetime(2024, 1, 8, 8, 0, 0),
+            end_time=datetime(2024, 1, 8, 10, 0, 0),
+        )
+        session.attendees = [class_group]
+        db.session.add(session)
+        db.session.commit()
+
+        log = CourseScheduleLog(
+            course=course,
+            status="warning",
+            summary="Permutation automatique des enseignants",
+            messages=json.dumps(
+                [
+                    {
+                        "level": "warning",
+                        "message": "INFO1 — Classe entière : Alice → Bob",
+                        "code": "teacher-permutation",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+        )
+        db.session.add(log)
+        db.session.commit()
+
+        refreshed = db.session.get(Course, course.id)
+        result = _evaluate_course_generation(refreshed)
+
+        self.assertEqual(result["status"], "warning")
+        self.assertTrue(
+            any("Permutation automatique des enseignants" in message for message in result["messages"])
+        )
+        self.assertTrue(
+            any("Affectation ajustée" in message for message in result["messages"])
+        )
 
 
 if __name__ == "__main__":

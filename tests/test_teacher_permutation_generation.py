@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -102,6 +103,23 @@ class TeacherPermutationGenerationTestCase(DatabaseTestCase):
         self.assertIs(ordered_links[1].teacher_a, desired_mapping[ordered_links[1].class_group.name])
         stored_sessions = Session.query.filter_by(course_id=course.id).all()
         self.assertEqual(len(stored_sessions), 2)
+
+        refreshed = db.session.get(Course, course.id)
+        latest_log = refreshed.latest_generation_log
+        self.assertIsNotNone(latest_log)
+        assert latest_log is not None
+        self.assertEqual(latest_log.status, "warning")
+        self.assertIn("Permutation automatique des enseignants", latest_log.summary)
+        log_entries = json.loads(latest_log.messages or "[]")
+        teacher_entries = [
+            entry
+            for entry in log_entries
+            if isinstance(entry, dict) and entry.get("code") == "teacher-permutation"
+        ]
+        self.assertTrue(teacher_entries)
+        self.assertTrue(
+            any("G1" in entry.get("message", "") or "G2" in entry.get("message", "") for entry in teacher_entries)
+        )
 
     def test_permutation_failure_restores_state(self) -> None:
         course, links, teachers, room = self._setup_course()
