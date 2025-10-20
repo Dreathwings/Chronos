@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from unittest.mock import MagicMock, patch
 
 from app import (create_app, db, _realign_tp_session_teachers,
@@ -20,7 +20,11 @@ from app.models import (
 )
 from sqlalchemy import text
 from app.routes import _validate_session_constraints
-from app.scheduler import has_weekly_course_conflict
+from app.scheduler import (
+    ScheduleReporter,
+    has_weekly_course_conflict,
+    _warn_weekly_limit,
+)
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -1019,6 +1023,31 @@ class WeeklyLimitTestCase(DatabaseTestCase):
                 additional_hours=1,
             )
         )
+
+
+class SchedulerFormattingTestCase(DatabaseTestCase):
+    def test_weekly_limit_warnings_are_grouped(self) -> None:
+        base_name = CourseName(name="Synthèse")
+        course = Course(
+            name=Course.compose_name("CM", base_name.name, "S1"),
+            course_type="CM",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        reporter = ScheduleReporter(course)
+        weeks = {
+            date(2025, 9, 8) + timedelta(days=7 * offset)
+            for offset in range(6)
+        }
+
+        _warn_weekly_limit(reporter, weeks)
+
+        self.assertEqual(len(reporter.entries), 1)
+        message = reporter.entries[0]["message"]
+        self.assertIn("08/09/2025", message)
+        self.assertIn("(+3 autre(s))", message)
 
 
 if __name__ == "__main__":

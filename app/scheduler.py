@@ -738,6 +738,37 @@ def has_weekly_course_conflict(
     return scheduled_hours + extra_hours > weekly_limit
 
 
+def _warn_weekly_limit(
+    reporter: ScheduleReporter, weeks: Iterable[date]
+) -> None:
+    unique_weeks = sorted({week for week in weeks})
+    if not unique_weeks:
+        return
+    labels = [week.strftime("%d/%m/%Y") for week in unique_weeks]
+    if len(labels) == 1:
+        message = (
+            "La durée hebdomadaire autorisée pour ce cours est déjà atteinte "
+            f"sur la semaine du {labels[0]}"
+        )
+    elif len(labels) == 2:
+        message = (
+            "La durée hebdomadaire autorisée pour ce cours est déjà atteinte "
+            f"sur les semaines du {labels[0]} et du {labels[1]}"
+        )
+    elif len(labels) == 3:
+        message = (
+            "La durée hebdomadaire autorisée pour ce cours est déjà atteinte "
+            f"sur les semaines du {labels[0]}, du {labels[1]} et du {labels[2]}"
+        )
+    else:
+        message = (
+            "La durée hebdomadaire autorisée pour ce cours est déjà atteinte "
+            f"sur les semaines du {labels[0]}, du {labels[1]} et du {labels[2]}… "
+            f"(+{len(labels) - 3} autre(s))"
+        )
+    reporter.warning(message)
+
+
 def respects_weekly_chronology(
     course: Course,
     class_group: ClassGroup,
@@ -1981,11 +2012,7 @@ def generate_schedule(
                         break
 
             if not placed:
-                for week_start in sorted(weekly_limit_weeks):
-                    reporter.warning(
-                        "La durée hebdomadaire autorisée pour ce cours est déjà "
-                        f"atteinte sur la semaine du {week_start.strftime('%d/%m/%Y')}"
-                    )
+                _warn_weekly_limit(reporter, weekly_limit_weeks)
                 for week_start in sorted(chronology_weeks):
                     reporter.warning(
                         "Ordre CM → TD → TP impossible à respecter "
@@ -2213,11 +2240,7 @@ def generate_schedule(
                             break
 
                 if not placed:
-                    for week_start in sorted(weekly_limit_weeks):
-                        reporter.warning(
-                            "La durée hebdomadaire autorisée pour ce cours est déjà "
-                            f"atteinte sur la semaine du {week_start.strftime('%d/%m/%Y')}"
-                        )
+                    _warn_weekly_limit(reporter, weekly_limit_weeks)
                     for week_start in sorted(chronology_weeks):
                         reporter.warning(
                             f"Chronologie CM → TD → TP impossible pour {class_group.name} "
