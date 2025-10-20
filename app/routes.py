@@ -943,8 +943,11 @@ def dashboard():
             }
         )
 
+    should_run_generation_evaluation = False
+
     if request.method == "POST":
-        if request.form.get("form") == "quick-session":
+        form_name = request.form.get("form")
+        if form_name == "quick-session":
             course_id = int(request.form["course_id"])
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
@@ -1019,7 +1022,7 @@ def dashboard():
             db.session.commit()
             flash("Séance créée", "success")
             return redirect(url_for("main.dashboard"))
-        elif request.form.get("form") == "bulk-auto-schedule":
+        elif form_name == "bulk-auto-schedule":
             if _wants_json_response():
                 tracker = _enqueue_bulk_schedule()
                 response = {
@@ -1063,7 +1066,7 @@ def dashboard():
                 flash("\n".join(error_messages), "warning")
 
             return redirect(url_for("main.dashboard"))
-        elif request.form.get("form") == "clear-course-sessions":
+        elif form_name == "clear-course-sessions":
             try:
                 course_id = int(request.form.get("course_id", "0"))
             except ValueError:
@@ -1085,7 +1088,7 @@ def dashboard():
             else:
                 flash("Aucune séance n'était planifiée pour ce cours.", "info")
             return redirect(url_for("main.dashboard"))
-        elif request.form.get("form") == "clear-all-sessions":
+        elif form_name == "clear-all-sessions":
             total_removed_sessions = 0
             total_removed_logs = 0
             for course in courses:
@@ -1117,6 +1120,8 @@ def dashboard():
                 )
 
             return redirect(url_for("main.dashboard"))
+        elif form_name == "evaluate-generation":
+            should_run_generation_evaluation = True
 
     all_sessions = Session.query.all()
     events = sessions_to_grouped_events(all_sessions)
@@ -1133,7 +1138,6 @@ def dashboard():
             latest_log,
             remaining_hours=remaining,
         )
-        evaluation = _evaluate_course_generation(course)
         course_summaries.append(
             {
                 "course": course,
@@ -1148,22 +1152,32 @@ def dashboard():
                 "latest_timestamp": latest_log.created_at if latest_log else None,
             }
         )
-        generation_evaluation.append(evaluation)
+        if should_run_generation_evaluation:
+            evaluation = _evaluate_course_generation(course)
+            generation_evaluation.append(evaluation)
 
-    evaluation_counts = Counter(result["status"] for result in generation_evaluation)
+    evaluation_counts = (
+        Counter(result["status"] for result in generation_evaluation)
+        if should_run_generation_evaluation
+        else Counter()
+    )
     generation_evaluation_overview = {
-        "total": len(generation_evaluation),
+        "total": len(generation_evaluation) if should_run_generation_evaluation else 0,
         "success": evaluation_counts.get("success", 0),
         "warning": evaluation_counts.get("warning", 0),
         "error": evaluation_counts.get("error", 0),
     }
     severity_order = {"error": 0, "warning": 1, "success": 2}
-    generation_evaluation_flagged = sorted(
-        [result for result in generation_evaluation if result["status"] != "success"],
-        key=lambda entry: (
-            severity_order.get(entry["status"], 3),
-            entry["course"].name.lower() if entry.get("course") else "",
-        ),
+    generation_evaluation_flagged = (
+        sorted(
+            [result for result in generation_evaluation if result["status"] != "success"],
+            key=lambda entry: (
+                severity_order.get(entry["status"], 3),
+                entry["course"].name.lower() if entry.get("course") else "",
+            ),
+        )
+        if should_run_generation_evaluation
+        else []
     )
 
     return render_template(
@@ -1188,6 +1202,7 @@ def dashboard():
         generation_evaluation_overview=generation_evaluation_overview,
         generation_criteria_labels=GENERATION_CRITERIA_LABELS,
         generation_criteria_badges=GENERATION_CRITERIA_BADGES,
+        generation_evaluation_requested=should_run_generation_evaluation,
     )
 
 

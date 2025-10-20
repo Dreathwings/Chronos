@@ -132,9 +132,19 @@
           {% endif %}
         {% endfor %}
         <div class="vstack gap-3">
-          {% if generation_evaluation_overview.total %}
           <div class="alert alert-light border mb-0">
-            <div class="fw-semibold mb-2">Évaluation des critères</div>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+              <div class="fw-semibold mb-0">Évaluation des critères</div>
+              <form method="post" class="d-inline">
+                <input type="hidden" name="form" value="evaluate-generation">
+                <button type="submit" class="btn btn-sm btn-outline-primary" {% if not course_summaries %}disabled{% endif %}>
+                  Lancer la vérification
+                </button>
+              </form>
+            </div>
+            {% if not course_summaries %}
+            <div class="small text-muted mb-0">Aucun cours n'est encore configuré.</div>
+            {% elif generation_evaluation_requested %}
             <div class="d-flex flex-wrap gap-2 small mb-2">
               <span class="badge {{ generation_criteria_badges.get('success', 'bg-success') }}">
                 Respectés : {{ generation_evaluation_overview.success }}
@@ -146,7 +156,7 @@
                 Non respectés : {{ generation_evaluation_overview.error }}
               </span>
             </div>
-            {% if generation_evaluation_flagged %}
+            {% if generation_evaluation_overview.total and generation_evaluation_flagged %}
             <div class="small text-muted mb-2">
               Les cours ci-dessous présentent des points à surveiller.
             </div>
@@ -169,13 +179,21 @@
               </div>
               {% endfor %}
             </div>
-            {% else %}
+            {% elif generation_evaluation_overview.total %}
             <div class="small text-success mb-0">
               Tous les cours respectent les critères définis.
             </div>
+            {% else %}
+            <div class="small text-muted mb-0">
+              Aucune séance planifiée n'est disponible pour vérification.
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="small text-muted mb-0">
+              Cliquez sur « Lancer la vérification » pour analyser les cours générés.
+            </div>
             {% endif %}
           </div>
-          {% endif %}
           <form
             method="post"
             class="vstack gap-3"

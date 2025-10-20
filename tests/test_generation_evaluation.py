@@ -298,5 +298,74 @@ class GenerationEvaluationTestCase(DatabaseTestCase):
         )
 
 
+class DashboardEvaluationTriggerTestCase(DatabaseTestCase):
+    def _create_basic_course(self) -> Course:
+        base_name = CourseName(name="Programmation")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=24)
+        link = CourseClassLink(class_group=class_group)
+        course.class_links.append(link)
+
+        teacher = Teacher(name="Alice")
+        room = Room(name="B201", capacity=30)
+
+        course.teachers.append(teacher)
+        db.session.add_all([base_name, course, class_group, teacher, room])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=datetime(2024, 1, 8, 8, 0, 0),
+            end_time=datetime(2024, 1, 8, 10, 0, 0),
+        )
+        session.attendees = [class_group]
+        db.session.add(session)
+        db.session.commit()
+
+        return db.session.get(Course, course.id)
+
+    def test_dashboard_get_does_not_run_evaluation(self) -> None:
+        client = self.app.test_client()
+        prefix = self.app.config.get("URL_PREFIX", "") or ""
+        response = client.get(f"{prefix}/")
+        html = response.get_data(as_text=True)
+
+        self.assertIn("Lancer la vérification", html)
+        self.assertNotIn("Respectés :", html)
+
+    def test_dashboard_post_runs_evaluation(self) -> None:
+        self._create_basic_course()
+
+        client = self.app.test_client()
+        prefix = self.app.config.get("URL_PREFIX", "") or ""
+        response = client.post(f"{prefix}/", data={"form": "evaluate-generation"})
+        html = response.get_data(as_text=True)
+
+        self.assertIn("Respectés :", html)
+        self.assertIn("Tous les cours respectent les critères définis.", html)
+
+
 if __name__ == "__main__":
     unittest.main()
