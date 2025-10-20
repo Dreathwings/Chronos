@@ -432,6 +432,9 @@ def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> N
         db.session.flush()
         existing_starts.add(week_start)
 
+    occurrence_goal = len(course.allowed_weeks)
+    course.sessions_required = max(occurrence_goal, 1)
+
 
 def _sync_course_class_links(
     course: Course,
@@ -1533,7 +1536,6 @@ def courses_list():
                 name=Course.compose_name(course_type, course_name.name, semester),
                 description=request.form.get("description"),
                 session_length_hours=int(request.form.get("session_length_hours", 2)),
-                sessions_required=int(request.form.get("sessions_required", 1)),
                 course_type=course_type,
                 semester=semester,
                 configured_name=course_name,
@@ -1662,7 +1664,6 @@ def course_detail(course_id: int):
             )
             course.description = request.form.get("description")
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
-            course.sessions_required = int(request.form.get("sessions_required", course.sessions_required))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
             course.configured_name = selected_course_name

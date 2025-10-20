@@ -749,8 +749,16 @@ def _normalise_label(label: str | None) -> str:
     return (label or "").upper()
 
 
+def _week_start_for(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
 def _class_hours_needed(
-    course: Course, class_group: ClassGroup, subgroup_label: str | None = None
+    course: Course,
+    class_group: ClassGroup,
+    subgroup_label: str | None = None,
+    *,
+    occurrences_goal: int | None = None,
 ) -> int:
     target_label = _normalise_label(subgroup_label)
     existing = sum(
@@ -759,7 +767,10 @@ def _class_hours_needed(
         if session.class_group_id == class_group.id
         and _normalise_label(session.subgroup_label) == target_label
     )
-    required_total = course.sessions_required * course.session_length_hours
+    target_occurrences = (
+        occurrences_goal if occurrences_goal is not None else course.sessions_required
+    )
+    required_total = target_occurrences * course.session_length_hours
     return max(required_total - existing, 0)
 
 
@@ -1615,6 +1626,20 @@ def generate_schedule(
             reporter.finalise(0)
             raise ValueError(message)
 
+    if normalised_weeks:
+        candidate_days = (
+            {day for day in allowed_days if day.weekday() < 5}
+            if allowed_days is not None
+            else set()
+        )
+        week_occurrences = sorted({_week_start_for(day) for day in candidate_days})
+        if week_occurrences:
+            effective_occurrences = len(week_occurrences)
+        else:
+            effective_occurrences = len({span_start for span_start, _ in normalised_weeks})
+    else:
+        effective_occurrences = course.sessions_required
+
     if not course.classes:
         message = "Associez au moins une classe au cours avant de planifier."
         reporter.error(message)
@@ -1624,7 +1649,7 @@ def generate_schedule(
 
     reporter.info(
         f"Durée cible des séances : {course.session_length_hours} h — "
-        f"{course.sessions_required} occurrence(s) par groupe"
+        f"{effective_occurrences} occurrence(s) par groupe"
     )
 
     created_sessions = []
@@ -1648,7 +1673,7 @@ def generate_schedule(
             raise ValueError(message)
         target_ids = {group.id for group in class_groups}
         existing_day_hours = _cm_existing_hours_by_day(course, target_ids)
-        total_required = course.sessions_required * course.session_length_hours
+        total_required = effective_occurrences * course.session_length_hours
         already_scheduled = sum(existing_day_hours.values())
         hours_remaining = max(total_required - already_scheduled, 0)
         progress.initialise(hours_remaining)
@@ -1848,7 +1873,12 @@ def generate_schedule(
     total_hours_needed = 0.0
     for link in links:
         for subgroup_label in link.group_labels():
-            amount = _class_hours_needed(course, link.class_group, subgroup_label)
+            amount = _class_hours_needed(
+                course,
+                link.class_group,
+                subgroup_label,
+                occurrences_goal=effective_occurrences,
+            )
             hours_needed_map[(link.class_group_id, subgroup_label or None)] = amount
             total_hours_needed += max(amount, 0)
     progress.initialise(total_hours_needed)

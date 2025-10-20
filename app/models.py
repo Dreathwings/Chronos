@@ -416,7 +416,11 @@ class Course(db.Model, TimeStampedModel):
             multiplier = 1
         else:
             multiplier = group_total or 1
-        return self.sessions_required * self.session_length_hours * multiplier
+        if self.allowed_weeks:
+            occurrences = len(self.allowed_weeks)
+        else:
+            occurrences = self.sessions_required
+        return occurrences * self.session_length_hours * multiplier
 
     @property
     def latest_generation_log(self) -> "CourseScheduleLog | None":
