@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, time
 from unittest.mock import MagicMock, patch
 
 from app import (create_app, db, _realign_tp_session_teachers,
@@ -14,8 +14,10 @@ from app.models import (
     Room,
     Session,
     Teacher,
+    TeacherAvailability,
 )
 from sqlalchemy import text
+from app.routes import _validate_session_constraints
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -515,6 +517,142 @@ class SubgroupParallelismTestCase(DatabaseTestCase):
         self.assertEqual(Session.query.count(), 2)
         self.assertFalse(class_group.is_available_during(start, end, subgroup_label="B"))
         self.assertFalse(class_group.is_available_during(start, end))
+
+
+class ChronologyValidationTestCase(DatabaseTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.class_group = ClassGroup(name="INFO2", size=28)
+        self.teacher = Teacher(name="Chloé")
+        self.room = Room(name="C201", capacity=40)
+        base_name = CourseName(name="Algorithmique")
+        self.course_cm = Course(
+            name=Course.compose_name("CM", base_name.name, "S1"),
+            course_type="CM",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        self.course_td = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        self.course_tp = Course(
+            name=Course.compose_name("TP", base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        self.course_eval = Course(
+            name=Course.compose_name("Eval", base_name.name, "S1"),
+            course_type="Eval",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        for course in (
+            self.course_cm,
+            self.course_td,
+            self.course_tp,
+            self.course_eval,
+        ):
+            course.class_links.append(CourseClassLink(class_group=self.class_group))
+
+        db.session.add_all(
+            [
+                self.class_group,
+                self.teacher,
+                self.room,
+                base_name,
+                self.course_cm,
+                self.course_td,
+                self.course_tp,
+                self.course_eval,
+            ]
+        )
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=self.teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        cm_session = Session(
+            course=self.course_cm,
+            teacher=self.teacher,
+            room=self.room,
+            class_group=self.class_group,
+            start_time=datetime(2024, 1, 11, 10, 15, 0),
+            end_time=datetime(2024, 1, 11, 12, 15, 0),
+        )
+        cm_session.attendees = [self.class_group]
+        tp_session = Session(
+            course=self.course_tp,
+            teacher=self.teacher,
+            room=self.room,
+            class_group=self.class_group,
+            start_time=datetime(2024, 1, 12, 10, 15, 0),
+            end_time=datetime(2024, 1, 12, 12, 15, 0),
+        )
+        tp_session.attendees = [self.class_group]
+        db.session.add_all([cm_session, tp_session])
+        db.session.commit()
+
+    def test_validation_blocks_td_before_cm(self) -> None:
+        start_dt = datetime(2024, 1, 9, 8, 0, 0)
+        end_dt = datetime(2024, 1, 9, 10, 0, 0)
+        error = _validate_session_constraints(
+            self.course_td,
+            self.teacher,
+            self.room,
+            [self.class_group],
+            start_dt,
+            end_dt,
+        )
+        self.assertIsNotNone(error)
+        self.assertIn("chronologie", error)
+
+    def test_validation_blocks_eval_before_tp(self) -> None:
+        start_dt = datetime(2024, 1, 11, 8, 0, 0)
+        end_dt = datetime(2024, 1, 11, 10, 0, 0)
+        error = _validate_session_constraints(
+            self.course_eval,
+            self.teacher,
+            self.room,
+            [self.class_group],
+            start_dt,
+            end_dt,
+        )
+        self.assertIsNotNone(error)
+        self.assertIn("chronologie", error)
+
+    def test_validation_allows_ordered_sequence(self) -> None:
+        start_dt = datetime(2024, 1, 12, 8, 0, 0)
+        end_dt = datetime(2024, 1, 12, 10, 0, 0)
+        error = _validate_session_constraints(
+            self.course_td,
+            self.teacher,
+            self.room,
+            [self.class_group],
+            start_dt,
+            end_dt,
+        )
+        self.assertIsNone(error)
 
 
 if __name__ == "__main__":

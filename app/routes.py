@@ -46,6 +46,7 @@ from .scheduler import (
     fits_in_windows,
     generate_schedule,
     overlaps,
+    respects_weekly_chronology,
 )
 from .utils import (
     parse_unavailability_ranges,
@@ -635,6 +636,17 @@ def _validate_session_constraints(
             subgroup_label=subgroup_label,
         ):
             return "La classe est indisponible sur ce créneau."
+        if not respects_weekly_chronology(
+            course,
+            class_group,
+            start_dt,
+            subgroup_label=subgroup_label,
+            ignore_session_id=ignore_session_id,
+        ):
+            return (
+                "La séance ne respecte pas la chronologie CM → TD → TP → Eval "
+                "sur la semaine."
+            )
     required_capacity = sum(course.capacity_needed_for(group) for group in class_groups)
     if room.capacity < required_capacity:
         return (
