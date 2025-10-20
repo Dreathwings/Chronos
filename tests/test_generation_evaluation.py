@@ -125,6 +125,79 @@ class GenerationEvaluationTestCase(DatabaseTestCase):
         self.assertEqual(result["status"], "error")
         self.assertTrue(any("lundi au vendredi" in message for message in result["messages"]))
 
+    def test_chronology_violation_marks_error(self) -> None:
+        base_name = CourseName(name="Langues")
+        class_group = ClassGroup(name="INFO2", size=24)
+        cm_course = Course(
+            name=Course.compose_name("CM", base_name.name, "S1"),
+            course_type="CM",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        td_course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        for course in (cm_course, td_course):
+            course.class_links.append(CourseClassLink(class_group=class_group))
+
+        teacher = Teacher(name="Chloé")
+        room = Room(name="E101", capacity=30)
+        cm_course.teachers.append(teacher)
+        td_course.teachers.append(teacher)
+
+        db.session.add_all([base_name, class_group, cm_course, td_course, teacher, room])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        td_session = Session(
+            course=td_course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=datetime(2024, 1, 9, 8, 0, 0),
+            end_time=datetime(2024, 1, 9, 10, 0, 0),
+        )
+        td_session.attendees = [class_group]
+
+        cm_session = Session(
+            course=cm_course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=datetime(2024, 1, 11, 10, 15, 0),
+            end_time=datetime(2024, 1, 11, 12, 15, 0),
+        )
+        cm_session.attendees = [class_group]
+
+        db.session.add_all([td_session, cm_session])
+        db.session.commit()
+
+        refreshed = db.session.get(Course, td_course.id)
+        result = _evaluate_course_generation(refreshed)
+
+        self.assertEqual(result["status"], "error")
+        self.assertTrue(
+            any("chronologie" in message for message in result["messages"])
+        )
+
     def test_teacher_permutation_alert_included(self) -> None:
         course = self._create_course_setup(sessions_required=1)
         teacher = course.teachers[0]
