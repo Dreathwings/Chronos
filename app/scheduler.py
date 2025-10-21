@@ -1103,6 +1103,71 @@ def _matching_sessions_for_groups(
     return matches
 
 
+def _relocate_sessions_for_groups(
+    *,
+    course: Course,
+    class_groups: Iterable[ClassGroup],
+    created_sessions: list[Session],
+    per_day_hours: dict[date, int],
+    weekday_frequencies: Counter[int],
+    reporter: ScheduleReporter | None,
+    attempted_weeks: set[date],
+    subgroup_label: str | None = None,
+    context_label: str | None = None,
+    require_exact_attendees: bool = False,
+) -> int:
+    matches = _matching_sessions_for_groups(
+        course,
+        class_groups,
+        pending_sessions=created_sessions,
+        subgroup_label=subgroup_label,
+        require_exact_attendees=require_exact_attendees,
+    )
+    if not matches:
+        return 0
+
+    sessions_by_week: dict[date, list[Session]] = defaultdict(list)
+    for session in matches:
+        week_start = _week_start_for(session.start_time.date())
+        sessions_by_week[week_start].append(session)
+
+    for week_start in sorted(sessions_by_week.keys(), reverse=True):
+        if week_start in attempted_weeks:
+            continue
+        targeted = sessions_by_week[week_start]
+        if not targeted:
+            continue
+
+        attempted_weeks.add(week_start)
+        total_hours = 0
+        for session in targeted:
+            total_hours += session.duration_hours
+            if session in created_sessions:
+                created_sessions.remove(session)
+            session_day = session.start_time.date()
+            if session_day in per_day_hours:
+                per_day_hours[session_day] = max(
+                    per_day_hours[session_day] - session.duration_hours,
+                    0,
+                )
+            weekday = session.start_time.weekday()
+            if weekday in weekday_frequencies:
+                weekday_frequencies[weekday] -= 1
+                if weekday_frequencies[weekday] <= 0:
+                    del weekday_frequencies[weekday]
+            db.session.delete(session)
+        db.session.flush()
+
+        if reporter is not None:
+            context = context_label or course.name
+            reporter.info(
+                "Replanification des séances de la semaine du "
+                f"{week_start.strftime('%d/%m/%Y')} pour {context}."
+            )
+        return total_hours
+    return 0
+
+
 def _latest_session_for_groups(
     course: Course,
     class_groups: Iterable[ClassGroup],
@@ -1912,13 +1977,17 @@ def generate_schedule(
             pending_sessions=created_sessions,
         )
         slot_length_hours = max(int(course.session_length_hours), 1)
-        blocks_total = max((hours_remaining + slot_length_hours - 1) // slot_length_hours, 1)
         block_index = 0
+        relocation_weeks: set[date] = set()
         primary_link = links[0] if links else None
         link_lookup = {
             link.class_group_id: link for link in links if link.class_group_id is not None
         }
         while hours_remaining > 0:
+            blocks_total = max(
+                (hours_remaining + slot_length_hours - 1) // slot_length_hours,
+                1,
+            )
             desired_hours = min(slot_length_hours, hours_remaining)
             if len(available_days) == 1:
                 anchor_index = 0
@@ -2076,14 +2145,29 @@ def generate_schedule(
                         placed = True
                         break
 
-            if not placed:
-                _warn_weekly_limit(reporter, weekly_limit_weeks)
-                for week_start in sorted(chronology_weeks):
-                    reporter.warning(
-                        "Ordre CM → TD → TP impossible à respecter "
-                        f"la semaine du {week_start.strftime('%d/%m/%Y')}"
+                if not placed:
+                    relocated_hours = _relocate_sessions_for_groups(
+                        course=course,
+                        class_groups=class_groups,
+                        created_sessions=created_sessions,
+                        per_day_hours=per_day_hours,
+                        weekday_frequencies=weekday_frequencies,
+                        reporter=reporter,
+                        attempted_weeks=relocation_weeks,
+                        require_exact_attendees=True,
+                        context_label=", ".join(group.name for group in class_groups),
                     )
-                break
+                    if relocated_hours:
+                        hours_remaining += relocated_hours
+                        block_index = max(block_index - 1, 0)
+                        continue
+                    _warn_weekly_limit(reporter, weekly_limit_weeks)
+                    for week_start in sorted(chronology_weeks):
+                        reporter.warning(
+                            "Ordre CM → TD → TP impossible à respecter "
+                            f"la semaine du {week_start.strftime('%d/%m/%Y')}"
+                        )
+                    break
 
         if hours_remaining > 0:
             reporter.warning(
@@ -2139,14 +2223,15 @@ def generate_schedule(
                 pending_sessions=created_sessions,
                 subgroup_label=subgroup_label,
             )
-            blocks_total = max(
-                (hours_needed + slot_length_hours - 1) // slot_length_hours,
-                1,
-            )
             block_index = 0
             hours_remaining = hours_needed
+            relocation_weeks: set[date] = set()
 
             while hours_remaining > 0:
+                blocks_total = max(
+                    (hours_remaining + slot_length_hours - 1) // slot_length_hours,
+                    1,
+                )
                 desired_hours = min(slot_length_hours, hours_remaining)
                 if len(available_days) == 1:
                     anchor_index = 0
@@ -2308,6 +2393,23 @@ def generate_schedule(
                             break
 
                 if not placed:
+                    relocated_hours = _relocate_sessions_for_groups(
+                        course=course,
+                        class_groups=[class_group],
+                        created_sessions=created_sessions,
+                        per_day_hours=per_day_hours,
+                        weekday_frequencies=weekday_frequencies,
+                        reporter=reporter,
+                        attempted_weeks=relocation_weeks,
+                        subgroup_label=subgroup_label,
+                        context_label=format_class_label(
+                            class_group, link=link, subgroup_label=subgroup_label
+                        ),
+                    )
+                    if relocated_hours:
+                        hours_remaining += relocated_hours
+                        block_index = max(block_index - 1, 0)
+                        continue
                     _warn_weekly_limit(reporter, weekly_limit_weeks)
                     for week_start in sorted(chronology_weeks):
                         reporter.warning(

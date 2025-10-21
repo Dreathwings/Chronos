@@ -1,4 +1,5 @@
 import unittest
+from collections import Counter
 from datetime import date, datetime, time, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -23,6 +24,7 @@ from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
     has_weekly_course_conflict,
+    _relocate_sessions_for_groups,
     _warn_weekly_limit,
 )
 
@@ -1105,6 +1107,100 @@ class SchedulerFormattingTestCase(DatabaseTestCase):
         self.assertIn("08/09/2025", message)
         self.assertIn("Synthèse", message)
         self.assertIn("(+3 autre(s))", message)
+
+
+class SchedulerRelocationTestCase(DatabaseTestCase):
+    def test_relocate_sessions_moves_latest_week(self) -> None:
+        base_name = CourseName(name="Analyse")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=24)
+        link = CourseClassLink(class_group=class_group)
+        course.class_links.append(link)
+        teacher = Teacher(name="Alice")
+        room = Room(name="A101", capacity=30)
+        db.session.add_all([base_name, course, class_group, teacher, room])
+        db.session.commit()
+
+        first_start = datetime(2025, 9, 8, 8, 0)
+        first_end = datetime(2025, 9, 8, 10, 0)
+        first_session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=first_start,
+            end_time=first_end,
+        )
+        first_session.attendees = [class_group]
+
+        second_start = datetime(2025, 9, 15, 8, 0)
+        second_end = datetime(2025, 9, 15, 10, 0)
+        second_session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=second_start,
+            end_time=second_end,
+        )
+        second_session.attendees = [class_group]
+
+        db.session.add_all([first_session, second_session])
+        db.session.commit()
+
+        per_day_hours = {
+            first_start.date(): first_session.duration_hours,
+            second_start.date(): second_session.duration_hours,
+        }
+        weekday_frequencies = Counter({first_start.weekday(): 2})
+        created_sessions: list[Session] = []
+        attempted_weeks: set[date] = set()
+
+        removed = _relocate_sessions_for_groups(
+            course=course,
+            class_groups=[class_group],
+            created_sessions=created_sessions,
+            per_day_hours=per_day_hours,
+            weekday_frequencies=weekday_frequencies,
+            reporter=None,
+            attempted_weeks=attempted_weeks,
+            subgroup_label=None,
+            context_label=class_group.name,
+        )
+
+        self.assertEqual(removed, 2)
+        self.assertEqual(attempted_weeks, {date(2025, 9, 15)})
+        remaining = Session.query.filter_by(course=course).all()
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0].start_time.date(), date(2025, 9, 8))
+        self.assertEqual(per_day_hours[first_start.date()], 2)
+        self.assertEqual(per_day_hours.get(second_start.date(), 0), 0)
+        self.assertEqual(weekday_frequencies[first_start.weekday()], 1)
+
+        second_attempt = _relocate_sessions_for_groups(
+            course=course,
+            class_groups=[class_group],
+            created_sessions=created_sessions,
+            per_day_hours=per_day_hours,
+            weekday_frequencies=weekday_frequencies,
+            reporter=None,
+            attempted_weeks=attempted_weeks,
+            subgroup_label=None,
+            context_label=class_group.name,
+        )
+
+        self.assertEqual(second_attempt, 2)
+        self.assertEqual(attempted_weeks, {date(2025, 9, 15), date(2025, 9, 8)})
+        self.assertEqual(Session.query.filter_by(course=course).count(), 0)
+        self.assertEqual(per_day_hours[first_start.date()], 0)
+        self.assertEqual(weekday_frequencies.get(first_start.weekday(), 0), 0)
 
 
 if __name__ == "__main__":
