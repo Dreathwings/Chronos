@@ -736,7 +736,7 @@ def _validate_session_constraints(
         ):
             return (
                 "La séance ne respecte pas la chronologie CM → TD → TP → Eval "
-                "sur la semaine."
+                "pour cette matière sur le semestre concerné."
             )
     required_capacity = sum(course.capacity_needed_for(group) for group in class_groups)
     if room.capacity < required_capacity:

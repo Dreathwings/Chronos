@@ -24,6 +24,7 @@ from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
     has_weekly_course_conflict,
+    respects_weekly_chronology,
     _relocate_sessions_for_groups,
     _warn_weekly_limit,
 )
@@ -1202,6 +1203,104 @@ class SchedulerRelocationTestCase(DatabaseTestCase):
         self.assertEqual(per_day_hours[first_start.date()], 0)
         self.assertEqual(weekday_frequencies.get(first_start.weekday(), 0), 0)
 
+
+class ChronologyRuleTestCase(DatabaseTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.base_name = CourseName(name="Physique")
+        self.class_group = ClassGroup(name="PHY1", size=28)
+        self.teacher = Teacher(name="Professeur X")
+        self.room = Room(name="A101", capacity=30)
+        db.session.add_all([self.base_name, self.class_group, self.teacher, self.room])
+        db.session.commit()
+
+    def _create_course(self, course_type: str, semester: str) -> Course:
+        course = Course(
+            name=Course.compose_name(course_type, self.base_name.name, semester),
+            course_type=course_type,
+            session_length_hours=2,
+            sessions_required=1,
+            semester=semester,
+            configured_name=self.base_name,
+        )
+        course.class_links.append(CourseClassLink(class_group=self.class_group))
+        db.session.add(course)
+        db.session.commit()
+        return course
+
+    def _create_session(self, course: Course, start: datetime) -> Session:
+        session = Session(
+            course=course,
+            teacher=self.teacher,
+            room=self.room,
+            class_group=self.class_group,
+            start_time=start,
+            end_time=start + timedelta(hours=course.session_length_hours),
+        )
+        session.attendees = [self.class_group]
+        db.session.add(session)
+        db.session.commit()
+        return session
+
+    def test_td_cannot_precede_existing_cm(self) -> None:
+        cm_course = self._create_course("CM", "S1")
+        td_course = self._create_course("TD", "S1")
+        self._create_session(cm_course, datetime(2024, 1, 10, 8, 0))
+
+        is_valid = respects_weekly_chronology(
+            td_course,
+            self.class_group,
+            datetime(2024, 1, 9, 8, 0),
+        )
+        self.assertFalse(is_valid)
+
+    def test_cm_cannot_follow_existing_td(self) -> None:
+        cm_course = self._create_course("CM", "S1")
+        td_course = self._create_course("TD", "S1")
+        self._create_session(td_course, datetime(2024, 1, 10, 8, 0))
+
+        is_valid = respects_weekly_chronology(
+            cm_course,
+            self.class_group,
+            datetime(2024, 1, 11, 8, 0),
+        )
+        self.assertFalse(is_valid)
+
+    def test_different_semesters_do_not_conflict(self) -> None:
+        cm_course = self._create_course("CM", "S1")
+        td_course = self._create_course("TD", "S2")
+        self._create_session(td_course, datetime(2024, 1, 10, 8, 0))
+
+        is_valid = respects_weekly_chronology(
+            cm_course,
+            self.class_group,
+            datetime(2024, 1, 9, 8, 0),
+        )
+        self.assertTrue(is_valid)
+
+    def test_same_day_respects_time_order(self) -> None:
+        cm_course = self._create_course("CM", "S1")
+        td_course = self._create_course("TD", "S1")
+        self._create_session(cm_course, datetime(2024, 1, 10, 14, 0))
+
+        is_valid = respects_weekly_chronology(
+            td_course,
+            self.class_group,
+            datetime(2024, 1, 10, 10, 0),
+        )
+        self.assertFalse(is_valid)
+
+    def test_later_type_allowed_after_earlier_same_day(self) -> None:
+        cm_course = self._create_course("CM", "S1")
+        td_course = self._create_course("TD", "S1")
+        self._create_session(cm_course, datetime(2024, 1, 10, 8, 0))
+
+        is_valid = respects_weekly_chronology(
+            td_course,
+            self.class_group,
+            datetime(2024, 1, 10, 10, 0),
+        )
+        self.assertTrue(is_valid)
 
 if __name__ == "__main__":
     unittest.main()
