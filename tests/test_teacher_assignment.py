@@ -26,6 +26,7 @@ from sqlalchemy import text
 from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
+    generate_schedule,
     has_weekly_course_conflict,
     _relocate_sessions_for_groups,
     _warn_weekly_limit,
@@ -1488,6 +1489,36 @@ class SchedulerRelocationTestCase(DatabaseTestCase):
         self.assertEqual(Session.query.filter_by(course=course).count(), 0)
         self.assertEqual(per_day_hours[first_start.date()], 0)
         self.assertEqual(weekday_frequencies.get(first_start.weekday(), 0), 0)
+
+
+class ScheduleGenerationFailureTestCase(DatabaseTestCase):
+    def test_generate_schedule_raises_when_no_room_available(self) -> None:
+        course, link, _ = self._create_tp_course()
+
+        teacher = Teacher(name="Alice")
+        db.session.add(teacher)
+        db.session.commit()
+
+        availability = TeacherAvailability(
+            teacher=teacher,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(18, 0),
+        )
+        db.session.add(availability)
+        db.session.commit()
+
+        link.teacher_a = teacher
+        course.teachers.append(teacher)
+        db.session.commit()
+
+        with self.assertRaises(ValueError) as context:
+            generate_schedule(course)
+
+        self.assertIn(
+            "Impossible de générer automatiquement toutes les séances",
+            str(context.exception),
+        )
 
 
 if __name__ == "__main__":
