@@ -930,11 +930,22 @@ def recommend_teacher_duos_for_classes(
             for pair in pairs
         )
 
+    if hasattr(int, "bit_count"):
+        def popcount(value: int) -> int:
+            return value.bit_count()
+    else:  # pragma: no cover - only executed on Python < 3.8
+        def popcount(value: int) -> int:
+            count = 0
+            while value:
+                value &= value - 1
+                count += 1
+            return count
+
     @lru_cache(maxsize=None)
     def solve(mask: int, remaining: int) -> tuple[float, tuple[tuple[int, int], ...]]:
         if remaining == 0:
             return 0.0, ()
-        if mask.bit_count() < remaining * 2:
+        if popcount(mask) < remaining * 2:
             return float("-inf"), ()
 
         best_score = float("-inf")
