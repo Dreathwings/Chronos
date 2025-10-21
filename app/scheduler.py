@@ -629,8 +629,6 @@ def _day_respects_chronology(
         return True
     family_key = _course_family_key(course)
     semester = family_key[2]
-    target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
-
     def _iter_sessions() -> Iterable[Session]:
         seen: set[int] = set()
         for collection in (class_group.all_sessions, pending_sessions):
@@ -653,10 +651,6 @@ def _day_respects_chronology(
     for session in _iter_sessions():
         if not _session_involves_class(session, class_group):
             continue
-        if target_label is not None:
-            session_label = _normalise_label(session.subgroup_label)
-            if session_label and session_label != target_label:
-                continue
         other_course = session.course
         if other_course is None:
             continue

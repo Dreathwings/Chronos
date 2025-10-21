@@ -38,7 +38,13 @@ class WeeklyChronologyRuleTestCase(DatabaseTestCase):
         db.session.add_all([self.base_name, self.class_group, self.teacher, self.room])
         db.session.commit()
 
-    def _create_course(self, course_type: str, *, use_configured: bool = True) -> Course:
+    def _create_course(
+        self,
+        course_type: str,
+        *,
+        use_configured: bool = True,
+        group_count: int = 1,
+    ) -> Course:
         course = Course(
             name=Course.compose_name(course_type, self.base_name.name, "S1"),
             course_type=course_type,
@@ -48,13 +54,15 @@ class WeeklyChronologyRuleTestCase(DatabaseTestCase):
         )
         if use_configured:
             course.configured_name = self.base_name
-        link = CourseClassLink(class_group=self.class_group)
+        link = CourseClassLink(class_group=self.class_group, group_count=group_count)
         course.class_links.append(link)
         db.session.add(course)
         db.session.commit()
         return course
 
-    def _create_session(self, course: Course, start: datetime) -> Session:
+    def _create_session(
+        self, course: Course, start: datetime, *, subgroup_label: str | None = None
+    ) -> Session:
         session = Session(
             course=course,
             class_group=self.class_group,
@@ -62,6 +70,7 @@ class WeeklyChronologyRuleTestCase(DatabaseTestCase):
             room=self.room,
             start_time=start,
             end_time=start + timedelta(hours=course.session_length_hours),
+            subgroup_label=subgroup_label,
         )
         session.attendees = [self.class_group]
         db.session.add(session)
@@ -129,6 +138,24 @@ class WeeklyChronologyRuleTestCase(DatabaseTestCase):
             course_td,
             self.class_group,
             datetime(2024, 1, 8, 8, 0, 0),
+        )
+
+        self.assertFalse(allowed)
+
+    def test_chronology_blocks_across_subgroups(self) -> None:
+        course_td = self._create_course("TD", group_count=2)
+        course_tp = self._create_course("TP", group_count=2)
+        self._create_session(
+            course_td,
+            datetime(2024, 1, 10, 8, 0, 0),
+            subgroup_label="A",
+        )
+
+        allowed = respects_weekly_chronology(
+            course_tp,
+            self.class_group,
+            datetime(2024, 1, 8, 8, 0, 0),
+            subgroup_label="B",
         )
 
         self.assertFalse(allowed)
