@@ -374,6 +374,83 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         self.assertIn(link_a.class_group_id, duos)
         self.assertNotIn(link_b.class_group_id, duos)
 
+    def test_recommended_duos_maximise_shared_availability(self) -> None:
+        course, link_a, _ = self._create_tp_course()
+        class_group_b = ClassGroup(name="INFO4", size=24)
+        link_b = CourseClassLink(class_group=class_group_b, group_count=2)
+        course.class_links.append(link_b)
+        db.session.add(class_group_b)
+        db.session.commit()
+
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        teacher_c = Teacher(name="Chloé")
+        teacher_d = Teacher(name="David")
+        db.session.add_all([teacher_a, teacher_b, teacher_c, teacher_d])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=1,
+                start_time=time(8, 0),
+                end_time=time(17, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=2,
+                start_time=time(8, 0),
+                end_time=time(17, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_c,
+                weekday=2,
+                start_time=time(8, 0),
+                end_time=time(17, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_d,
+                weekday=1,
+                start_time=time(8, 0),
+                end_time=time(17, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        duos = recommend_teacher_duos_for_classes(
+            course.class_links,
+            [teacher_a, teacher_b, teacher_c, teacher_d],
+        )
+
+        self.assertEqual(
+            set(duos.keys()),
+            {link_a.class_group_id, link_b.class_group_id},
+        )
+        recommended_pairs = {
+            frozenset((teacher_a_obj.id, teacher_b_obj.id))
+            for teacher_a_obj, teacher_b_obj, _ in duos.values()
+        }
+        self.assertEqual(
+            recommended_pairs,
+            {
+                frozenset((teacher_a.id, teacher_d.id)),
+                frozenset((teacher_b.id, teacher_c.id)),
+            },
+        )
+
 
 class DashboardActionsTestCase(DatabaseTestCase):
     def test_clear_all_sessions_removes_every_course_schedule(self) -> None:

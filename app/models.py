@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, time, timedelta
+from functools import lru_cache
 from math import ceil
 from itertools import combinations
 from typing import Iterable, List, Optional, Set
@@ -853,34 +854,167 @@ def recommend_teacher_duos_for_classes(
     The returned mapping uses the ``class_group_id`` of each ``CourseClassLink``
     as key and associates it with the selected ``(teacher_a, teacher_b,
     overlap_hours)`` tuple. If a class cannot be assigned a duo without
-    duplicating teachers, it will be omitted from the mapping.
+    duplicating teachers, it will be omitted from the mapping. When several
+    pairings are possible, the combination with the highest total shared
+    availability is chosen to maximise the overlap for every recommended duo.
     """
 
-    available_pairs = best_teacher_duos(teachers, limit=None)
-    assignments: dict[int, tuple[Teacher, Teacher, float]] = {}
-    used_teachers: set[int] = set()
+    unique_teachers: list[Teacher] = []
+    unique_ids: list[int] = []
+    seen: set[int] = set()
+    for teacher in teachers:
+        if teacher is None:
+            continue
+        identifier = teacher.id or id(teacher)
+        if identifier in seen:
+            continue
+        seen.add(identifier)
+        unique_teachers.append(teacher)
+        unique_ids.append(identifier)
 
+    teacher_count = len(unique_teachers)
+    if teacher_count < 2:
+        return {}
+
+    resolved_links: list[tuple[int, "CourseClassLink"]] = []
     for link in class_links:
         class_group_id = link.class_group_id
         if class_group_id is None and link.class_group is not None:
             class_group_id = link.class_group.id
         if class_group_id is None:
             continue
+        resolved_links.append((class_group_id, link))
 
-        selected: tuple[Teacher, Teacher, float] | None = None
-        for index, (first, second, overlap) in enumerate(available_pairs):
-            first_id = first.id or id(first)
-            second_id = second.id or id(second)
-            if first_id in used_teachers or second_id in used_teachers:
+    if not resolved_links:
+        return {}
+
+    resolved_links.sort(key=lambda item: item[0])
+
+    pairs_needed = min(len(resolved_links), teacher_count // 2)
+    if pairs_needed == 0:
+        return {}
+
+    overlaps: list[list[float]] = [
+        [0.0 for _ in range(teacher_count)] for _ in range(teacher_count)
+    ]
+    for first_index in range(teacher_count):
+        first_teacher = unique_teachers[first_index]
+        for second_index in range(first_index + 1, teacher_count):
+            second_teacher = unique_teachers[second_index]
+            overlap = first_teacher.overlapping_available_hours(second_teacher)
+            overlaps[first_index][second_index] = overlap
+            overlaps[second_index][first_index] = overlap
+
+    teacher_sort_key = [
+        ((teacher.name or "").lower(), unique_ids[index])
+        for index, teacher in enumerate(unique_teachers)
+    ]
+
+    def canonical_pairs(pairs: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...]:
+        return tuple(
+            sorted(
+                pairs,
+                key=lambda pair: (
+                    teacher_sort_key[pair[0]],
+                    teacher_sort_key[pair[1]],
+                ),
+            )
+        )
+
+    def signature(pairs: tuple[tuple[int, int], ...]) -> tuple[tuple[tuple[str, int], tuple[str, int]], ...]:
+        return tuple(
+            (
+                teacher_sort_key[pair[0]],
+                teacher_sort_key[pair[1]],
+            )
+            for pair in pairs
+        )
+
+    @lru_cache(maxsize=None)
+    def solve(mask: int, remaining: int) -> tuple[float, tuple[tuple[int, int], ...]]:
+        if remaining == 0:
+            return 0.0, ()
+        if mask.bit_count() < remaining * 2:
+            return float("-inf"), ()
+
+        best_score = float("-inf")
+        best_pairs: tuple[tuple[int, int], ...] = ()
+        best_signature: tuple[tuple[tuple[str, int], tuple[str, int]], ...] | None = None
+
+        # Option 1: skip the lowest-index teacher.
+        lowest_bit = mask & -mask
+        first_index = lowest_bit.bit_length() - 1
+        without_first = mask & ~lowest_bit
+
+        skip_score, skip_pairs = solve(without_first, remaining)
+        if skip_score > best_score:
+            best_score = skip_score
+            best_pairs = skip_pairs
+            best_signature = signature(skip_pairs)
+        elif skip_score == best_score and best_score != float("-inf"):
+            candidate_signature = signature(skip_pairs)
+            if best_signature is None or candidate_signature < best_signature:
+                best_pairs = skip_pairs
+                best_signature = candidate_signature
+
+        # Option 2: pair the first teacher with every other available teacher.
+        other_mask = without_first
+        while other_mask:
+            lowest_other_bit = other_mask & -other_mask
+            second_index = lowest_other_bit.bit_length() - 1
+            other_mask &= ~lowest_other_bit
+
+            pair_score = overlaps[first_index][second_index]
+            combined_mask = without_first & ~lowest_other_bit
+            remainder_score, remainder_pairs = solve(combined_mask, remaining - 1)
+            if remainder_score == float("-inf"):
                 continue
-            selected = (first, second, overlap)
-            used_teachers.add(first_id)
-            used_teachers.add(second_id)
-            available_pairs.pop(index)
-            break
 
-        if selected is not None:
-            assignments[class_group_id] = selected
+            candidate_score = remainder_score + pair_score
+            candidate_pairs = canonical_pairs(
+                ((min(first_index, second_index), max(first_index, second_index)),)
+                + remainder_pairs
+            )
+
+            if candidate_score > best_score:
+                best_score = candidate_score
+                best_pairs = candidate_pairs
+                best_signature = signature(candidate_pairs)
+            elif candidate_score == best_score and best_score != float("-inf"):
+                candidate_signature = signature(candidate_pairs)
+                if best_signature is None or candidate_signature < best_signature:
+                    best_pairs = candidate_pairs
+                    best_signature = candidate_signature
+
+        return best_score, best_pairs
+
+    full_mask = (1 << teacher_count) - 1
+    _, selected_pairs = solve(full_mask, pairs_needed)
+
+    if not selected_pairs:
+        return {}
+
+    selected_pairs_for_assignment = sorted(
+        selected_pairs,
+        key=lambda pair: (
+            -overlaps[pair[0]][pair[1]],
+            teacher_sort_key[pair[0]],
+            teacher_sort_key[pair[1]],
+        ),
+    )
+
+    selected_pairs_list: list[tuple[Teacher, Teacher, float]] = [
+        (
+            unique_teachers[first_index],
+            unique_teachers[second_index],
+            overlaps[first_index][second_index],
+        )
+        for first_index, second_index in selected_pairs_for_assignment
+    ]
+
+    assignments: dict[int, tuple[Teacher, Teacher, float]] = {}
+    for (class_group_id, _), pair in zip(resolved_links, selected_pairs_list):
+        assignments[class_group_id] = pair
 
     return assignments
 
