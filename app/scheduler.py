@@ -578,15 +578,16 @@ def _class_sessions_in_week(
             yield session
 
 
-def _course_family_key(course: Course) -> tuple[str, int | str]:
+def _course_family_key(course: Course) -> tuple[str, tuple[int | str | None, str]]:
+    semester = (course.semester or "").strip().upper()
     if course.course_name_id is not None:
-        return ("course-name-id", course.course_name_id)
+        return ("course-name-id", (course.course_name_id, semester))
     configured = course.configured_name
     if configured is not None and configured.name:
-        return ("course-name", configured.name.lower())
+        return ("course-name", (configured.name.lower(), semester))
     if course.id is not None:
-        return ("course-id", course.id)
-    return ("course-name", (course.name or "").lower())
+        return ("course-id", (course.id, semester))
+    return ("course-name", ((course.name or "").lower(), semester))
 
 
 def format_class_label(
