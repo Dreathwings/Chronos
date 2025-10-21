@@ -619,6 +619,7 @@ def _day_respects_chronology(
     *,
     subgroup_label: str | None = None,
     ignore_session_id: int | None = None,
+    candidate_start: datetime | None = None,
 ) -> bool:
     priority = _course_type_priority(course.course_type)
     if priority is None:
@@ -642,6 +643,9 @@ def _day_respects_chronology(
                 yield session
 
     week_start, week_end = _week_bounds(day)
+    candidate_day = (
+        candidate_start.date() if isinstance(candidate_start, datetime) else day
+    )
 
     for session in _iter_sessions():
         if not _session_involves_class(session, class_group):
@@ -661,8 +665,15 @@ def _day_respects_chronology(
         other_priority = _course_type_priority(other_course.course_type)
         if other_priority is None or other_priority == priority:
             continue
-        session_day = session.start_time.date()
+        session_start = session.start_time
+        session_day = session_start.date()
         if session_day < week_start or session_day > week_end:
+            continue
+        if candidate_start is not None and session_day == candidate_day:
+            if other_priority < priority and session_start > candidate_start:
+                return False
+            if other_priority > priority and session_start < candidate_start:
+                return False
             continue
         if other_priority < priority and session_day > day:
             return False
@@ -863,7 +874,8 @@ def respects_weekly_chronology(
     pending_sessions: Iterable[Session] = (),
     ignore_session_id: int | None = None,
 ) -> bool:
-    target_day = start.date() if isinstance(start, datetime) else start
+    is_datetime = isinstance(start, datetime)
+    target_day = start.date() if is_datetime else start
     return _day_respects_chronology(
         course,
         class_group,
@@ -871,6 +883,7 @@ def respects_weekly_chronology(
         pending_sessions,
         subgroup_label=subgroup_label,
         ignore_session_id=ignore_session_id,
+        candidate_start=start if is_datetime else None,
     )
 
 
@@ -1242,6 +1255,7 @@ def _schedule_block_for_day(
     day: date,
     desired_hours: int,
     base_offset: int,
+    pending_sessions: Iterable[Session] = (),
     reporter: ScheduleReporter | None = None,
 ) -> list[Session] | None:
     diagnostics = PlacementDiagnostics()
@@ -1256,6 +1270,7 @@ def _schedule_block_for_day(
         day=day,
         desired_hours=desired_hours,
         base_offset=base_offset,
+        pending_sessions=pending_sessions,
         diagnostics=diagnostics,
     )
     if placement:
@@ -1275,6 +1290,7 @@ def _schedule_block_for_day(
         day=day,
         desired_hours=desired_hours,
         base_offset=base_offset,
+        pending_sessions=pending_sessions,
         diagnostics=diagnostics,
     )
     if placement:
@@ -1296,6 +1312,7 @@ def _try_full_block(
     day: date,
     desired_hours: int,
     base_offset: int,
+    pending_sessions: Iterable[Session] = (),
     diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     required_capacity = course.capacity_needed_for(class_group)
@@ -1354,6 +1371,19 @@ def _try_full_block(
                     )
                 )
             continue
+        if not _day_respects_chronology(
+            course,
+            class_group,
+            day,
+            pending_sessions,
+            subgroup_label=subgroup_label,
+            candidate_start=start_dt,
+        ):
+            if diagnostics is not None:
+                diagnostics.add_other(
+                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                )
+            continue
         session = Session(
             course=course,
             teacher=teacher,
@@ -1383,6 +1413,7 @@ def _try_split_block(
     day: date,
     desired_hours: int,
     base_offset: int,
+    pending_sessions: Iterable[Session] = (),
     diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     segment_lengths = [2, 2] if desired_hours == 4 else [1] * desired_hours
@@ -1492,6 +1523,19 @@ def _try_split_block(
             rooms.append(room)
         if not valid:
             continue
+        if not _day_respects_chronology(
+            course,
+            class_group,
+            day,
+            pending_sessions,
+            subgroup_label=subgroup_label,
+            candidate_start=start_dt,
+        ):
+            if diagnostics is not None:
+                diagnostics.add_other(
+                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                )
+            continue
         sessions: list[Session] = []
         for idx, (seg_start, seg_end) in enumerate(segment_datetimes):
             session = Session(
@@ -1538,6 +1582,7 @@ def _cm_schedule_block_for_day(
     day: date,
     desired_hours: int,
     base_offset: int,
+    pending_sessions: Iterable[Session] = (),
     reporter: ScheduleReporter | None = None,
 ) -> list[Session] | None:
     diagnostics = PlacementDiagnostics()
@@ -1549,6 +1594,7 @@ def _cm_schedule_block_for_day(
         day=day,
         desired_hours=desired_hours,
         base_offset=base_offset,
+        pending_sessions=pending_sessions,
         diagnostics=diagnostics,
     )
     if placement:
@@ -1567,6 +1613,7 @@ def _cm_schedule_block_for_day(
         day=day,
         desired_hours=desired_hours,
         base_offset=base_offset,
+        pending_sessions=pending_sessions,
         diagnostics=diagnostics,
     )
     if placement:
@@ -1587,6 +1634,7 @@ def _cm_try_full_block(
     day: date,
     desired_hours: int,
     base_offset: int,
+    pending_sessions: Iterable[Session] = (),
     diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     if not class_groups:
@@ -1652,6 +1700,24 @@ def _cm_try_full_block(
                     )
                 )
             continue
+        chronology_ok = True
+        for group in class_groups:
+            if not _day_respects_chronology(
+                course,
+                group,
+                day,
+                pending_sessions,
+                subgroup_label=None,
+                candidate_start=start_dt,
+            ):
+                chronology_ok = False
+                break
+        if not chronology_ok:
+            if diagnostics is not None:
+                diagnostics.add_other(
+                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                )
+            continue
         session = Session(
             course=course,
             teacher=teacher,
@@ -1675,6 +1741,7 @@ def _cm_try_split_block(
     day: date,
     desired_hours: int,
     base_offset: int,
+    pending_sessions: Iterable[Session] = (),
     diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     if not class_groups:
@@ -1773,6 +1840,25 @@ def _cm_try_split_block(
                 break
             rooms.append(room)
         if not valid:
+            continue
+        chronology_ok = True
+        candidate_start = segment_datetimes[0][0]
+        for group in class_groups:
+            if not _day_respects_chronology(
+                course,
+                group,
+                day,
+                pending_sessions,
+                subgroup_label=None,
+                candidate_start=candidate_start,
+            ):
+                chronology_ok = False
+                break
+        if not chronology_ok:
+            if diagnostics is not None:
+                diagnostics.add_other(
+                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                )
             continue
         sessions: list[Session] = []
         for idx, (seg_start, seg_end) in enumerate(segment_datetimes):
@@ -2136,6 +2222,7 @@ def generate_schedule(
                         day=day,
                         desired_hours=desired_hours,
                         base_offset=base_offset,
+                        pending_sessions=created_sessions,
                         reporter=reporter,
                     )
                     if not block_sessions:
@@ -2381,6 +2468,7 @@ def generate_schedule(
                             day=day,
                             desired_hours=desired_hours,
                             base_offset=base_offset,
+                            pending_sessions=created_sessions,
                             reporter=reporter,
                         )
                         if not block_sessions:

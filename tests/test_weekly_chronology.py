@@ -93,6 +93,32 @@ class WeeklyChronologyRuleTestCase(DatabaseTestCase):
 
         self.assertFalse(allowed)
 
+    def test_chronology_blocks_out_of_order_within_same_day(self) -> None:
+        course_cm = self._create_course("CM")
+        course_td = self._create_course("TD")
+        self._create_session(course_cm, datetime(2024, 1, 8, 14, 0, 0))
+
+        allowed = respects_weekly_chronology(
+            course_td,
+            self.class_group,
+            datetime(2024, 1, 8, 8, 0, 0),
+        )
+
+        self.assertFalse(allowed)
+
+    def test_chronology_allows_progressive_order_same_day(self) -> None:
+        course_cm = self._create_course("CM")
+        course_td = self._create_course("TD")
+        self._create_session(course_cm, datetime(2024, 1, 8, 8, 0, 0))
+
+        allowed = respects_weekly_chronology(
+            course_td,
+            self.class_group,
+            datetime(2024, 1, 8, 14, 0, 0),
+        )
+
+        self.assertTrue(allowed)
+
 
 if __name__ == "__main__":
     unittest.main()
