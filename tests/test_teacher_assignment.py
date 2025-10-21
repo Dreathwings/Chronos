@@ -1,6 +1,7 @@
 import unittest
 from collections import Counter
 from datetime import date, datetime, time, timedelta
+from itertools import combinations
 from unittest.mock import MagicMock, patch
 
 from app import (create_app, db, _realign_tp_session_teachers,
@@ -450,6 +451,24 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
                 frozenset((teacher_b.id, teacher_c.id)),
             },
         )
+
+        pair_scores = {
+            frozenset((first.id, second.id)): first.overlapping_available_hours(second)
+            for first, second in combinations(
+                [teacher_a, teacher_b, teacher_c, teacher_d],
+                2,
+            )
+        }
+        best_mean = float("-inf")
+        for first_pair, second_pair in combinations(pair_scores.keys(), 2):
+            if len(first_pair | second_pair) != 4:
+                continue
+            candidate_mean = (pair_scores[first_pair] + pair_scores[second_pair]) / 2
+            if candidate_mean > best_mean:
+                best_mean = candidate_mean
+
+        recommended_mean = sum(overlap for _, _, overlap in duos.values()) / len(duos)
+        self.assertAlmostEqual(recommended_mean, best_mean)
 
 
 class DashboardActionsTestCase(DatabaseTestCase):

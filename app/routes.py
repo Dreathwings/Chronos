@@ -1953,11 +1953,15 @@ def course_detail(course_id: int):
     )
 
     teacher_duos_by_class: dict[int, tuple[Teacher, Teacher, float]] = {}
+    teacher_duos_average_hours: float | None = None
     if course.course_type == "TP" and available_teachers:
         teacher_duos_by_class = recommend_teacher_duos_for_classes(
             course.class_links,
             available_teachers,
         )
+        if teacher_duos_by_class:
+            total_overlap = sum(pair[2] for pair in teacher_duos_by_class.values())
+            teacher_duos_average_hours = total_overlap / len(teacher_duos_by_class)
 
     closing_spans = _closing_period_spans()
 
@@ -2021,6 +2025,7 @@ def course_detail(course_id: int):
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
         teacher_duos_by_class=teacher_duos_by_class,
+        teacher_duos_average_hours=teacher_duos_average_hours,
     )
 
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, time, timedelta
-from functools import lru_cache
 from math import ceil
 from itertools import combinations
 from typing import Iterable, List, Optional, Set
@@ -855,8 +854,9 @@ def recommend_teacher_duos_for_classes(
     as key and associates it with the selected ``(teacher_a, teacher_b,
     overlap_hours)`` tuple. If a class cannot be assigned a duo without
     duplicating teachers, it will be omitted from the mapping. When several
-    pairings are possible, the combination with the highest total shared
-    availability is chosen to maximise the overlap for every recommended duo.
+    pairings are possible, the combination that maximises the mean shared
+    availability across the recommended duos is selected, breaking ties on the
+    total shared time and then alphabetically by teacher names.
     """
 
     unique_teachers: list[Teacher] = []
@@ -941,66 +941,74 @@ def recommend_teacher_duos_for_classes(
                 count += 1
             return count
 
-    @lru_cache(maxsize=None)
-    def solve(mask: int, remaining: int) -> tuple[float, tuple[tuple[int, int], ...]]:
-        if remaining == 0:
-            return 0.0, ()
-        if popcount(mask) < remaining * 2:
-            return float("-inf"), ()
+    best_pairs: tuple[tuple[int, int], ...] = ()
+    best_average = float("-inf")
+    best_total = float("-inf")
+    best_signature: tuple[tuple[tuple[str, int], tuple[str, int]], ...] | None = None
 
-        best_score = float("-inf")
-        best_pairs: tuple[tuple[int, int], ...] = ()
-        best_signature: tuple[tuple[tuple[str, int], tuple[str, int]], ...] | None = None
+    def explore(mask: int, selected: tuple[tuple[int, int], ...], total: float) -> None:
+        nonlocal best_pairs, best_average, best_total, best_signature
 
-        # Option 1: skip the lowest-index teacher.
+        selected_count = len(selected)
+        remaining_pairs = pairs_needed - selected_count
+        if remaining_pairs == 0:
+            if not selected:
+                return
+            canonical = canonical_pairs(selected)
+            mean_overlap = total / selected_count if selected_count else 0.0
+            candidate_signature = signature(canonical)
+            if (
+                mean_overlap > best_average
+                or (
+                    mean_overlap == best_average
+                    and (
+                        total > best_total
+                        or (
+                            total == best_total
+                            and (
+                                best_signature is None
+                                or candidate_signature < best_signature
+                            )
+                        )
+                    )
+                )
+            ):
+                best_pairs = canonical
+                best_average = mean_overlap
+                best_total = total
+                best_signature = candidate_signature
+            return
+
+        if popcount(mask) < remaining_pairs * 2:
+            return
+
         lowest_bit = mask & -mask
         first_index = lowest_bit.bit_length() - 1
         without_first = mask & ~lowest_bit
 
-        skip_score, skip_pairs = solve(without_first, remaining)
-        if skip_score > best_score:
-            best_score = skip_score
-            best_pairs = skip_pairs
-            best_signature = signature(skip_pairs)
-        elif skip_score == best_score and best_score != float("-inf"):
-            candidate_signature = signature(skip_pairs)
-            if best_signature is None or candidate_signature < best_signature:
-                best_pairs = skip_pairs
-                best_signature = candidate_signature
+        explore(without_first, selected, total)
 
-        # Option 2: pair the first teacher with every other available teacher.
         other_mask = without_first
         while other_mask:
             lowest_other_bit = other_mask & -other_mask
             second_index = lowest_other_bit.bit_length() - 1
             other_mask &= ~lowest_other_bit
 
-            pair_score = overlaps[first_index][second_index]
-            combined_mask = without_first & ~lowest_other_bit
-            remainder_score, remainder_pairs = solve(combined_mask, remaining - 1)
-            if remainder_score == float("-inf"):
-                continue
-
-            candidate_score = remainder_score + pair_score
-            candidate_pairs = canonical_pairs(
-                ((min(first_index, second_index), max(first_index, second_index)),)
-                + remainder_pairs
+            pair = (
+                min(first_index, second_index),
+                max(first_index, second_index),
+            )
+            pair_score = overlaps[pair[0]][pair[1]]
+            explore(
+                without_first & ~lowest_other_bit,
+                selected + (pair,),
+                total + pair_score,
             )
 
-            if candidate_score > best_score:
-                best_score = candidate_score
-                best_pairs = candidate_pairs
-                best_signature = signature(candidate_pairs)
-            elif candidate_score == best_score and best_score != float("-inf"):
-                candidate_signature = signature(candidate_pairs)
-                if best_signature is None or candidate_signature < best_signature:
-                    best_pairs = candidate_pairs
-                    best_signature = candidate_signature
-
-        return best_score, best_pairs
-
     full_mask = (1 << teacher_count) - 1
-    _, selected_pairs = solve(full_mask, pairs_needed)
+    explore(full_mask, (), 0.0)
+
+    selected_pairs = best_pairs
 
     if not selected_pairs:
         return {}
