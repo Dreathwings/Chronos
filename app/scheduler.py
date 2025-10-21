@@ -673,6 +673,8 @@ def _day_respects_chronology(
     if priority is None:
         return True
     target_day = start.date() if isinstance(start, datetime) else start
+    week_start = target_day - timedelta(days=target_day.weekday())
+    week_end = week_start + timedelta(days=6)
     target_start = start if isinstance(start, datetime) else None
     for session in _chronology_candidate_sessions(
         course,
@@ -685,6 +687,8 @@ def _day_respects_chronology(
         if other_priority is None or other_priority == priority:
             continue
         session_day = session.start_time.date()
+        if session_day < week_start or session_day > week_end:
+            continue
         if other_priority < priority:
             if session_day > target_day:
                 return False

@@ -1301,6 +1301,32 @@ class ChronologyRuleTestCase(DatabaseTestCase):
             datetime(2024, 1, 10, 10, 0),
         )
         self.assertTrue(is_valid)
+    def test_td_allowed_with_future_cm_in_other_week(self) -> None:
+        cm_course = self._create_course("CM", "S1")
+        td_course = self._create_course("TD", "S1")
+        self._create_session(cm_course, datetime(2024, 1, 8, 8, 0))
+        self._create_session(cm_course, datetime(2024, 1, 22, 8, 0))
+
+        is_valid = respects_weekly_chronology(
+            td_course,
+            self.class_group,
+            datetime(2024, 1, 11, 8, 0),
+        )
+        self.assertTrue(is_valid)
+
+    def test_td_blocked_if_cm_later_same_week(self) -> None:
+        cm_course = self._create_course("CM", "S1")
+        td_course = self._create_course("TD", "S1")
+        self._create_session(cm_course, datetime(2024, 1, 8, 8, 0))
+        self._create_session(cm_course, datetime(2024, 1, 12, 8, 0))
+
+        is_valid = respects_weekly_chronology(
+            td_course,
+            self.class_group,
+            datetime(2024, 1, 10, 8, 0),
+        )
+        self.assertFalse(is_valid)
+
 
 if __name__ == "__main__":
     unittest.main()
