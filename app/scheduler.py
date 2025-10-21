@@ -578,15 +578,16 @@ def _class_sessions_in_week(
             yield session
 
 
-def _course_family_key(course: Course) -> tuple[str, int | str]:
+def _course_family_key(course: Course) -> tuple[str, int | str, str | None]:
+    semester = (course.semester or "").strip().upper() or None
     if course.course_name_id is not None:
-        return ("course-name-id", course.course_name_id)
+        return ("course-name-id", course.course_name_id, semester)
     configured = course.configured_name
     if configured is not None and configured.name:
-        return ("course-name", configured.name.lower())
+        return ("course-name", configured.name.lower(), semester)
     if course.id is not None:
-        return ("course-id", course.id)
-    return ("course-name", (course.name or "").lower())
+        return ("course-id", course.id, semester)
+    return ("course-name", (course.name or "").lower(), semester)
 
 
 def format_class_label(
@@ -623,18 +624,39 @@ def _day_respects_chronology(
     if priority is None:
         return True
     family_key = _course_family_key(course)
-    week_start, week_end = _week_bounds(day)
-    for session in _class_sessions_in_week(
-        class_group,
-        week_start,
-        week_end,
-        pending_sessions,
-        subgroup_label=subgroup_label,
-        ignore_session_id=ignore_session_id,
-    ):
-        if _course_family_key(session.course) != family_key:
+    semester = family_key[2]
+    target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
+
+    def _iter_sessions() -> Iterable[Session]:
+        seen: set[int] = set()
+        for collection in (class_group.all_sessions, pending_sessions):
+            for session in collection:
+                if session is None or session.start_time is None:
+                    continue
+                if ignore_session_id and session.id == ignore_session_id:
+                    continue
+                marker = session.id if session.id is not None else id(session)
+                if marker in seen:
+                    continue
+                seen.add(marker)
+                yield session
+
+    for session in _iter_sessions():
+        if not _session_involves_class(session, class_group):
             continue
-        other_priority = _course_type_priority(session.course.course_type)
+        if target_label is not None:
+            session_label = _normalise_label(session.subgroup_label)
+            if session_label and session_label != target_label:
+                continue
+        other_course = session.course
+        if other_course is None:
+            continue
+        if _course_family_key(other_course) != family_key:
+            continue
+        other_semester = (other_course.semester or "").strip().upper() or None
+        if other_semester != semester:
+            continue
+        other_priority = _course_type_priority(other_course.course_type)
         if other_priority is None or other_priority == priority:
             continue
         session_day = session.start_time.date()
