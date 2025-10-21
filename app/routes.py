@@ -46,6 +46,7 @@ from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
     fits_in_windows,
+    format_class_label,
     generate_schedule,
     has_weekly_course_conflict,
     overlaps,
@@ -716,9 +717,14 @@ def _validate_session_constraints(
             additional_hours=candidate_hours,
         ):
             week_start = start_dt.date() - timedelta(days=start_dt.weekday())
+            link = course.class_link_for(class_group)
+            label = format_class_label(
+                class_group, link=link, subgroup_label=subgroup_label
+            )
             return (
-                "La durée hebdomadaire autorisée pour ce cours est déjà atteinte "
-                f"sur la semaine du {week_start.strftime('%d/%m/%Y')}"
+                "La durée hebdomadaire autorisée pour "
+                f"{label} est déjà atteinte sur la semaine du "
+                f"{week_start.strftime('%d/%m/%Y')}"
                 "."
             )
         if not respects_weekly_chronology(

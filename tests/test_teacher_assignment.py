@@ -953,6 +953,7 @@ class WeeklyLimitTestCase(DatabaseTestCase):
         )
         self.assertIsNotNone(error)
         self.assertIn("semaine", error)
+        self.assertIn(class_group.name, error)
 
         next_week_start = third_start + timedelta(days=7)
         next_week_end = third_end + timedelta(days=7)
@@ -977,7 +978,7 @@ class WeeklyLimitTestCase(DatabaseTestCase):
             )
         )
 
-    def test_weekly_limit_shared_between_course_classes(self) -> None:
+    def test_weekly_limit_independent_between_course_classes(self) -> None:
         course, primary_class, room = self._create_course()
         teacher = self._create_teacher()
 
@@ -1012,14 +1013,69 @@ class WeeklyLimitTestCase(DatabaseTestCase):
             overlap_start,
             overlap_end,
         )
-        self.assertIsNotNone(error)
-        self.assertIn("cours", error)
+        self.assertIsNone(error)
 
-        self.assertTrue(
+        self.assertFalse(
             has_weekly_course_conflict(
                 course,
                 second_class,
                 overlap_start,
+                additional_hours=1,
+            )
+        )
+
+    def test_weekly_limit_independent_between_tp_subgroups(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher = self._create_teacher()
+        room = Room(name="B302", capacity=24)
+        db.session.add(room)
+        db.session.commit()
+
+        first_start = datetime(2024, 1, 8, 8, 0, 0)
+        first_end = datetime(2024, 1, 8, 10, 0, 0)
+        first_session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            subgroup_label="A",
+            start_time=first_start,
+            end_time=first_end,
+        )
+        first_session.attendees = [class_group]
+        db.session.add(first_session)
+        db.session.commit()
+
+        overlap_start = datetime(2024, 1, 10, 8, 0, 0)
+        overlap_end = datetime(2024, 1, 10, 9, 0, 0)
+
+        error = _validate_session_constraints(
+            course,
+            teacher,
+            room,
+            [class_group],
+            overlap_start,
+            overlap_end,
+            class_group_labels={class_group.id: "B"},
+        )
+        self.assertIsNone(error)
+
+        self.assertFalse(
+            has_weekly_course_conflict(
+                course,
+                class_group,
+                overlap_start,
+                subgroup_label="B",
+                additional_hours=1,
+            )
+        )
+
+        self.assertTrue(
+            has_weekly_course_conflict(
+                course,
+                class_group,
+                overlap_start,
+                subgroup_label="A",
                 additional_hours=1,
             )
         )
@@ -1042,11 +1098,12 @@ class SchedulerFormattingTestCase(DatabaseTestCase):
             for offset in range(6)
         }
 
-        _warn_weekly_limit(reporter, weeks)
+        _warn_weekly_limit(reporter, {"Synthèse": weeks})
 
         self.assertEqual(len(reporter.entries), 1)
         message = reporter.entries[0]["message"]
         self.assertIn("08/09/2025", message)
+        self.assertIn("Synthèse", message)
         self.assertIn("(+3 autre(s))", message)
 
 
