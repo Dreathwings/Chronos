@@ -290,6 +290,19 @@
             <div class="text-muted small mb-2">
               {% if course.course_type == 'TP' %}
               Travaux pratiques — demi-groupes
+              {% if teacher_duos %}
+              <div class="mt-1">
+                <div>Duos recommandés :</div>
+                <ul class="small mb-0 ps-3">
+                  {% for teacher_a, teacher_b, overlap in teacher_duos %}
+                  <li>
+                    {{ teacher_a.name }} + {{ teacher_b.name }} —
+                    {{ ('%.1f' % overlap).rstrip('0').rstrip('.') }} h communes
+                  </li>
+                  {% endfor %}
+                </ul>
+              </div>
+              {% endif %}
               {% else %}
               Classe entière
               {% endif %}

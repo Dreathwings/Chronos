@@ -18,6 +18,7 @@ from app.models import (
     Session,
     Teacher,
     TeacherAvailability,
+    best_teacher_duos,
 )
 from sqlalchemy import text
 from app.routes import _validate_session_constraints
@@ -182,6 +183,91 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         teachers = event["extendedProps"]["teachers"]
         self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
+
+    def test_best_teacher_duos_prefers_shared_availability(self) -> None:
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        teacher_c = Teacher(name="Chloé")
+        db.session.add_all([teacher_a, teacher_b, teacher_c])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=1,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(9, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=1,
+                start_time=time(13, 0),
+                end_time=time(17, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_c,
+                weekday=0,
+                start_time=time(10, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_c,
+                weekday=1,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        pairs = best_teacher_duos([teacher_a, teacher_b, teacher_c], limit=2)
+
+        self.assertEqual(len(pairs), 2)
+        self.assertEqual((pairs[0][0].id, pairs[0][1].id), (teacher_a.id, teacher_c.id))
+        self.assertAlmostEqual(pairs[0][2], 6.0)
+        self.assertEqual({pairs[1][0].id, pairs[1][1].id}, {teacher_a.id, teacher_b.id})
+        self.assertAlmostEqual(pairs[1][2], 3.0)
+
+    def test_best_teacher_duos_returns_zero_overlap_when_needed(self) -> None:
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        db.session.add_all([teacher_a, teacher_b])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(10, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(10, 0),
+                end_time=time(12, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        pairs = best_teacher_duos([teacher_a, teacher_b], limit=5)
+
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual({pairs[0][0].id, pairs[0][1].id}, {teacher_a.id, teacher_b.id})
+        self.assertAlmostEqual(pairs[0][2], 0.0)
 
 
 class DashboardActionsTestCase(DatabaseTestCase):

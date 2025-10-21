@@ -38,6 +38,7 @@ from .models import (
     Software,
     Teacher,
     TeacherAvailability,
+    best_teacher_duos,
     SEMESTER_CHOICES,
     semester_date_window,
 )
@@ -1951,6 +1952,10 @@ def course_detail(course_id: int):
         key=lambda teacher: (teacher.name or "").lower(),
     )
 
+    teacher_duos: list[tuple[Teacher, Teacher, float]] = []
+    if course.course_type == "TP" and available_teachers:
+        teacher_duos = best_teacher_duos(available_teachers, limit=5)
+
     closing_spans = _closing_period_spans()
 
     week_ranges = _semester_week_ranges(course.semester)
@@ -2012,6 +2017,7 @@ def course_detail(course_id: int):
         selected_course_week_labels=selected_course_week_labels,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
+        teacher_duos=teacher_duos,
     )
 
 

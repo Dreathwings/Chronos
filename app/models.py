@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, time, timedelta
 from math import ceil
-from typing import List, Optional, Set
+from itertools import combinations
+from typing import Iterable, List, Optional, Set
 
 from sqlalchemy import (
     CheckConstraint,
@@ -177,6 +178,24 @@ class Teacher(db.Model, TimeStampedModel):
             if coverage >= target_end:
                 return True
         return False
+
+    def overlapping_available_hours(self, other: "Teacher") -> float:
+        """Return the amount of overlapping availability with ``other`` in hours."""
+
+        if other is self:
+            return 0.0
+        total = 0.0
+        for weekday in range(7):
+            my_slots = [a for a in self.availabilities if a.weekday == weekday]
+            other_slots = [a for a in other.availabilities if a.weekday == weekday]
+            if not my_slots or not other_slots:
+                continue
+            for mine in my_slots:
+                for theirs in other_slots:
+                    overlap = _availability_overlap_hours(mine, theirs)
+                    if overlap > 0:
+                        total += overlap
+        return total
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"Teacher<{self.id} {self.name}>"
@@ -772,6 +791,57 @@ class TeacherAvailability(db.Model, TimeStampedModel):
             f"TeacherAvailability<Teacher {self.teacher_id} day {self.weekday} "
             f"{self.start_time}-{self.end_time}>"
         )
+
+
+def _availability_overlap_hours(
+    first: TeacherAvailability, second: TeacherAvailability
+) -> float:
+    start = max(first.start_time, second.start_time)
+    end = min(first.end_time, second.end_time)
+    if end <= start:
+        return 0.0
+    delta = datetime.combine(date.min, end) - datetime.combine(date.min, start)
+    return delta.total_seconds() / 3600
+
+
+def best_teacher_duos(
+    teachers: Iterable[Teacher], *, limit: int | None = 5
+) -> list[tuple[Teacher, Teacher, float]]:
+    """Return the best teacher pairs ranked by shared availability hours.
+
+    The returned list is ordered from the most overlapping availability to the
+    least. Each entry is a tuple ``(teacher_a, teacher_b, overlap_hours)``.
+    ``limit`` controls the maximum number of pairs returned; pass ``None`` to
+    retrieve every combination.
+    """
+
+    unique: list[Teacher] = []
+    seen: set[int] = set()
+    for teacher in teachers:
+        if teacher is None:
+            continue
+        teacher_id = teacher.id or id(teacher)
+        if teacher_id in seen:
+            continue
+        seen.add(teacher_id)
+        unique.append(teacher)
+
+    pairs: list[tuple[Teacher, Teacher, float]] = []
+    for first, second in combinations(unique, 2):
+        overlap = first.overlapping_available_hours(second)
+        pairs.append((first, second, overlap))
+
+    pairs.sort(
+        key=lambda item: (
+            -item[2],
+            (item[0].name or "").lower(),
+            (item[1].name or "").lower(),
+        )
+    )
+
+    if limit is not None and limit >= 0:
+        return pairs[:limit]
+    return pairs
 
 
 class ClassGroup(db.Model, TimeStampedModel):
