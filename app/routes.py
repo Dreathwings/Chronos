@@ -39,6 +39,7 @@ from .models import (
     Teacher,
     TeacherAvailability,
     SEMESTER_CHOICES,
+    recommend_teacher_duos_for_classes,
     semester_date_window,
 )
 from .progress import progress_registry, ScheduleProgressTracker
@@ -1951,6 +1952,17 @@ def course_detail(course_id: int):
         key=lambda teacher: (teacher.name or "").lower(),
     )
 
+    teacher_duos_by_class: dict[int, tuple[Teacher, Teacher, float]] = {}
+    teacher_duos_average_hours: float | None = None
+    if course.course_type == "TP" and available_teachers:
+        teacher_duos_by_class = recommend_teacher_duos_for_classes(
+            course.class_links,
+            available_teachers,
+        )
+        if teacher_duos_by_class:
+            total_overlap = sum(pair[2] for pair in teacher_duos_by_class.values())
+            teacher_duos_average_hours = total_overlap / len(teacher_duos_by_class)
+
     closing_spans = _closing_period_spans()
 
     week_ranges = _semester_week_ranges(course.semester)
@@ -2012,6 +2024,8 @@ def course_detail(course_id: int):
         selected_course_week_labels=selected_course_week_labels,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
+        teacher_duos_by_class=teacher_duos_by_class,
+        teacher_duos_average_hours=teacher_duos_average_hours,
     )
 
 

@@ -290,6 +290,26 @@
             <div class="text-muted small mb-2">
               {% if course.course_type == 'TP' %}
               Travaux pratiques — demi-groupes
+              {% if teacher_duos_average_hours is not none and loop.first %}
+              <div class="mt-1">
+                <span class="text-muted small">
+                  Moyenne des disponibilités communes proposées :
+                  {{ ('%.1f' % teacher_duos_average_hours).rstrip('0').rstrip('.') }} h
+                </span>
+              </div>
+              {% endif %}
+              {% set recommended_duo = teacher_duos_by_class.get(link.class_group_id) %}
+              {% if recommended_duo %}
+              <div class="mt-1">
+                <div>Duo recommandé :</div>
+                <ul class="small mb-0 ps-3">
+                  <li>
+                    {{ recommended_duo[0].name }} + {{ recommended_duo[1].name }} —
+                    {{ ('%.1f' % recommended_duo[2]).rstrip('0').rstrip('.') }} h communes
+                  </li>
+                </ul>
+              </div>
+              {% endif %}
               {% else %}
               Classe entière
               {% endif %}

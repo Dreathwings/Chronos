@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, time, timedelta
 from math import ceil
-from typing import List, Optional, Set
+from itertools import combinations
+from typing import Iterable, List, Optional, Set
 
 from sqlalchemy import (
     CheckConstraint,
@@ -177,6 +178,24 @@ class Teacher(db.Model, TimeStampedModel):
             if coverage >= target_end:
                 return True
         return False
+
+    def overlapping_available_hours(self, other: "Teacher") -> float:
+        """Return the amount of overlapping availability with ``other`` in hours."""
+
+        if other is self:
+            return 0.0
+        total = 0.0
+        for weekday in range(7):
+            my_slots = [a for a in self.availabilities if a.weekday == weekday]
+            other_slots = [a for a in other.availabilities if a.weekday == weekday]
+            if not my_slots or not other_slots:
+                continue
+            for mine in my_slots:
+                for theirs in other_slots:
+                    overlap = _availability_overlap_hours(mine, theirs)
+                    if overlap > 0:
+                        total += overlap
+        return total
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"Teacher<{self.id} {self.name}>"
@@ -772,6 +791,251 @@ class TeacherAvailability(db.Model, TimeStampedModel):
             f"TeacherAvailability<Teacher {self.teacher_id} day {self.weekday} "
             f"{self.start_time}-{self.end_time}>"
         )
+
+
+def _availability_overlap_hours(
+    first: TeacherAvailability, second: TeacherAvailability
+) -> float:
+    start = max(first.start_time, second.start_time)
+    end = min(first.end_time, second.end_time)
+    if end <= start:
+        return 0.0
+    delta = datetime.combine(date.min, end) - datetime.combine(date.min, start)
+    return delta.total_seconds() / 3600
+
+
+def best_teacher_duos(
+    teachers: Iterable[Teacher], *, limit: int | None = 5
+) -> list[tuple[Teacher, Teacher, float]]:
+    """Return the best teacher pairs ranked by shared availability hours.
+
+    The returned list is ordered from the most overlapping availability to the
+    least. Each entry is a tuple ``(teacher_a, teacher_b, overlap_hours)``.
+    ``limit`` controls the maximum number of pairs returned; pass ``None`` to
+    retrieve every combination.
+    """
+
+    unique: list[Teacher] = []
+    seen: set[int] = set()
+    for teacher in teachers:
+        if teacher is None:
+            continue
+        teacher_id = teacher.id or id(teacher)
+        if teacher_id in seen:
+            continue
+        seen.add(teacher_id)
+        unique.append(teacher)
+
+    pairs: list[tuple[Teacher, Teacher, float]] = []
+    for first, second in combinations(unique, 2):
+        overlap = first.overlapping_available_hours(second)
+        pairs.append((first, second, overlap))
+
+    pairs.sort(
+        key=lambda item: (
+            -item[2],
+            (item[0].name or "").lower(),
+            (item[1].name or "").lower(),
+        )
+    )
+
+    if limit is not None and limit >= 0:
+        return pairs[:limit]
+    return pairs
+
+
+def recommend_teacher_duos_for_classes(
+    class_links: Iterable["CourseClassLink"],
+    teachers: Iterable[Teacher],
+) -> dict[int, tuple[Teacher, Teacher, float]]:
+    """Suggest one teacher duo per class without reusing instructors.
+
+    The returned mapping uses the ``class_group_id`` of each ``CourseClassLink``
+    as key and associates it with the selected ``(teacher_a, teacher_b,
+    overlap_hours)`` tuple. If a class cannot be assigned a duo without
+    duplicating teachers, it will be omitted from the mapping. When several
+    pairings are possible, the combination that maximises the mean shared
+    availability across the recommended duos is selected, breaking ties on the
+    total shared time and then alphabetically by teacher names.
+    """
+
+    unique_teachers: list[Teacher] = []
+    unique_ids: list[int] = []
+    seen: set[int] = set()
+    for teacher in teachers:
+        if teacher is None:
+            continue
+        identifier = teacher.id or id(teacher)
+        if identifier in seen:
+            continue
+        seen.add(identifier)
+        unique_teachers.append(teacher)
+        unique_ids.append(identifier)
+
+    teacher_count = len(unique_teachers)
+    if teacher_count < 2:
+        return {}
+
+    resolved_links: list[tuple[int, "CourseClassLink"]] = []
+    for link in class_links:
+        class_group_id = link.class_group_id
+        if class_group_id is None and link.class_group is not None:
+            class_group_id = link.class_group.id
+        if class_group_id is None:
+            continue
+        resolved_links.append((class_group_id, link))
+
+    if not resolved_links:
+        return {}
+
+    resolved_links.sort(key=lambda item: item[0])
+
+    pairs_needed = min(len(resolved_links), teacher_count // 2)
+    if pairs_needed == 0:
+        return {}
+
+    overlaps: list[list[float]] = [
+        [0.0 for _ in range(teacher_count)] for _ in range(teacher_count)
+    ]
+    for first_index in range(teacher_count):
+        first_teacher = unique_teachers[first_index]
+        for second_index in range(first_index + 1, teacher_count):
+            second_teacher = unique_teachers[second_index]
+            overlap = first_teacher.overlapping_available_hours(second_teacher)
+            overlaps[first_index][second_index] = overlap
+            overlaps[second_index][first_index] = overlap
+
+    teacher_sort_key = [
+        ((teacher.name or "").lower(), unique_ids[index])
+        for index, teacher in enumerate(unique_teachers)
+    ]
+
+    def canonical_pairs(pairs: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...]:
+        return tuple(
+            sorted(
+                pairs,
+                key=lambda pair: (
+                    teacher_sort_key[pair[0]],
+                    teacher_sort_key[pair[1]],
+                ),
+            )
+        )
+
+    def signature(pairs: tuple[tuple[int, int], ...]) -> tuple[tuple[tuple[str, int], tuple[str, int]], ...]:
+        return tuple(
+            (
+                teacher_sort_key[pair[0]],
+                teacher_sort_key[pair[1]],
+            )
+            for pair in pairs
+        )
+
+    if hasattr(int, "bit_count"):
+        def popcount(value: int) -> int:
+            return value.bit_count()
+    else:  # pragma: no cover - only executed on Python < 3.8
+        def popcount(value: int) -> int:
+            count = 0
+            while value:
+                value &= value - 1
+                count += 1
+            return count
+
+    best_pairs: tuple[tuple[int, int], ...] = ()
+    best_average = float("-inf")
+    best_total = float("-inf")
+    best_signature: tuple[tuple[tuple[str, int], tuple[str, int]], ...] | None = None
+
+    def explore(mask: int, selected: tuple[tuple[int, int], ...], total: float) -> None:
+        nonlocal best_pairs, best_average, best_total, best_signature
+
+        selected_count = len(selected)
+        remaining_pairs = pairs_needed - selected_count
+        if remaining_pairs == 0:
+            if not selected:
+                return
+            canonical = canonical_pairs(selected)
+            mean_overlap = total / selected_count if selected_count else 0.0
+            candidate_signature = signature(canonical)
+            if (
+                mean_overlap > best_average
+                or (
+                    mean_overlap == best_average
+                    and (
+                        total > best_total
+                        or (
+                            total == best_total
+                            and (
+                                best_signature is None
+                                or candidate_signature < best_signature
+                            )
+                        )
+                    )
+                )
+            ):
+                best_pairs = canonical
+                best_average = mean_overlap
+                best_total = total
+                best_signature = candidate_signature
+            return
+
+        if popcount(mask) < remaining_pairs * 2:
+            return
+
+        lowest_bit = mask & -mask
+        first_index = lowest_bit.bit_length() - 1
+        without_first = mask & ~lowest_bit
+
+        explore(without_first, selected, total)
+
+        other_mask = without_first
+        while other_mask:
+            lowest_other_bit = other_mask & -other_mask
+            second_index = lowest_other_bit.bit_length() - 1
+            other_mask &= ~lowest_other_bit
+
+            pair = (
+                min(first_index, second_index),
+                max(first_index, second_index),
+            )
+            pair_score = overlaps[pair[0]][pair[1]]
+            explore(
+                without_first & ~lowest_other_bit,
+                selected + (pair,),
+                total + pair_score,
+            )
+
+    full_mask = (1 << teacher_count) - 1
+    explore(full_mask, (), 0.0)
+
+    selected_pairs = best_pairs
+
+    if not selected_pairs:
+        return {}
+
+    selected_pairs_for_assignment = sorted(
+        selected_pairs,
+        key=lambda pair: (
+            -overlaps[pair[0]][pair[1]],
+            teacher_sort_key[pair[0]],
+            teacher_sort_key[pair[1]],
+        ),
+    )
+
+    selected_pairs_list: list[tuple[Teacher, Teacher, float]] = [
+        (
+            unique_teachers[first_index],
+            unique_teachers[second_index],
+            overlaps[first_index][second_index],
+        )
+        for first_index, second_index in selected_pairs_for_assignment
+    ]
+
+    assignments: dict[int, tuple[Teacher, Teacher, float]] = {}
+    for (class_group_id, _), pair in zip(resolved_links, selected_pairs_list):
+        assignments[class_group_id] = pair
+
+    return assignments
 
 
 class ClassGroup(db.Model, TimeStampedModel):

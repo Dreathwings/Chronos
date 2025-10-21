@@ -1,6 +1,7 @@
 import unittest
 from collections import Counter
 from datetime import date, datetime, time, timedelta
+from itertools import combinations
 from unittest.mock import MagicMock, patch
 
 from app import (create_app, db, _realign_tp_session_teachers,
@@ -18,6 +19,8 @@ from app.models import (
     Session,
     Teacher,
     TeacherAvailability,
+    best_teacher_duos,
+    recommend_teacher_duos_for_classes,
 )
 from sqlalchemy import text
 from app.routes import _validate_session_constraints
@@ -182,6 +185,290 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         teachers = event["extendedProps"]["teachers"]
         self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
+
+    def test_best_teacher_duos_prefers_shared_availability(self) -> None:
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        teacher_c = Teacher(name="Chloé")
+        db.session.add_all([teacher_a, teacher_b, teacher_c])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=1,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(9, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=1,
+                start_time=time(13, 0),
+                end_time=time(17, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_c,
+                weekday=0,
+                start_time=time(10, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_c,
+                weekday=1,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        pairs = best_teacher_duos([teacher_a, teacher_b, teacher_c], limit=2)
+
+        self.assertEqual(len(pairs), 2)
+        self.assertEqual((pairs[0][0].id, pairs[0][1].id), (teacher_a.id, teacher_c.id))
+        self.assertAlmostEqual(pairs[0][2], 6.0)
+        self.assertEqual({pairs[1][0].id, pairs[1][1].id}, {teacher_a.id, teacher_b.id})
+        self.assertAlmostEqual(pairs[1][2], 3.0)
+
+    def test_best_teacher_duos_returns_zero_overlap_when_needed(self) -> None:
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        db.session.add_all([teacher_a, teacher_b])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(10, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(10, 0),
+                end_time=time(12, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        pairs = best_teacher_duos([teacher_a, teacher_b], limit=5)
+
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual({pairs[0][0].id, pairs[0][1].id}, {teacher_a.id, teacher_b.id})
+        self.assertAlmostEqual(pairs[0][2], 0.0)
+
+    def test_recommended_duos_avoid_teacher_duplicates(self) -> None:
+        course, link_a, _ = self._create_tp_course()
+        class_group_b = ClassGroup(name="INFO2", size=24)
+        link_b = CourseClassLink(class_group=class_group_b, group_count=2)
+        course.class_links.append(link_b)
+        db.session.add(class_group_b)
+        db.session.commit()
+
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        teacher_c = Teacher(name="Chloé")
+        teacher_d = Teacher(name="David")
+        db.session.add_all([teacher_a, teacher_b, teacher_c, teacher_d])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_c,
+                weekday=0,
+                start_time=time(13, 0),
+                end_time=time(17, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_d,
+                weekday=0,
+                start_time=time(13, 0),
+                end_time=time(17, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        duos = recommend_teacher_duos_for_classes(
+            course.class_links,
+            [teacher_a, teacher_b, teacher_c, teacher_d],
+        )
+
+        self.assertEqual(
+            set(duos.keys()),
+            {link_a.class_group_id, link_b.class_group_id},
+        )
+        used_teacher_ids = set()
+        for teacher_a_obj, teacher_b_obj, _ in duos.values():
+            used_teacher_ids.add(teacher_a_obj.id)
+            used_teacher_ids.add(teacher_b_obj.id)
+        self.assertEqual(used_teacher_ids, {teacher_a.id, teacher_b.id, teacher_c.id, teacher_d.id})
+
+    def test_recommended_duos_skip_when_not_enough_teachers(self) -> None:
+        course, link_a, _ = self._create_tp_course()
+        class_group_b = ClassGroup(name="INFO3", size=24)
+        link_b = CourseClassLink(class_group=class_group_b, group_count=2)
+        course.class_links.append(link_b)
+        db.session.add(class_group_b)
+        db.session.commit()
+
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        teacher_c = Teacher(name="Chloé")
+        db.session.add_all([teacher_a, teacher_b, teacher_c])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_c,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        duos = recommend_teacher_duos_for_classes(
+            course.class_links,
+            [teacher_a, teacher_b, teacher_c],
+        )
+
+        self.assertIn(link_a.class_group_id, duos)
+        self.assertNotIn(link_b.class_group_id, duos)
+
+    def test_recommended_duos_maximise_shared_availability(self) -> None:
+        course, link_a, _ = self._create_tp_course()
+        class_group_b = ClassGroup(name="INFO4", size=24)
+        link_b = CourseClassLink(class_group=class_group_b, group_count=2)
+        course.class_links.append(link_b)
+        db.session.add(class_group_b)
+        db.session.commit()
+
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        teacher_c = Teacher(name="Chloé")
+        teacher_d = Teacher(name="David")
+        db.session.add_all([teacher_a, teacher_b, teacher_c, teacher_d])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=1,
+                start_time=time(8, 0),
+                end_time=time(17, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=2,
+                start_time=time(8, 0),
+                end_time=time(17, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_c,
+                weekday=2,
+                start_time=time(8, 0),
+                end_time=time(17, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_d,
+                weekday=1,
+                start_time=time(8, 0),
+                end_time=time(17, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        duos = recommend_teacher_duos_for_classes(
+            course.class_links,
+            [teacher_a, teacher_b, teacher_c, teacher_d],
+        )
+
+        self.assertEqual(
+            set(duos.keys()),
+            {link_a.class_group_id, link_b.class_group_id},
+        )
+        recommended_pairs = {
+            frozenset((teacher_a_obj.id, teacher_b_obj.id))
+            for teacher_a_obj, teacher_b_obj, _ in duos.values()
+        }
+        self.assertEqual(
+            recommended_pairs,
+            {
+                frozenset((teacher_a.id, teacher_d.id)),
+                frozenset((teacher_b.id, teacher_c.id)),
+            },
+        )
+
+        pair_scores = {
+            frozenset((first.id, second.id)): first.overlapping_available_hours(second)
+            for first, second in combinations(
+                [teacher_a, teacher_b, teacher_c, teacher_d],
+                2,
+            )
+        }
+        best_mean = float("-inf")
+        for first_pair, second_pair in combinations(pair_scores.keys(), 2):
+            if len(first_pair | second_pair) != 4:
+                continue
+            candidate_mean = (pair_scores[first_pair] + pair_scores[second_pair]) / 2
+            if candidate_mean > best_mean:
+                best_mean = candidate_mean
+
+        recommended_mean = sum(overlap for _, _, overlap in duos.values()) / len(duos)
+        self.assertAlmostEqual(recommended_mean, best_mean)
 
 
 class DashboardActionsTestCase(DatabaseTestCase):
