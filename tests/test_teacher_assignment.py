@@ -1327,6 +1327,58 @@ class ChronologyRuleTestCase(DatabaseTestCase):
         )
         self.assertFalse(is_valid)
 
+    def test_tp_allowed_with_future_td_in_other_week(self) -> None:
+        td_course = self._create_course("TD", "S1")
+        tp_course = self._create_course("TP", "S1")
+        self._create_session(td_course, datetime(2024, 1, 8, 8, 0))
+        self._create_session(td_course, datetime(2024, 1, 22, 8, 0))
+
+        is_valid = respects_weekly_chronology(
+            tp_course,
+            self.class_group,
+            datetime(2024, 1, 11, 8, 0),
+        )
+        self.assertTrue(is_valid)
+
+    def test_tp_blocked_if_td_later_same_week(self) -> None:
+        td_course = self._create_course("TD", "S1")
+        tp_course = self._create_course("TP", "S1")
+        self._create_session(td_course, datetime(2024, 1, 8, 8, 0))
+        self._create_session(td_course, datetime(2024, 1, 12, 8, 0))
+
+        is_valid = respects_weekly_chronology(
+            tp_course,
+            self.class_group,
+            datetime(2024, 1, 10, 8, 0),
+        )
+        self.assertFalse(is_valid)
+
+    def test_eval_allowed_with_future_tp_in_other_week(self) -> None:
+        tp_course = self._create_course("TP", "S1")
+        eval_course = self._create_course("Eval", "S1")
+        self._create_session(tp_course, datetime(2024, 1, 8, 8, 0))
+        self._create_session(tp_course, datetime(2024, 1, 22, 8, 0))
+
+        is_valid = respects_weekly_chronology(
+            eval_course,
+            self.class_group,
+            datetime(2024, 1, 11, 8, 0),
+        )
+        self.assertTrue(is_valid)
+
+    def test_eval_blocked_if_tp_later_same_week(self) -> None:
+        tp_course = self._create_course("TP", "S1")
+        eval_course = self._create_course("Eval", "S1")
+        self._create_session(tp_course, datetime(2024, 1, 8, 8, 0))
+        self._create_session(tp_course, datetime(2024, 1, 12, 8, 0))
+
+        is_valid = respects_weekly_chronology(
+            eval_course,
+            self.class_group,
+            datetime(2024, 1, 10, 8, 0),
+        )
+        self.assertFalse(is_valid)
+
 
 if __name__ == "__main__":
     unittest.main()

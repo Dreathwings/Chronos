@@ -673,8 +673,7 @@ def _day_respects_chronology(
     if priority is None:
         return True
     target_day = start.date() if isinstance(start, datetime) else start
-    week_start = target_day - timedelta(days=target_day.weekday())
-    week_end = week_start + timedelta(days=6)
+    week_start, week_end = _week_bounds(target_day)
     target_start = start if isinstance(start, datetime) else None
     for session in _chronology_candidate_sessions(
         course,
