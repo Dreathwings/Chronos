@@ -16,6 +16,7 @@ from flask import (
     request,
     url_for,
 )
+from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -23,6 +24,7 @@ from . import db
 from .events import sessions_to_grouped_events
 from .models import (
     COURSE_TYPE_CHOICES,
+    COURSE_TYPE_PLACEMENT_ORDER,
     ClassGroup,
     ClosingPeriod,
     Course,
@@ -44,7 +46,9 @@ from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
     fits_in_windows,
+    format_class_label,
     generate_schedule,
+    has_weekly_course_conflict,
     overlaps,
     respects_weekly_chronology,
 )
@@ -73,9 +77,21 @@ COURSE_TYPE_LABELS = {
     "TD": "TD",
     "TP": "TP",
     "SAE": "SAE",
-    "Eval":"Eval"
+    "Eval": "Évaluation",
 }
 DEFAULT_SEMESTER = SEMESTER_CHOICES[0]
+
+COURSE_TYPE_CANONICAL = {
+    choice.upper(): choice for choice in COURSE_TYPE_CHOICES
+}
+
+COURSE_TYPE_ORDER_EXPRESSION = case(
+    *[
+        (func.upper(Course.course_type) == label.upper(), index)
+        for index, label in enumerate(COURSE_TYPE_PLACEMENT_ORDER)
+    ],
+    else_=len(COURSE_TYPE_PLACEMENT_ORDER),
+)
 
 GENERATION_STATUS_LABELS = {**CourseScheduleLog.STATUS_LABELS, "none": "Jamais généré"}
 
@@ -83,9 +99,12 @@ GENERATION_STATUS_LABELS = {**CourseScheduleLog.STATUS_LABELS, "none": "Jamais g
 def _normalise_course_type(raw_value: str | None) -> str:
     if not raw_value:
         return "CM"
-    raw_value = raw_value.strip().upper()
-    if raw_value in COURSE_TYPE_CHOICES:
-        return raw_value
+    value = raw_value.strip()
+    if not value:
+        return "CM"
+    canonical = COURSE_TYPE_CANONICAL.get(value.upper())
+    if canonical:
+        return canonical
     return "CM"
 
 
@@ -243,6 +262,49 @@ def _closing_period_backgrounds() -> list[dict[str, object]]:
     return backgrounds
 
 
+def _closing_period_spans() -> list[tuple[date, date]]:
+    periods = ClosingPeriod.ordered_periods()
+    spans = [(period.start_date, period.end_date) for period in periods]
+    if not spans:
+        return []
+    spans.sort(key=lambda span: span[0])
+    merged: list[tuple[date, date]] = []
+    for start, end in spans:
+        if not merged:
+            merged.append((start, end))
+            continue
+        previous_start, previous_end = merged[-1]
+        if start <= previous_end + timedelta(days=1):
+            merged[-1] = (previous_start, max(previous_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _is_day_within_closing_periods(day: date, spans: list[tuple[date, date]]) -> bool:
+    if not spans:
+        return False
+    for start, end in spans:
+        if start > day:
+            break
+        if start <= day <= end:
+            return True
+    return False
+
+
+def _is_week_closed(
+    week_start: date, week_end: date, spans: list[tuple[date, date]]
+) -> bool:
+    if not spans:
+        return False
+    current = week_start
+    while current <= week_end:
+        if not _is_day_within_closing_periods(current, spans):
+            return False
+        current += timedelta(days=1)
+    return True
+
+
 def _week_bounds_for(day: date) -> tuple[date, date]:
     start = day - timedelta(days=day.weekday())
     end = start + timedelta(days=6)
@@ -260,8 +322,11 @@ def _semester_week_ranges(semester: str) -> list[tuple[date, date]]:
 
     ranges: list[tuple[date, date]] = []
     current = start
+    closing_spans = _closing_period_spans()
     while current <= end:
-        ranges.append((current, current + timedelta(days=6)))
+        week_end = current + timedelta(days=6)
+        if not _is_week_closed(current, week_end, closing_spans):
+            ranges.append((current, week_end))
         current += timedelta(days=7)
     return ranges
 
@@ -340,13 +405,16 @@ def _sync_simple_relationship(collection: MutableSequence, desired: Iterable[obj
 
 
 def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> None:
+    closing_spans = _closing_period_spans()
     desired: list[date] = []
     seen: set[date] = set()
     for raw_start in week_starts:
         if raw_start is None:
             continue
-        week_start, _ = _week_bounds_for(raw_start)
+        week_start, week_end = _week_bounds_for(raw_start)
         if week_start in seen:
+            continue
+        if _is_week_closed(week_start, week_end, closing_spans):
             continue
         seen.add(week_start)
         desired.append(week_start)
@@ -365,6 +433,9 @@ def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> N
         course.allowed_weeks.append(CourseAllowedWeek(week_start=week_start))
         db.session.flush()
         existing_starts.add(week_start)
+
+    occurrence_goal = len(course.allowed_weeks)
+    course.sessions_required = max(occurrence_goal, 1)
 
 
 def _sync_course_class_links(
@@ -629,6 +700,7 @@ def _validate_session_constraints(
         subgroup_label: str | None = None
         if class_group_labels is not None and class_group.id is not None:
             subgroup_label = class_group_labels.get(class_group.id)
+        candidate_hours = max(int((end_dt - start_dt).total_seconds() // 3600), 0)
         if not class_group.is_available_during(
             start_dt,
             end_dt,
@@ -636,6 +708,25 @@ def _validate_session_constraints(
             subgroup_label=subgroup_label,
         ):
             return "La classe est indisponible sur ce créneau."
+        if has_weekly_course_conflict(
+            course,
+            class_group,
+            start_dt,
+            subgroup_label=subgroup_label,
+            ignore_session_id=ignore_session_id,
+            additional_hours=candidate_hours,
+        ):
+            week_start = start_dt.date() - timedelta(days=start_dt.weekday())
+            link = course.class_link_for(class_group)
+            label = format_class_label(
+                class_group, link=link, subgroup_label=subgroup_label
+            )
+            return (
+                "La durée hebdomadaire autorisée pour "
+                f"{label} est déjà atteinte sur la semaine du "
+                f"{week_start.strftime('%d/%m/%Y')}"
+                "."
+            )
         if not respects_weekly_chronology(
             course,
             class_group,
@@ -670,7 +761,7 @@ def _validate_session_constraints(
 def dashboard():
     courses = (
         Course.query.options(selectinload(Course.generation_logs))
-        .order_by(Course.priority.desc())
+        .order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
         .all()
     )
     teachers = Teacher.query.order_by(Teacher.name).all()
@@ -989,7 +1080,6 @@ def dashboard():
                 "required": required_total,
                 "scheduled": scheduled_total,
                 "remaining": remaining,
-                "priority": course.priority,
                 "latest_status": latest_log.status if latest_log else "none",
                 "display_status": display_status,
                 "latest_summary": latest_log.summary if latest_log and latest_log.summary else None,
@@ -1139,7 +1229,9 @@ def teachers_list():
 @bp.route("/enseignant/<int:teacher_id>", methods=["GET", "POST"])
 def teacher_detail(teacher_id: int):
     teacher = Teacher.query.get_or_404(teacher_id)
-    courses = Course.query.order_by(Course.name).all()
+    courses = (
+        Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc()).all()
+    )
     assignable_courses = [course for course in courses if teacher not in course.teachers]
 
     if request.method == "POST":
@@ -1284,7 +1376,9 @@ def classes_list():
 @bp.route("/classe/<int:class_id>", methods=["GET", "POST"])
 def class_detail(class_id: int):
     class_group = ClassGroup.query.get_or_404(class_id)
-    courses = Course.query.order_by(Course.name).all()
+    courses = (
+        Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc()).all()
+    )
     assignable_courses = [course for course in courses if class_group not in course.classes]
     teachers = Teacher.query.order_by(Teacher.name).all()
 
@@ -1464,8 +1558,6 @@ def courses_list():
                 name=Course.compose_name(course_type, course_name.name, semester),
                 description=request.form.get("description"),
                 session_length_hours=int(request.form.get("session_length_hours", 2)),
-                sessions_required=int(request.form.get("sessions_required", 1)),
-                priority=int(request.form.get("priority", 1)),
                 course_type=course_type,
                 semester=semester,
                 configured_name=course_name,
@@ -1500,7 +1592,9 @@ def courses_list():
                 flash("Nom de cours déjà utilisé", "danger")
         return redirect(url_for("main.courses_list"))
 
-    courses = Course.query.order_by(Course.priority.desc()).all()
+    courses = (
+        Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc()).all()
+    )
     return render_template(
         "courses/list.html",
         courses=courses,
@@ -1592,8 +1686,6 @@ def course_detail(course_id: int):
             )
             course.description = request.form.get("description")
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
-            course.sessions_required = int(request.form.get("sessions_required", course.sessions_required))
-            course.priority = int(request.form.get("priority", course.priority))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
             course.configured_name = selected_course_name
@@ -1859,14 +1951,20 @@ def course_detail(course_id: int):
         key=lambda teacher: (teacher.name or "").lower(),
     )
 
+    closing_spans = _closing_period_spans()
+
     week_ranges = _semester_week_ranges(course.semester)
 
     selected_course_week_values = {
-        allowed.week_start.isoformat() for allowed in course.allowed_weeks
+        allowed.week_start.isoformat()
+        for allowed in course.allowed_weeks
+        if not _is_week_closed(allowed.week_start, allowed.week_end, closing_spans)
     }
 
     known_starts = {start for start, _ in week_ranges}
     for allowed in course.allowed_weeks:
+        if _is_week_closed(allowed.week_start, allowed.week_end, closing_spans):
+            continue
         if allowed.week_start not in known_starts:
             week_ranges.append((allowed.week_start, allowed.week_end))
             known_starts.add(allowed.week_start)
@@ -1880,6 +1978,7 @@ def course_detail(course_id: int):
     selected_course_week_labels = [
         _week_label(allowed.week_start, allowed.week_end)
         for allowed in course.allowed_weeks
+        if not _is_week_closed(allowed.week_start, allowed.week_end, closing_spans)
     ]
 
     remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
@@ -2070,7 +2169,7 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
             return
         try:
             courses = (
-                Course.query.order_by(Course.priority.desc())
+                Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
                 .options(
                     selectinload(Course.class_links),
                     selectinload(Course.sessions),

@@ -46,7 +46,9 @@
                 <option value="TD">Travaux dirigés</option>
                 <option value="TP">Travaux pratiques</option>
                 <option value="SAE">Situation d'apprentissage et d'évaluation</option>
+                <option value="Eval">Évaluation</option>
               </select>
+              <div class="form-text">L'ordre de planification suit le type : CM → SAE → TD → TP → Éval.</div>
             </div>
             <div class="col-md-4">
               <label class="form-label">Semestre</label>
@@ -60,16 +62,6 @@
             <div class="col-md-4">
               <label class="form-label">Durée séance (h)</label>
               <input type="number" class="form-control" name="session_length_hours" value="2" min="1">
-            </div>
-          </div>
-          <div class="row g-2">
-            <div class="col">
-              <label class="form-label">Nombre de séances</label>
-              <input type="number" class="form-control" name="sessions_required" value="1" min="1">
-            </div>
-            <div class="col">
-              <label class="form-label">Priorité</label>
-              <input type="number" class="form-control" name="priority" value="1" min="1">
             </div>
           </div>
           <div class="row g-2 align-items-center">
@@ -154,7 +146,6 @@
                 <th>Semestre</th>
                 <th>Période</th>
                 <th>Heures planifiées</th>
-                <th>Priorité</th>
                 <th>Classes</th>
               </tr>
             </thead>
@@ -174,7 +165,6 @@
                 {% set group_total = course.class_links | map(attribute='group_count') | sum %}
                 {% set required_hours = course.total_required_hours %}
                 <td>{{ course.scheduled_hours }}h/{{ required_hours }}h</td>
-                <td>{{ course.priority }}</td>
                 <td style="width: 30%;">
                   {% if course.class_links %}
                   {% if course.course_type == 'CM' %}

@@ -65,6 +65,7 @@
                 <option value="SAE" {% if course.course_type == 'SAE' %}selected{% endif %}>SAE</option>
                 <option value="Eval" {% if course.course_type == 'Eval' %}selected{% endif %}>Eval</option>
               </select>
+              <div class="form-text">Les cours sont générés selon l'ordre : CM → SAE → TD → TP → Éval.</div>
             </div>
             <div class="col-md-4">
               <label class="form-label">Semestre</label>
@@ -78,16 +79,6 @@
             <div class="col-md-4">
               <label class="form-label">Durée séance (h)</label>
               <input type="number" class="form-control" name="session_length_hours" value="{{ course.session_length_hours }}" min="1">
-            </div>
-          </div>
-          <div class="row g-2">
-            <div class="col">
-              <label class="form-label">Séances requises</label>
-              <input type="number" class="form-control" name="sessions_required" value="{{ course.sessions_required }}" min="1">
-            </div>
-            <div class="col">
-              <label class="form-label">Priorité</label>
-              <input type="number" class="form-control" name="priority" value="{{ course.priority }}" min="1">
             </div>
           </div>
           <div class="text-muted small">
@@ -119,7 +110,7 @@
                 {% endfor %}
               </div>
             </div>
-            <div class="form-text">Cochez les semaines autorisées pour la génération automatique. Laissez vide pour autoriser l'ensemble du semestre.</div>
+            <div class="form-text">Chaque semaine cochée donnera lieu à une séance automatique. Laissez vide pour autoriser l'ensemble du semestre.</div>
             {% else %}
             <div class="alert alert-info mb-0">Aucune semaine n'est disponible pour le semestre sélectionné.</div>
             {% endif %}
