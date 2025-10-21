@@ -641,6 +641,8 @@ def _day_respects_chronology(
                 seen.add(marker)
                 yield session
 
+    week_start, week_end = _week_bounds(day)
+
     for session in _iter_sessions():
         if not _session_involves_class(session, class_group):
             continue
@@ -660,6 +662,8 @@ def _day_respects_chronology(
         if other_priority is None or other_priority == priority:
             continue
         session_day = session.start_time.date()
+        if session_day < week_start or session_day > week_end:
+            continue
         if other_priority < priority and session_day > day:
             return False
         if other_priority > priority and session_day < day:
