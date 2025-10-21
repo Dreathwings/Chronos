@@ -38,8 +38,8 @@ from .models import (
     Software,
     Teacher,
     TeacherAvailability,
-    best_teacher_duos,
     SEMESTER_CHOICES,
+    recommend_teacher_duos_for_classes,
     semester_date_window,
 )
 from .progress import progress_registry, ScheduleProgressTracker
@@ -1952,9 +1952,12 @@ def course_detail(course_id: int):
         key=lambda teacher: (teacher.name or "").lower(),
     )
 
-    teacher_duos: list[tuple[Teacher, Teacher, float]] = []
+    teacher_duos_by_class: dict[int, tuple[Teacher, Teacher, float]] = {}
     if course.course_type == "TP" and available_teachers:
-        teacher_duos = best_teacher_duos(available_teachers, limit=5)
+        teacher_duos_by_class = recommend_teacher_duos_for_classes(
+            course.class_links,
+            available_teachers,
+        )
 
     closing_spans = _closing_period_spans()
 
@@ -2017,7 +2020,7 @@ def course_detail(course_id: int):
         selected_course_week_labels=selected_course_week_labels,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
-        teacher_duos=teacher_duos,
+        teacher_duos_by_class=teacher_duos_by_class,
     )
 
 

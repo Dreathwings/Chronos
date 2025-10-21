@@ -844,6 +844,47 @@ def best_teacher_duos(
     return pairs
 
 
+def recommend_teacher_duos_for_classes(
+    class_links: Iterable["CourseClassLink"],
+    teachers: Iterable[Teacher],
+) -> dict[int, tuple[Teacher, Teacher, float]]:
+    """Suggest one teacher duo per class without reusing instructors.
+
+    The returned mapping uses the ``class_group_id`` of each ``CourseClassLink``
+    as key and associates it with the selected ``(teacher_a, teacher_b,
+    overlap_hours)`` tuple. If a class cannot be assigned a duo without
+    duplicating teachers, it will be omitted from the mapping.
+    """
+
+    available_pairs = best_teacher_duos(teachers, limit=None)
+    assignments: dict[int, tuple[Teacher, Teacher, float]] = {}
+    used_teachers: set[int] = set()
+
+    for link in class_links:
+        class_group_id = link.class_group_id
+        if class_group_id is None and link.class_group is not None:
+            class_group_id = link.class_group.id
+        if class_group_id is None:
+            continue
+
+        selected: tuple[Teacher, Teacher, float] | None = None
+        for index, (first, second, overlap) in enumerate(available_pairs):
+            first_id = first.id or id(first)
+            second_id = second.id or id(second)
+            if first_id in used_teachers or second_id in used_teachers:
+                continue
+            selected = (first, second, overlap)
+            used_teachers.add(first_id)
+            used_teachers.add(second_id)
+            available_pairs.pop(index)
+            break
+
+        if selected is not None:
+            assignments[class_group_id] = selected
+
+    return assignments
+
+
 class ClassGroup(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)

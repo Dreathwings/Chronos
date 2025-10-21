@@ -19,6 +19,7 @@ from app.models import (
     Teacher,
     TeacherAvailability,
     best_teacher_duos,
+    recommend_teacher_duos_for_classes,
 )
 from sqlalchemy import text
 from app.routes import _validate_session_constraints
@@ -268,6 +269,110 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         self.assertEqual(len(pairs), 1)
         self.assertEqual({pairs[0][0].id, pairs[0][1].id}, {teacher_a.id, teacher_b.id})
         self.assertAlmostEqual(pairs[0][2], 0.0)
+
+    def test_recommended_duos_avoid_teacher_duplicates(self) -> None:
+        course, link_a, _ = self._create_tp_course()
+        class_group_b = ClassGroup(name="INFO2", size=24)
+        link_b = CourseClassLink(class_group=class_group_b, group_count=2)
+        course.class_links.append(link_b)
+        db.session.add(class_group_b)
+        db.session.commit()
+
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        teacher_c = Teacher(name="Chloé")
+        teacher_d = Teacher(name="David")
+        db.session.add_all([teacher_a, teacher_b, teacher_c, teacher_d])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_c,
+                weekday=0,
+                start_time=time(13, 0),
+                end_time=time(17, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_d,
+                weekday=0,
+                start_time=time(13, 0),
+                end_time=time(17, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        duos = recommend_teacher_duos_for_classes(
+            course.class_links,
+            [teacher_a, teacher_b, teacher_c, teacher_d],
+        )
+
+        self.assertEqual(
+            set(duos.keys()),
+            {link_a.class_group_id, link_b.class_group_id},
+        )
+        used_teacher_ids = set()
+        for teacher_a_obj, teacher_b_obj, _ in duos.values():
+            used_teacher_ids.add(teacher_a_obj.id)
+            used_teacher_ids.add(teacher_b_obj.id)
+        self.assertEqual(used_teacher_ids, {teacher_a.id, teacher_b.id, teacher_c.id, teacher_d.id})
+
+    def test_recommended_duos_skip_when_not_enough_teachers(self) -> None:
+        course, link_a, _ = self._create_tp_course()
+        class_group_b = ClassGroup(name="INFO3", size=24)
+        link_b = CourseClassLink(class_group=class_group_b, group_count=2)
+        course.class_links.append(link_b)
+        db.session.add(class_group_b)
+        db.session.commit()
+
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        teacher_c = Teacher(name="Chloé")
+        db.session.add_all([teacher_a, teacher_b, teacher_c])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_c,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        duos = recommend_teacher_duos_for_classes(
+            course.class_links,
+            [teacher_a, teacher_b, teacher_c],
+        )
+
+        self.assertIn(link_a.class_group_id, duos)
+        self.assertNotIn(link_b.class_group_id, duos)
 
 
 class DashboardActionsTestCase(DatabaseTestCase):
