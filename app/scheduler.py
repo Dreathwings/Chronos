@@ -2574,10 +2574,12 @@ def generate_schedule(
                             break
 
                 if not placed:
-                    successful_relocation_mode: bool | None = None
+                    successful_relocation_plan: (
+                        tuple[bool, date, int] | None
+                    ) = None
 
                     def _simulate_relocation_attempt() -> bool:
-                        nonlocal successful_relocation_mode
+                        nonlocal successful_relocation_plan
                         backup_created = list(created_sessions)
                         backup_day_hours = dict(per_day_hours)
                         backup_weekdays = Counter(weekday_frequencies)
@@ -2631,6 +2633,11 @@ def generate_schedule(
                                             reporter=None,
                                         )
                                         if placement:
+                                            successful_relocation_plan = (
+                                                require_exact,
+                                                candidate_day,
+                                                base_offset,
+                                            )
                                             return True
                                 return False
                             finally:
@@ -2643,11 +2650,13 @@ def generate_schedule(
 
                         for require_exact in (True, False):
                             if _attempt(require_exact):
-                                successful_relocation_mode = require_exact
                                 return True
                         return False
 
-                    if _simulate_relocation_attempt():
+                    if _simulate_relocation_attempt() and successful_relocation_plan:
+                        require_exact, candidate_day, base_offset = (
+                            successful_relocation_plan
+                        )
                         relocated_hours = _relocate_sessions_for_groups(
                             course=course,
                             class_groups=[class_group],
@@ -2660,12 +2669,41 @@ def generate_schedule(
                             context_label=format_class_label(
                                 class_group, link=link, subgroup_label=subgroup_label
                             ),
-                            require_exact_attendees=bool(successful_relocation_mode),
+                            require_exact_attendees=require_exact,
                         )
                         if relocated_hours:
                             hours_remaining += relocated_hours
                             block_index = max(block_index - 1, 0)
-                            continue
+                            block_sessions = _schedule_block_for_day(
+                                course=course,
+                                class_group=class_group,
+                                link=link,
+                                subgroup_label=subgroup_label,
+                                day=candidate_day,
+                                desired_hours=desired_hours,
+                                base_offset=base_offset,
+                                pending_sessions=created_sessions,
+                                reporter=reporter,
+                            )
+                            if block_sessions:
+                                created_sessions.extend(block_sessions)
+                                block_hours = sum(
+                                    session.duration_hours for session in block_sessions
+                                )
+                                if block_hours > 0:
+                                    progress.record(
+                                        block_hours, sessions=len(block_sessions)
+                                    )
+                                for session in block_sessions:
+                                    reporter.session_created(session)
+                                    weekday_frequencies[
+                                        session.start_time.weekday()
+                                    ] += 1
+                                per_day_hours.setdefault(candidate_day, 0)
+                                per_day_hours[candidate_day] += block_hours
+                                hours_remaining = max(hours_remaining - block_hours, 0)
+                                block_index += 1
+                                continue
                     _warn_weekly_limit(reporter, weekly_limit_weeks)
                     for week_start in sorted(chronology_weeks):
                         reporter.warning(
