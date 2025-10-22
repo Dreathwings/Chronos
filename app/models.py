@@ -262,6 +262,9 @@ class Course(db.Model, TimeStampedModel):
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
     computers_required: Mapped[int] = mapped_column(Integer, default=0)
+    sae_split_consecutive: Mapped[bool] = mapped_column(
+        db.Boolean, default=True, nullable=False
+    )
 
     configured_name: Mapped[Optional["CourseName"]] = relationship(
         "CourseName", back_populates="courses"
@@ -351,6 +354,12 @@ class Course(db.Model, TimeStampedModel):
     @property
     def semester_window(self) -> tuple[date, date] | None:
         return semester_date_window(self.semester)
+
+    @property
+    def requires_consecutive_split(self) -> bool:
+        if not self.is_sae:
+            return True
+        return bool(self.sae_split_consecutive)
 
     @property
     def semester_start(self) -> date | None:

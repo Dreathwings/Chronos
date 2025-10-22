@@ -64,6 +64,25 @@
               <input type="number" class="form-control" name="session_length_hours" value="2" min="1">
             </div>
           </div>
+          <div class="border rounded p-3 bg-light" data-sae-split-option>
+            <div class="d-flex flex-column flex-lg-row justify-content-lg-between align-items-lg-center gap-2">
+              <div>
+                <div class="fw-semibold">Séances scindées pour les SAE</div>
+                <div class="form-text">Définissez si les heures fractionnées doivent rester consécutives lors de la planification.</div>
+              </div>
+              <div class="d-flex gap-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="sae_split_consecutive" id="new-sae-split-consecutive" value="1" checked>
+                  <label class="form-check-label" for="new-sae-split-consecutive">Séances consécutives</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="sae_split_consecutive" id="new-sae-split-flexible" value="0">
+                  <label class="form-check-label" for="new-sae-split-flexible">Séances séparées dans la journée</label>
+                </div>
+              </div>
+            </div>
+            <div class="form-text mt-2">Cette option s'applique uniquement aux cours de type SAE.</div>
+          </div>
           <div class="row g-2 align-items-center">
             <div class="col-sm-auto">
               <div class="form-check mb-0">
@@ -228,4 +247,28 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const courseTypeSelect = document.querySelector('select[name="course_type"]');
+    const saeOption = document.querySelector('[data-sae-split-option]');
+    const toggleSaeOption = function() {
+      if (!saeOption) {
+        return;
+      }
+      if (courseTypeSelect && courseTypeSelect.value === 'SAE') {
+        saeOption.classList.remove('d-none');
+      } else {
+        saeOption.classList.add('d-none');
+      }
+    };
+    if (courseTypeSelect) {
+      courseTypeSelect.addEventListener('change', toggleSaeOption);
+    }
+    toggleSaeOption();
+  });
+</script>
 {% endblock %}

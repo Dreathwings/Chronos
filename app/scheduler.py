@@ -1298,6 +1298,8 @@ def _report_one_hour_alignment(
 ) -> None:
     if reporter is None or class_group is None:
         return
+    if course.is_sae and not course.requires_consecutive_split:
+        return
 
     sessions = _matching_sessions_for_groups(
         course,
@@ -1423,6 +1425,7 @@ def _schedule_block_for_day(
         base_offset=base_offset,
         pending_sessions=pending_sessions,
         diagnostics=diagnostics,
+        require_consecutive_segments=course.requires_consecutive_split,
     )
     if placement:
         return placement
@@ -1535,6 +1538,72 @@ def _try_full_block(
     return None
 
 
+def _iter_segment_slot_choices(
+    start_index: int,
+    segment_lengths: list[int],
+    *,
+    require_consecutive: bool,
+) -> Iterable[list[list[tuple[time, time]]]]:
+    slot_count = len(SCHEDULE_SLOTS)
+    visited: set[int] = set()
+    total_length = sum(segment_lengths)
+    for offset in range(slot_count):
+        candidate_start = (start_index + offset) % slot_count
+        if candidate_start in visited:
+            continue
+        visited.add(candidate_start)
+        if require_consecutive:
+            contiguous = _collect_contiguous_slots(candidate_start, total_length)
+            if not contiguous:
+                continue
+            segments: list[list[tuple[time, time]]] = []
+            index = 0
+            valid = True
+            for length in segment_lengths:
+                segment = contiguous[index : index + length]
+                if len(segment) != length:
+                    valid = False
+                    break
+                segments.append(segment)
+                index += length
+            if not valid:
+                continue
+            yield segments
+            continue
+        yield from _iter_non_consecutive_segment_choices(candidate_start, segment_lengths)
+
+
+def _iter_non_consecutive_segment_choices(
+    start_index: int, segment_lengths: list[int]
+) -> Iterable[list[list[tuple[time, time]]]]:
+    if not segment_lengths:
+        return
+    first_length = segment_lengths[0]
+    first_block = _collect_contiguous_slots(start_index, first_length)
+    if not first_block:
+        return
+    segments: list[list[tuple[time, time]]] = [first_block]
+    if len(segment_lengths) == 1:
+        yield [list(first_block)]
+        return
+
+    def _backtrack(segment_idx: int, candidate_index: int) -> Iterable[list[list[tuple[time, time]]]]:
+        if segment_idx >= len(segment_lengths):
+            yield [list(segment) for segment in segments]
+            return
+        length = segment_lengths[segment_idx]
+        for idx in range(candidate_index, len(SCHEDULE_SLOTS)):
+            block = _collect_contiguous_slots(idx, length)
+            if not block:
+                break
+            segments.append(block)
+            next_index = idx + length
+            yield from _backtrack(segment_idx + 1, next_index)
+            segments.pop()
+
+    yield from _backtrack(1, start_index + first_length)
+
+
 def _try_split_block(
     *,
     course: Course,
@@ -1546,33 +1615,29 @@ def _try_split_block(
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
     diagnostics: PlacementDiagnostics | None = None,
+    require_consecutive_segments: bool = True,
 ) -> list[Session] | None:
     segment_lengths = [2, 2] if desired_hours == 4 else [1] * desired_hours
-    segment_count = sum(segment_lengths)
     required_capacity = course.capacity_needed_for(class_group)
     target_class_ids = (
         {class_group.id} if class_group.id is not None else set()
     )
-    slot_count = len(SCHEDULE_SLOTS)
-    for offset in range(slot_count):
-        start_index = (base_offset + offset) % slot_count
-        contiguous = _collect_contiguous_slots(start_index, segment_count)
-        if not contiguous:
-            continue
-        if not all(fits_in_windows(start, end) for start, end in contiguous):
+    for segment_slots in _iter_segment_slot_choices(
+        base_offset, segment_lengths, require_consecutive=require_consecutive_segments
+    ):
+        flat_slots = [slot for segment in segment_slots for slot in segment]
+        if not all(fits_in_windows(start, end) for start, end in flat_slots):
             continue
         segment_datetimes: list[tuple[datetime, datetime]] = []
-        index = 0
-        for length in segment_lengths:
-            segment_start = contiguous[index][0]
-            segment_end = contiguous[index + length - 1][1]
+        for slots in segment_slots:
+            segment_start = slots[0][0]
+            segment_end = slots[-1][1]
             segment_datetimes.append(
                 (
                     datetime.combine(day, segment_start),
                     datetime.combine(day, segment_end),
                 )
             )
-            index += length
         start_dt = segment_datetimes[0][0]
         end_dt = segment_datetimes[-1][1]
         if not all(
@@ -2642,6 +2707,16 @@ def generate_schedule(
                         and day.weekday() == continuity_weekday
                     ):
                         offsets.append(continuity_slot_index)
+                    if desired_hours == 1:
+                        adjacency_offsets = _one_hour_adjacency_offsets(
+                            [class_group],
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=subgroup_label,
+                        )
+                        for offset in adjacency_offsets:
+                            if offset not in offsets:
+                                offsets.append(offset)
                     preferred_slot = _preferred_slot_index_for_groups(
                         course,
                         [class_group],

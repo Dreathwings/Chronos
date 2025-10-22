@@ -81,6 +81,39 @@
               <input type="number" class="form-control" name="session_length_hours" value="{{ course.session_length_hours }}" min="1">
             </div>
           </div>
+          <div class="border rounded p-3 bg-light" data-sae-split-option>
+            <div class="d-flex flex-column flex-lg-row justify-content-lg-between align-items-lg-center gap-2">
+              <div>
+                <div class="fw-semibold">Séances scindées pour les SAE</div>
+                <div class="form-text">Choisissez si les heures fractionnées doivent être planifiées consécutivement.</div>
+              </div>
+              <div class="d-flex gap-3">
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="radio"
+                    name="sae_split_consecutive"
+                    id="edit-sae-split-consecutive"
+                    value="1"
+                    {% if course.sae_split_consecutive %}checked{% endif %}
+                  >
+                  <label class="form-check-label" for="edit-sae-split-consecutive">Séances consécutives</label>
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input"
+                    type="radio"
+                    name="sae_split_consecutive"
+                    id="edit-sae-split-flexible"
+                    value="0"
+                    {% if not course.sae_split_consecutive %}checked{% endif %}
+                  >
+                  <label class="form-check-label" for="edit-sae-split-flexible">Séances séparées dans la journée</label>
+                </div>
+              </div>
+            </div>
+            <div class="form-text mt-2">Applicable uniquement aux cours SAE. Les autres types restent inchangés.</div>
+          </div>
           <div class="text-muted small">
             {% if course.semester_start and course.semester_end %}
             Période du semestre : {{ course.semester_start.strftime('%d/%m/%Y') }} → {{ course.semester_end.strftime('%d/%m/%Y') }}
@@ -638,6 +671,22 @@
     chronosBindFilterInputs();
     const calendarEl = document.getElementById('course-calendar');
     const events = {{ events_json|safe }};
+    const saeToggleTargets = document.querySelectorAll('[data-sae-split-option]');
+    const courseTypeSelect = document.querySelector('select[name="course_type"]');
+    const updateSaeVisibility = function() {
+      const isSae = courseTypeSelect && courseTypeSelect.value === 'SAE';
+      saeToggleTargets.forEach(function(element) {
+        if (isSae) {
+          element.classList.remove('d-none');
+        } else {
+          element.classList.add('d-none');
+        }
+      });
+    };
+    if (courseTypeSelect) {
+      courseTypeSelect.addEventListener('change', updateSaeVisibility);
+    }
+    updateSaeVisibility();
     const calendar = window.createChronosCalendar(calendarEl, events);
     calendar.render();
   });

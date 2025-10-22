@@ -97,6 +97,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_type_column()
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
+        _ensure_course_sae_split_column()
         _ensure_session_attendance_backfill()
         updated_sessions = _realign_tp_session_teachers()
         if updated_sessions:
@@ -602,6 +603,50 @@ def _ensure_course_course_name_column() -> None:
         except SQLAlchemyError:
             current_app.logger.warning(
                 "Unable to add foreign key constraint to course.course_name_id; continuing without constraint."
+            )
+
+
+def _ensure_course_sae_split_column() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course")}
+    if "sae_split_consecutive" in existing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE course ADD COLUMN sae_split_consecutive BOOLEAN DEFAULT 1"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE course SET sae_split_consecutive = 1 "
+                    "WHERE sae_split_consecutive IS NULL"
+                )
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard for legacy DBs
+        current_app.logger.warning(
+            "Unable to add sae_split_consecutive column to course: %s", exc
+        )
+        return
+
+    if engine.dialect.name not in {"sqlite"}:
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE course MODIFY sae_split_consecutive "
+                        "BOOLEAN NOT NULL DEFAULT 1"
+                    )
+                )
+        except SQLAlchemyError:
+            current_app.logger.warning(
+                "Unable to tighten constraints on course.sae_split_consecutive; continuing with relaxed column."
             )
 
 

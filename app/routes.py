@@ -1564,6 +1564,8 @@ def courses_list():
                 configured_name=course_name,
                 requires_computers=bool(request.form.get("requires_computers")),
                 computers_required=computers_required,
+                sae_split_consecutive=request.form.get("sae_split_consecutive", "1")
+                != "0",
             )
             selected_equipments = [
                 equipment
@@ -1698,6 +1700,9 @@ def course_detail(course_id: int):
             course.requires_computers = bool(request.form.get("requires_computers"))
             course.computers_required = _parse_non_negative_int(
                 request.form.get("computers_required"), course.computers_required
+            )
+            course.sae_split_consecutive = (
+                request.form.get("sae_split_consecutive", "1") != "0"
             )
             selected_equipments = [
                 equipment
