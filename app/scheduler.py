@@ -2409,21 +2409,63 @@ def generate_schedule(
                             break
 
                     if not placed:
-                        relocated_hours = _relocate_sessions_for_groups(
-                            course=course,
-                            class_groups=class_groups,
-                            created_sessions=created_sessions,
-                            per_day_hours=per_day_hours,
-                            weekday_frequencies=weekday_frequencies,
-                            reporter=reporter,
-                            attempted_weeks=relocation_weeks,
-                            require_exact_attendees=True,
-                            context_label=", ".join(group.name for group in class_groups),
-                        )
-                        if relocated_hours:
-                            hours_remaining += relocated_hours
-                            block_index = max(block_index - 1, 0)
-                            continue
+                        def _simulate_cm_relocation() -> bool:
+                            backup_created = list(created_sessions)
+                            backup_day_hours = dict(per_day_hours)
+                            backup_weekdays = Counter(weekday_frequencies)
+                            nested = db.session.begin_nested()
+                            try:
+                                simulated_attempted = set(relocation_weeks)
+                                relocated = _relocate_sessions_for_groups(
+                                    course=course,
+                                    class_groups=class_groups,
+                                    created_sessions=created_sessions,
+                                    per_day_hours=per_day_hours,
+                                    weekday_frequencies=weekday_frequencies,
+                                    reporter=None,
+                                    attempted_weeks=simulated_attempted,
+                                    require_exact_attendees=True,
+                                    context_label=", ".join(
+                                        group.name for group in class_groups
+                                    ),
+                                )
+                                if not relocated:
+                                    return False
+                                placement = _cm_schedule_block_for_day(
+                                    course=course,
+                                    class_groups=class_groups,
+                                    primary_link=primary_link,
+                                    day=day,
+                                    desired_hours=desired_hours,
+                                    base_offset=base_offset,
+                                    pending_sessions=created_sessions,
+                                    reporter=None,
+                                )
+                                return bool(placement)
+                            finally:
+                                nested.rollback()
+                                created_sessions[:] = backup_created
+                                per_day_hours.clear()
+                                per_day_hours.update(backup_day_hours)
+                                weekday_frequencies.clear()
+                                weekday_frequencies.update(backup_weekdays)
+
+                        if _simulate_cm_relocation():
+                            relocated_hours = _relocate_sessions_for_groups(
+                                course=course,
+                                class_groups=class_groups,
+                                created_sessions=created_sessions,
+                                per_day_hours=per_day_hours,
+                                weekday_frequencies=weekday_frequencies,
+                                reporter=reporter,
+                                attempted_weeks=relocation_weeks,
+                                require_exact_attendees=True,
+                                context_label=", ".join(group.name for group in class_groups),
+                            )
+                            if relocated_hours:
+                                hours_remaining += relocated_hours
+                                block_index = max(block_index - 1, 0)
+                                continue
                         _warn_weekly_limit(reporter, weekly_limit_weeks)
                         for week_start in sorted(chronology_weeks):
                             reporter.warning(
@@ -2592,6 +2634,28 @@ def generate_schedule(
                 chronology_weeks: set[date] = set()
                 weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
 
+                def _candidate_base_offsets(day: date) -> list[int]:
+                    offsets: list[int] = []
+                    if (
+                        continuity_slot_index is not None
+                        and continuity_weekday is not None
+                        and day.weekday() == continuity_weekday
+                    ):
+                        offsets.append(continuity_slot_index)
+                    preferred_slot = _preferred_slot_index_for_groups(
+                        course,
+                        [class_group],
+                        day,
+                        pending_sessions=created_sessions,
+                        subgroup_label=subgroup_label,
+                    )
+                    if preferred_slot is not None and preferred_slot not in offsets:
+                        offsets.append(preferred_slot)
+                    fallback_offset = int(per_day_hours[day])
+                    if fallback_offset not in offsets:
+                        offsets.append(fallback_offset)
+                    return offsets
+
                 def _attempt_day(day: date) -> bool:
                     nonlocal hours_remaining, block_index
                     week_start, _ = _week_bounds(day)
@@ -2648,7 +2712,7 @@ def generate_schedule(
                     if fallback_offset not in preferred_offsets:
                         preferred_offsets.append(fallback_offset)
 
-                    for base_offset in preferred_offsets:
+                    for base_offset in _candidate_base_offsets(day):
                         block_sessions = _schedule_block_for_day(
                             course=course,
                             class_group=class_group,
@@ -2696,23 +2760,136 @@ def generate_schedule(
                             break
 
                 if not placed:
-                    relocated_hours = _relocate_sessions_for_groups(
-                        course=course,
-                        class_groups=[class_group],
-                        created_sessions=created_sessions,
-                        per_day_hours=per_day_hours,
-                        weekday_frequencies=weekday_frequencies,
-                        reporter=reporter,
-                        attempted_weeks=relocation_weeks,
-                        subgroup_label=subgroup_label,
-                        context_label=format_class_label(
-                            class_group, link=link, subgroup_label=subgroup_label
-                        ),
-                    )
-                    if relocated_hours:
-                        hours_remaining += relocated_hours
-                        block_index = max(block_index - 1, 0)
-                        continue
+                    successful_relocation_plan: (
+                        tuple[bool, date, int] | None
+                    ) = None
+
+                    def _simulate_relocation_attempt() -> bool:
+                        nonlocal successful_relocation_plan
+                        backup_created = list(created_sessions)
+                        backup_day_hours = dict(per_day_hours)
+                        backup_weekdays = Counter(weekday_frequencies)
+
+                        def _attempt(require_exact: bool) -> bool:
+                            nested = db.session.begin_nested()
+                            try:
+                                simulated_attempted = set(relocation_weeks)
+                                relocated = _relocate_sessions_for_groups(
+                                    course=course,
+                                    class_groups=[class_group],
+                                    created_sessions=created_sessions,
+                                    per_day_hours=per_day_hours,
+                                    weekday_frequencies=weekday_frequencies,
+                                    reporter=None,
+                                    attempted_weeks=simulated_attempted,
+                                    subgroup_label=subgroup_label,
+                                    context_label=format_class_label(
+                                        class_group,
+                                        link=link,
+                                        subgroup_label=subgroup_label,
+                                    ),
+                                    require_exact_attendees=require_exact,
+                                )
+                                if not relocated:
+                                    return False
+                                candidate_days: list[date] = []
+                                if (
+                                    continuity_target_date is not None
+                                    and continuity_target_date in available_days
+                                ):
+                                    candidate_days.append(continuity_target_date)
+                                for candidate_day in ordered_days:
+                                    if (
+                                        continuity_target_date is not None
+                                        and candidate_day == continuity_target_date
+                                    ):
+                                        continue
+                                    candidate_days.append(candidate_day)
+                                for candidate_day in candidate_days:
+                                    for base_offset in _candidate_base_offsets(candidate_day):
+                                        placement = _schedule_block_for_day(
+                                            course=course,
+                                            class_group=class_group,
+                                            link=link,
+                                            subgroup_label=subgroup_label,
+                                            day=candidate_day,
+                                            desired_hours=desired_hours,
+                                            base_offset=base_offset,
+                                            pending_sessions=created_sessions,
+                                            reporter=None,
+                                        )
+                                        if placement:
+                                            successful_relocation_plan = (
+                                                require_exact,
+                                                candidate_day,
+                                                base_offset,
+                                            )
+                                            return True
+                                return False
+                            finally:
+                                nested.rollback()
+                                created_sessions[:] = backup_created
+                                per_day_hours.clear()
+                                per_day_hours.update(backup_day_hours)
+                                weekday_frequencies.clear()
+                                weekday_frequencies.update(backup_weekdays)
+
+                        for require_exact in (True, False):
+                            if _attempt(require_exact):
+                                return True
+                        return False
+
+                    if _simulate_relocation_attempt() and successful_relocation_plan:
+                        require_exact, candidate_day, base_offset = (
+                            successful_relocation_plan
+                        )
+                        relocated_hours = _relocate_sessions_for_groups(
+                            course=course,
+                            class_groups=[class_group],
+                            created_sessions=created_sessions,
+                            per_day_hours=per_day_hours,
+                            weekday_frequencies=weekday_frequencies,
+                            reporter=reporter,
+                            attempted_weeks=relocation_weeks,
+                            subgroup_label=subgroup_label,
+                            context_label=format_class_label(
+                                class_group, link=link, subgroup_label=subgroup_label
+                            ),
+                            require_exact_attendees=require_exact,
+                        )
+                        if relocated_hours:
+                            hours_remaining += relocated_hours
+                            block_index = max(block_index - 1, 0)
+                            block_sessions = _schedule_block_for_day(
+                                course=course,
+                                class_group=class_group,
+                                link=link,
+                                subgroup_label=subgroup_label,
+                                day=candidate_day,
+                                desired_hours=desired_hours,
+                                base_offset=base_offset,
+                                pending_sessions=created_sessions,
+                                reporter=reporter,
+                            )
+                            if block_sessions:
+                                created_sessions.extend(block_sessions)
+                                block_hours = sum(
+                                    session.duration_hours for session in block_sessions
+                                )
+                                if block_hours > 0:
+                                    progress.record(
+                                        block_hours, sessions=len(block_sessions)
+                                    )
+                                for session in block_sessions:
+                                    reporter.session_created(session)
+                                    weekday_frequencies[
+                                        session.start_time.weekday()
+                                    ] += 1
+                                per_day_hours.setdefault(candidate_day, 0)
+                                per_day_hours[candidate_day] += block_hours
+                                hours_remaining = max(hours_remaining - block_hours, 0)
+                                block_index += 1
+                                continue
                     _warn_weekly_limit(reporter, weekly_limit_weeks)
                     for week_start in sorted(chronology_weeks):
                         reporter.warning(
