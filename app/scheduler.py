@@ -1287,6 +1287,50 @@ def _slots_are_adjacent(first_index: int, second_index: int) -> bool:
     return lower_end == upper_start
 
 
+def _report_one_hour_alignment(
+    *,
+    course: Course,
+    class_group: ClassGroup | None,
+    reporter: ScheduleReporter | None,
+    pending_sessions: Iterable[Session] = (),
+    link: CourseClassLink | None = None,
+    subgroup_label: str | None = None,
+) -> None:
+    if reporter is None or class_group is None:
+        return
+
+    sessions = _matching_sessions_for_groups(
+        course,
+        [class_group],
+        pending_sessions=pending_sessions,
+        subgroup_label=subgroup_label,
+    )
+    by_day: dict[date, list[Session]] = defaultdict(list)
+    for session in sessions:
+        if session.start_time is None or session.duration_hours != 1:
+            continue
+        by_day[session.start_time.date()].append(session)
+
+    for day, day_sessions in by_day.items():
+        if len(day_sessions) <= 1:
+            continue
+        ordered = sorted(day_sessions, key=lambda s: (s.start_time, s.id or 0))
+        violation_detected = False
+        for earlier, later in zip(ordered, ordered[1:]):
+            if later.start_time != earlier.end_time:
+                violation_detected = True
+                break
+        if not violation_detected:
+            continue
+        label = format_class_label(
+            class_group, link=link, subgroup_label=subgroup_label
+        )
+        reporter.warning(
+            "Séances d'1 h non consécutives détectées pour "
+            f"{course.name} — {label} le {day.strftime('%d/%m/%Y')}"
+        )
+
+
 def _one_hour_adjacency_offsets(
     class_groups: Iterable[ClassGroup],
     day: date,
@@ -2152,6 +2196,13 @@ def generate_schedule(
             f"Heures requises : {total_required} h — déjà planifiées : {already_scheduled} h"
         )
         if hours_remaining == 0:
+            for group in class_groups:
+                _report_one_hour_alignment(
+                    course=course,
+                    class_group=group,
+                    reporter=reporter,
+                    pending_sessions=created_sessions,
+                )
             reporter.info("Toutes les heures requises sont déjà planifiées.")
             progress.complete("Toutes les heures requises sont déjà planifiées.")
             reporter.finalise(len(created_sessions))
@@ -2388,6 +2439,15 @@ def generate_schedule(
                 )
                 reporter.error(message)
                 placement_failures.append(message)
+        if not placement_failures:
+            for group in class_groups:
+                _report_one_hour_alignment(
+                    course=course,
+                    class_group=group,
+                    reporter=reporter,
+                    pending_sessions=created_sessions,
+                    link=link_lookup.get(group.id) if link_lookup else None,
+                )
         reporter.info(f"Total de séances générées : {len(created_sessions)}")
         if placement_failures:
             unique_failures: list[str] = []
@@ -2667,6 +2727,18 @@ def generate_schedule(
                 )
                 reporter.error(message)
                 placement_failures.append(message)
+    if not placement_failures:
+        for link in links:
+            class_group = link.class_group
+            for subgroup_label in link.group_labels():
+                _report_one_hour_alignment(
+                    course=course,
+                    class_group=class_group,
+                    reporter=reporter,
+                    pending_sessions=created_sessions,
+                    link=link,
+                    subgroup_label=subgroup_label,
+                )
     reporter.info(f"Total de séances générées : {len(created_sessions)}")
     if placement_failures:
         unique_failures = []

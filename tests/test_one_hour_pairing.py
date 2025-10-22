@@ -62,6 +62,16 @@ class OneHourPlacementTestCase(DatabaseTestCase):
         db.session.commit()
         return course, link
 
+    def _warning_messages_for(self, course: Course) -> list[str]:
+        db.session.flush()
+        self.assertTrue(course.generation_logs)
+        log = course.generation_logs[-1]
+        return [
+            entry["message"]
+            for entry in log.parsed_messages()
+            if entry.get("level") == "warning"
+        ]
+
     def test_pairs_one_hour_session_with_existing_block(self) -> None:
         existing_course, _ = self._create_course("TD - Communication - S1")
 
@@ -125,6 +135,97 @@ class OneHourPlacementTestCase(DatabaseTestCase):
         self.assertEqual(
             generated_session.end_time, datetime(2025, 9, 8, 12, 15, 0)
         )
+
+    def test_warns_when_one_hour_sessions_not_consecutive(self) -> None:
+        course, _ = self._create_course("TD - Programmation - S1")
+
+        first_session = Session(
+            course=course,
+            teacher=self.teacher,
+            room=self.room,
+            class_group=self.class_group,
+            start_time=datetime(2025, 9, 8, 8, 0, 0),
+            end_time=datetime(2025, 9, 8, 9, 0, 0),
+        )
+        second_session = Session(
+            course=course,
+            teacher=self.teacher,
+            room=self.room,
+            class_group=self.class_group,
+            start_time=datetime(2025, 9, 8, 10, 15, 0),
+            end_time=datetime(2025, 9, 8, 11, 15, 0),
+        )
+        for session in (first_session, second_session):
+            session.attendees = [self.class_group]
+            db.session.add(session)
+        db.session.commit()
+
+        created = generate_schedule(
+            course,
+            window_start=date(2025, 9, 8),
+            window_end=date(2025, 9, 12),
+        )
+
+        self.assertEqual(created, [])
+        warnings = self._warning_messages_for(course)
+        self.assertTrue(any("non consécutives" in message for message in warnings))
+        self.assertTrue(any(self.class_group.name in message for message in warnings))
+
+    def test_warns_for_cm_non_consecutive_sessions(self) -> None:
+        second_group = ClassGroup(name="INFO2", size=26)
+        db.session.add(second_group)
+        db.session.commit()
+
+        course = Course(
+            name="CM - Réseaux - S1",
+            course_type="CM",
+            session_length_hours=1,
+            sessions_required=1,
+            semester="S1",
+        )
+        link_primary = CourseClassLink(class_group=self.class_group)
+        link_primary.teacher_a = self.teacher
+        link_secondary = CourseClassLink(class_group=second_group)
+        link_secondary.teacher_a = self.teacher
+        course.class_links.extend([link_primary, link_secondary])
+        course.teachers.append(self.teacher)
+        db.session.add(course)
+        db.session.commit()
+
+        first_session = Session(
+            course=course,
+            teacher=self.teacher,
+            room=self.room,
+            class_group=self.class_group,
+            start_time=datetime(2025, 9, 8, 8, 0, 0),
+            end_time=datetime(2025, 9, 8, 9, 0, 0),
+        )
+        second_session = Session(
+            course=course,
+            teacher=self.teacher,
+            room=self.room,
+            class_group=self.class_group,
+            start_time=datetime(2025, 9, 8, 10, 15, 0),
+            end_time=datetime(2025, 9, 8, 11, 15, 0),
+        )
+        for session in (first_session, second_session):
+            session.attendees = [self.class_group, second_group]
+            db.session.add(session)
+        db.session.commit()
+
+        created = generate_schedule(
+            course,
+            window_start=date(2025, 9, 8),
+            window_end=date(2025, 9, 12),
+        )
+
+        self.assertEqual(created, [])
+        warnings = self._warning_messages_for(course)
+        self.assertTrue(any("non consécutives" in message for message in warnings))
+        self.assertTrue(
+            any(self.class_group.name in message for message in warnings)
+        )
+        self.assertTrue(any(second_group.name in message for message in warnings))
 
 
 if __name__ == "__main__":
