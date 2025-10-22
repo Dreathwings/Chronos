@@ -578,6 +578,38 @@ def _class_sessions_in_week(
             yield session
 
 
+def _class_sessions_on_day(
+    class_group: ClassGroup,
+    day: date,
+    *,
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+) -> list[Session]:
+    target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
+    collected: list[Session] = []
+    seen: set[int] = set()
+
+    for collection in (class_group.all_sessions, pending_sessions):
+        for session in collection:
+            if session is None or session.start_time is None:
+                continue
+            marker = session.id if session.id is not None else id(session)
+            if marker in seen:
+                continue
+            if not _session_involves_class(session, class_group):
+                continue
+            if target_label is not None:
+                session_label = _normalise_label(session.subgroup_label)
+                if session_label and session_label != target_label:
+                    continue
+            if session.start_time.date() != day:
+                continue
+            collected.append(session)
+            seen.add(marker)
+
+    return sorted(collected, key=lambda s: (s.start_time, s.id or 0))
+
+
 def _course_family_key(course: Course) -> tuple[str, int | str, str | None]:
     semester = (course.semester or "").strip().upper() or None
     if course.course_name_id is not None:
@@ -1244,6 +1276,66 @@ def _collect_contiguous_slots(start_index: int, length: int) -> list[tuple[time,
         slots.append((slot_start, slot_end))
         previous_end = slot_end
     return slots
+
+
+def _slots_are_adjacent(first_index: int, second_index: int) -> bool:
+    if first_index == second_index:
+        return False
+    lower, upper = sorted((first_index, second_index))
+    lower_end = SCHEDULE_SLOTS[lower][1]
+    upper_start = SCHEDULE_SLOTS[upper][0]
+    gap = datetime.combine(date.min, upper_start) - datetime.combine(date.min, lower_end)
+    if gap < timedelta(0):
+        return False
+    if gap <= MAX_SLOT_GAP:
+        return True
+    return (lower_end, upper_start) in EXTENDED_BREAKS
+
+
+def _one_hour_adjacency_offsets(
+    class_groups: Iterable[ClassGroup],
+    day: date,
+    *,
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+) -> list[int]:
+    offsets: list[int] = []
+    seen_offsets: set[int] = set()
+
+    for group in class_groups:
+        if group is None:
+            continue
+        day_sessions = _class_sessions_on_day(
+            group,
+            day,
+            pending_sessions=pending_sessions,
+            subgroup_label=subgroup_label,
+        )
+        occupied_indices: set[int] = set()
+        for session in day_sessions:
+            try:
+                slot_index = START_TIMES.index(session.start_time.time())
+            except (AttributeError, ValueError):
+                continue
+            occupied_indices.add(slot_index)
+        for session in day_sessions:
+            if session.duration_hours != 1:
+                continue
+            try:
+                session_slot = START_TIMES.index(session.start_time.time())
+            except ValueError:
+                continue
+            for neighbour in (session_slot - 1, session_slot + 1):
+                if neighbour < 0 or neighbour >= len(SCHEDULE_SLOTS):
+                    continue
+                if neighbour in seen_offsets or neighbour in occupied_indices:
+                    continue
+                if not _slots_are_adjacent(session_slot, neighbour):
+                    continue
+                offsets.append(neighbour)
+                seen_offsets.add(neighbour)
+
+    return offsets
 
 
 def _schedule_block_for_day(
@@ -2203,6 +2295,16 @@ def generate_schedule(
                         and day.weekday() == continuity_weekday
                     ):
                         preferred_offsets.append(continuity_slot_index)
+                    if desired_hours == 1:
+                        adjacency_offsets = _one_hour_adjacency_offsets(
+                            class_groups,
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=None,
+                        )
+                        for offset in adjacency_offsets:
+                            if offset not in preferred_offsets:
+                                preferred_offsets.append(offset)
                     preferred_slot = _preferred_slot_index_for_groups(
                         course,
                         class_groups,
@@ -2468,6 +2570,16 @@ def generate_schedule(
                         and day.weekday() == continuity_weekday
                     ):
                         preferred_offsets.append(continuity_slot_index)
+                    if desired_hours == 1:
+                        adjacency_offsets = _one_hour_adjacency_offsets(
+                            [class_group],
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=subgroup_label,
+                        )
+                        for offset in adjacency_offsets:
+                            if offset not in preferred_offsets:
+                                preferred_offsets.append(offset)
                     preferred_slot = _preferred_slot_index_for_groups(
                         course,
                         [class_group],
