@@ -85,7 +85,7 @@
             <div class="d-flex flex-column flex-lg-row justify-content-lg-between align-items-lg-center gap-2">
               <div>
                 <div class="fw-semibold">Séances scindées pour les SAE</div>
-                <div class="form-text">Choisissez si les heures fractionnées doivent être planifiées consécutivement.</div>
+                <div class="form-text">Choisissez si les heures fractionnées doivent être planifiées consécutivement ou réparties sur la semaine.</div>
               </div>
               <div class="d-flex gap-3">
                 <div class="form-check">
@@ -108,7 +108,7 @@
                     value="0"
                     {% if not course.sae_split_consecutive %}checked{% endif %}
                   >
-                  <label class="form-check-label" for="edit-sae-split-flexible">Séances séparées dans la journée</label>
+                  <label class="form-check-label" for="edit-sae-split-flexible">Séances réparties sur la semaine</label>
                 </div>
               </div>
             </div>

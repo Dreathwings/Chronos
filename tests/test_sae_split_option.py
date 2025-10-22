@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 
 from app import create_app, db
 from app.models import (
@@ -46,13 +46,14 @@ class SaeSplitOptionTestCase(DatabaseTestCase):
         db.session.commit()
 
         for teacher in (self.teacher_primary, self.teacher_secondary):
-            availability = TeacherAvailability(
-                teacher=teacher,
-                weekday=0,
-                start_time=time(8, 0),
-                end_time=time(18, 0),
-            )
-            db.session.add(availability)
+            for weekday in (0, 1):
+                availability = TeacherAvailability(
+                    teacher=teacher,
+                    weekday=weekday,
+                    start_time=time(8, 0),
+                    end_time=time(18, 0),
+                )
+                db.session.add(availability)
         db.session.commit()
 
     def _create_course(self, *, consecutive: bool) -> Course:
@@ -90,6 +91,7 @@ class SaeSplitOptionTestCase(DatabaseTestCase):
 
         blocking_slots = [
             (datetime(2025, 9, 8, 10, 15, 0), datetime(2025, 9, 8, 12, 15, 0)),
+            (datetime(2025, 9, 8, 13, 30, 0), datetime(2025, 9, 8, 15, 30, 0)),
             (datetime(2025, 9, 8, 15, 45, 0), datetime(2025, 9, 8, 16, 45, 0)),
         ]
         for start_dt, end_dt in blocking_slots:
@@ -123,17 +125,13 @@ class SaeSplitOptionTestCase(DatabaseTestCase):
         created = generate_schedule(
             course,
             window_start=date(2025, 9, 8),
-            window_end=date(2025, 9, 8),
+            window_end=date(2025, 9, 9),
         )
 
         self.assertEqual(len(created), 2)
         ordered = sorted(created, key=lambda session: session.start_time)
-        morning, afternoon = ordered
+        morning, second = ordered
         self.assertEqual(morning.start_time, datetime(2025, 9, 8, 8, 0, 0))
         self.assertEqual(morning.end_time, datetime(2025, 9, 8, 10, 0, 0))
-        self.assertEqual(afternoon.start_time, datetime(2025, 9, 8, 13, 30, 0))
-        self.assertEqual(afternoon.end_time, datetime(2025, 9, 8, 15, 30, 0))
-        self.assertGreater(
-            afternoon.start_time - morning.end_time,
-            timedelta(minutes=60),
-        )
+        self.assertEqual(second.start_time.date(), date(2025, 9, 9))
+        self.assertEqual(second.duration_hours, 2)

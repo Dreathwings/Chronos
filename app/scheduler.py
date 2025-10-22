@@ -60,6 +60,13 @@ EXTENDED_BREAKS = _build_extended_breaks()
 
 START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
 
+
+def _effective_slot_length(course: Course) -> int:
+    base_length = max(int(course.session_length_hours), 1)
+    if course.is_sae and not course.requires_consecutive_split:
+        return min(base_length, 2)
+    return base_length
+
 COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
     "CM": 0,
     "TD": 1,
@@ -2233,7 +2240,7 @@ def generate_schedule(
     )
 
     created_sessions = []
-    slot_length_hours = max(int(course.session_length_hours), 1)
+    slot_length_hours = _effective_slot_length(course)
 
     links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
     if links:
@@ -2293,7 +2300,7 @@ def generate_schedule(
                 class_groups,
                 pending_sessions=created_sessions,
             )
-            slot_length_hours = max(int(course.session_length_hours), 1)
+            slot_length_hours = _effective_slot_length(course)
             block_index = 0
             relocation_weeks: set[date] = set()
             primary_link = links[0] if links else None
