@@ -578,6 +578,38 @@ def _class_sessions_in_week(
             yield session
 
 
+def _class_sessions_on_day(
+    class_group: ClassGroup,
+    day: date,
+    *,
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+) -> list[Session]:
+    target_label = _normalise_label(subgroup_label) if subgroup_label is not None else None
+    collected: list[Session] = []
+    seen: set[int] = set()
+
+    for collection in (class_group.all_sessions, pending_sessions):
+        for session in collection:
+            if session is None or session.start_time is None:
+                continue
+            marker = session.id if session.id is not None else id(session)
+            if marker in seen:
+                continue
+            if not _session_involves_class(session, class_group):
+                continue
+            if target_label is not None:
+                session_label = _normalise_label(session.subgroup_label)
+                if session_label and session_label != target_label:
+                    continue
+            if session.start_time.date() != day:
+                continue
+            collected.append(session)
+            seen.add(marker)
+
+    return sorted(collected, key=lambda s: (s.start_time, s.id or 0))
+
+
 def _course_family_key(course: Course) -> tuple[str, int | str, str | None]:
     semester = (course.semester or "").strip().upper() or None
     if course.course_name_id is not None:
@@ -1244,6 +1276,105 @@ def _collect_contiguous_slots(start_index: int, length: int) -> list[tuple[time,
         slots.append((slot_start, slot_end))
         previous_end = slot_end
     return slots
+
+
+def _slots_are_adjacent(first_index: int, second_index: int) -> bool:
+    if first_index == second_index:
+        return False
+    lower, upper = sorted((first_index, second_index))
+    lower_end = SCHEDULE_SLOTS[lower][1]
+    upper_start = SCHEDULE_SLOTS[upper][0]
+    return lower_end == upper_start
+
+
+def _report_one_hour_alignment(
+    *,
+    course: Course,
+    class_group: ClassGroup | None,
+    reporter: ScheduleReporter | None,
+    pending_sessions: Iterable[Session] = (),
+    link: CourseClassLink | None = None,
+    subgroup_label: str | None = None,
+) -> None:
+    if reporter is None or class_group is None:
+        return
+
+    sessions = _matching_sessions_for_groups(
+        course,
+        [class_group],
+        pending_sessions=pending_sessions,
+        subgroup_label=subgroup_label,
+    )
+    by_day: dict[date, list[Session]] = defaultdict(list)
+    for session in sessions:
+        if session.start_time is None or session.duration_hours != 1:
+            continue
+        by_day[session.start_time.date()].append(session)
+
+    for day, day_sessions in by_day.items():
+        if len(day_sessions) <= 1:
+            continue
+        ordered = sorted(day_sessions, key=lambda s: (s.start_time, s.id or 0))
+        violation_detected = False
+        for earlier, later in zip(ordered, ordered[1:]):
+            if later.start_time != earlier.end_time:
+                violation_detected = True
+                break
+        if not violation_detected:
+            continue
+        label = format_class_label(
+            class_group, link=link, subgroup_label=subgroup_label
+        )
+        reporter.warning(
+            "Séances d'1 h non consécutives détectées pour "
+            f"{course.name} — {label} le {day.strftime('%d/%m/%Y')}"
+        )
+
+
+def _one_hour_adjacency_offsets(
+    class_groups: Iterable[ClassGroup],
+    day: date,
+    *,
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+) -> list[int]:
+    offsets: list[int] = []
+    seen_offsets: set[int] = set()
+
+    for group in class_groups:
+        if group is None:
+            continue
+        day_sessions = _class_sessions_on_day(
+            group,
+            day,
+            pending_sessions=pending_sessions,
+            subgroup_label=subgroup_label,
+        )
+        occupied_indices: set[int] = set()
+        for session in day_sessions:
+            try:
+                slot_index = START_TIMES.index(session.start_time.time())
+            except (AttributeError, ValueError):
+                continue
+            occupied_indices.add(slot_index)
+        for session in day_sessions:
+            if session.duration_hours != 1:
+                continue
+            try:
+                session_slot = START_TIMES.index(session.start_time.time())
+            except ValueError:
+                continue
+            for neighbour in (session_slot - 1, session_slot + 1):
+                if neighbour < 0 or neighbour >= len(SCHEDULE_SLOTS):
+                    continue
+                if neighbour in seen_offsets or neighbour in occupied_indices:
+                    continue
+                if not _slots_are_adjacent(session_slot, neighbour):
+                    continue
+                offsets.append(neighbour)
+                seen_offsets.add(neighbour)
+
+    return offsets
 
 
 def _schedule_block_for_day(
@@ -2065,6 +2196,13 @@ def generate_schedule(
             f"Heures requises : {total_required} h — déjà planifiées : {already_scheduled} h"
         )
         if hours_remaining == 0:
+            for group in class_groups:
+                _report_one_hour_alignment(
+                    course=course,
+                    class_group=group,
+                    reporter=reporter,
+                    pending_sessions=created_sessions,
+                )
             reporter.info("Toutes les heures requises sont déjà planifiées.")
             progress.complete("Toutes les heures requises sont déjà planifiées.")
             reporter.finalise(len(created_sessions))
@@ -2203,6 +2341,16 @@ def generate_schedule(
                         and day.weekday() == continuity_weekday
                     ):
                         preferred_offsets.append(continuity_slot_index)
+                    if desired_hours == 1:
+                        adjacency_offsets = _one_hour_adjacency_offsets(
+                            class_groups,
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=None,
+                        )
+                        for offset in adjacency_offsets:
+                            if offset not in preferred_offsets:
+                                preferred_offsets.append(offset)
                     preferred_slot = _preferred_slot_index_for_groups(
                         course,
                         class_groups,
@@ -2333,6 +2481,15 @@ def generate_schedule(
                 )
                 reporter.error(message)
                 placement_failures.append(message)
+        if not placement_failures:
+            for group in class_groups:
+                _report_one_hour_alignment(
+                    course=course,
+                    class_group=group,
+                    reporter=reporter,
+                    pending_sessions=created_sessions,
+                    link=link_lookup.get(group.id) if link_lookup else None,
+                )
         reporter.info(f"Total de séances générées : {len(created_sessions)}")
         if placement_failures:
             unique_failures: list[str] = []
@@ -2525,6 +2682,35 @@ def generate_schedule(
                         week_start, _ = _week_bounds(day)
                         chronology_weeks.add(week_start)
                         return False
+                    preferred_offsets: list[int] = []
+                    if (
+                        continuity_slot_index is not None
+                        and continuity_weekday is not None
+                        and day.weekday() == continuity_weekday
+                    ):
+                        preferred_offsets.append(continuity_slot_index)
+                    if desired_hours == 1:
+                        adjacency_offsets = _one_hour_adjacency_offsets(
+                            [class_group],
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=subgroup_label,
+                        )
+                        for offset in adjacency_offsets:
+                            if offset not in preferred_offsets:
+                                preferred_offsets.append(offset)
+                    preferred_slot = _preferred_slot_index_for_groups(
+                        course,
+                        [class_group],
+                        day,
+                        pending_sessions=created_sessions,
+                        subgroup_label=subgroup_label,
+                    )
+                    if preferred_slot is not None and preferred_slot not in preferred_offsets:
+                        preferred_offsets.append(preferred_slot)
+                    fallback_offset = int(per_day_hours[day])
+                    if fallback_offset not in preferred_offsets:
+                        preferred_offsets.append(fallback_offset)
 
                     for base_offset in _candidate_base_offsets(day):
                         block_sessions = _schedule_block_for_day(
@@ -2718,6 +2904,18 @@ def generate_schedule(
                 )
                 reporter.error(message)
                 placement_failures.append(message)
+    if not placement_failures:
+        for link in links:
+            class_group = link.class_group
+            for subgroup_label in link.group_labels():
+                _report_one_hour_alignment(
+                    course=course,
+                    class_group=class_group,
+                    reporter=reporter,
+                    pending_sessions=created_sessions,
+                    link=link,
+                    subgroup_label=subgroup_label,
+                )
     reporter.info(f"Total de séances générées : {len(created_sessions)}")
     if placement_failures:
         unique_failures = []
