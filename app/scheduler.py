@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter, defaultdict
+from functools import lru_cache
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, List, Optional, Set
 
@@ -15,11 +16,13 @@ from .models import (
     CourseClassLink,
     CourseScheduleLog,
     ClosingPeriod,
+    Equipment,
     Room,
     Session,
     Teacher,
 )
 from .progress import NullScheduleProgress, ScheduleProgress
+from sqlalchemy.orm import selectinload
 
 # Working windows respecting pauses
 WORKING_WINDOWS: List[tuple[time, time]] = [
@@ -68,6 +71,50 @@ COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
     "EVAL": 3,
     "Eval": 3,
 }
+
+
+def _segment_duration_hours(start: datetime, end: datetime) -> float:
+    delta = end - start
+    return max(delta.total_seconds() / 3600.0, 0.0)
+
+
+@lru_cache(maxsize=256)
+def _room_candidate_ids(
+    required_students: int,
+    required_posts: int,
+    equipment_ids: tuple[int, ...],
+) -> tuple[int, ...]:
+    query = Room.query
+    if required_students:
+        query = query.filter(Room.capacity >= required_students)
+    if required_posts:
+        query = query.filter(Room.computers >= required_posts)
+    for equipment_id in equipment_ids:
+        query = query.filter(Room.equipments.any(Equipment.id == equipment_id))
+    ids = [
+        room_id
+        for (room_id,) in query.with_entities(Room.id)
+        .order_by(Room.capacity.asc(), Room.name.asc())
+        .all()
+        if room_id is not None
+    ]
+    return tuple(ids)
+
+
+def _ordered_candidate_rooms(candidate_ids: tuple[int, ...]) -> list[Room]:
+    if not candidate_ids:
+        return []
+    rooms = (
+        Room.query.filter(Room.id.in_(candidate_ids))
+        .options(
+            selectinload(Room.softwares),
+            selectinload(Room.equipments),
+            selectinload(Room.sessions),
+        )
+        .all()
+    )
+    by_id = {room.id: room for room in rooms if room.id is not None}
+    return [by_id[room_id] for room_id in candidate_ids if room_id in by_id]
 
 
 def _course_type_priority(course_type: str | None) -> int | None:
@@ -297,21 +344,38 @@ def find_available_room(
     *,
     required_capacity: int | None = None,
 ) -> Optional[Room]:
-    rooms = Room.query.order_by(Room.capacity.asc(), Room.name.asc()).all()
+    required_students = max(required_capacity or 1, 1)
+    required_posts = course.required_computer_posts()
+    equipment_ids = tuple(
+        sorted(equipment.id for equipment in course.equipments if equipment.id)
+    )
+    candidate_ids = _room_candidate_ids(required_students, required_posts, equipment_ids)
+    candidates = _ordered_candidate_rooms(candidate_ids)
+    candidate_id_set = {room.id for room in candidates if room.id is not None}
+
     preferred_rooms: list[Room] = []
     preferred_room_ids: set[int] = set()
     if course.preferred_rooms:
         preferred_rooms = sorted(
-            [room for room in course.preferred_rooms if room is not None],
+            [
+                room
+                for room in course.preferred_rooms
+                if room is not None and room.id in candidate_id_set
+            ],
             key=lambda room: (room.capacity or 0, (room.name or "").lower()),
         )
-        preferred_room_ids = {room.id for room in preferred_rooms if room.id}
+
     ordered_rooms: list[Room] = []
-    ordered_rooms.extend(preferred_rooms)
-    ordered_rooms.extend(room for room in rooms if room.id not in preferred_room_ids)
-    required_students = required_capacity or 1
-    required_posts = course.required_computer_posts()
-    required_equipment_ids = {equipment.id for equipment in course.equipments}
+    seen: set[int] = set()
+    for room in preferred_rooms + candidates:
+        room_id = room.id
+        if room_id is None:
+            continue
+        if room_id in seen:
+            continue
+        ordered_rooms.append(room)
+        seen.add(room_id)
+
     required_software_ids = {software.id for software in course.softwares}
 
     best_room: Room | None = None
@@ -321,10 +385,6 @@ def find_available_room(
         if room.capacity < required_students:
             continue
         if required_posts and (room.computers or 0) < required_posts:
-            continue
-
-        room_equipment_ids = {equipment.id for equipment in room.equipments}
-        if required_equipment_ids.difference(room_equipment_ids):
             continue
 
         room_software_ids = {software.id for software in room.softwares}
@@ -339,7 +399,11 @@ def find_available_room(
             continue
 
         missing_count = len(missing_softwares)
-        if best_room is None or best_missing_softwares is None or missing_count < best_missing_softwares:
+        if (
+            best_room is None
+            or best_missing_softwares is None
+            or missing_count < best_missing_softwares
+        ):
             best_room = room
             best_missing_softwares = missing_count
             if missing_count == 0:
@@ -1003,21 +1067,89 @@ def find_available_teacher(
             ),
         )
 
+    segments_to_check = segments or [(start, end)]
+    segment_days = {segment_start.date() for segment_start, _ in segments_to_check}
+    segment_hours_by_day: dict[date, float] = defaultdict(float)
+    for segment_start, segment_end in segments_to_check:
+        segment_hours_by_day[segment_start.date()] += _segment_duration_hours(
+            segment_start, segment_end
+        )
+
+    preferred_ids = {teacher.id for teacher in preferred if teacher and teacher.id}
+
+    viable: list[tuple[tuple[int | float, ...], Teacher]] = []
     for teacher in candidates:
-        segments_to_check = segments or [(start, end)]
-        if not all(
-            teacher.is_available_during(segment_start, segment_end)
-            for segment_start, segment_end in segments_to_check
-        ):
+        availability_cache = teacher.__dict__.setdefault("_availability_cache", {})
+        available = True
+        for segment_start, segment_end in segments_to_check:
+            cache_key = (segment_start, segment_end)
+            if cache_key not in availability_cache:
+                availability_cache[cache_key] = teacher.is_available_during(
+                    segment_start, segment_end
+                )
+            if not availability_cache[cache_key]:
+                available = False
+                break
+        if not available:
             continue
-        if any(
-            overlaps(s.start_time, s.end_time, segment_start, segment_end)
-            for s in teacher.sessions
-            for segment_start, segment_end in segments_to_check
-        ):
+
+        relevant_sessions = [
+            session
+            for session in teacher.sessions
+            if session.start_time.date() in segment_days
+        ]
+        conflict = False
+        for session in relevant_sessions:
+            for segment_start, segment_end in segments_to_check:
+                if overlaps(session.start_time, session.end_time, segment_start, segment_end):
+                    conflict = True
+                    break
+            if conflict:
+                break
+        if conflict:
             continue
-        return teacher
-    return None
+
+        affinity = 3
+        teacher_id = teacher.id
+        if teacher_id is not None and teacher_id in preferred_ids:
+            affinity = 0
+        elif target_class_ids and any(
+            _session_attendee_ids(session) == target_class_ids
+            for session in teacher.sessions
+        ):
+            affinity = min(affinity, 1)
+        elif any(session.course_id == course.id for session in teacher.sessions):
+            affinity = min(affinity, 2)
+
+        day_penalty = 0.0
+        for day, added_hours in segment_hours_by_day.items():
+            existing = sum(
+                session.duration_hours
+                for session in teacher.sessions
+                if session.start_time.date() == day
+            )
+            day_penalty = max(day_penalty, existing + added_hours)
+
+        total_assignments = len(teacher.sessions)
+        score = (affinity, day_penalty, total_assignments, (teacher.name or "").lower())
+        viable.append((score, teacher))
+
+    if not viable:
+        return None
+
+    viable.sort(key=lambda item: item[0])
+    return viable[0][1]
+
+
+def _persist_sessions(sessions: Iterable[Session]) -> None:
+    to_persist = [session for session in sessions if session is not None]
+    if not to_persist:
+        return
+    # Un flush unique conserve la parade au bug MariaDB mentionné dans les
+    # commentaires historiques tout en évitant des allers-retours répétés avec
+    # la base de données pour chaque séance.
+    db.session.add_all(to_persist)
+    db.session.flush()
 
 
 def _normalise_label(label: str | None) -> str:
@@ -1525,12 +1657,7 @@ def _try_full_block(
             end_time=end_dt,
         )
         session.attendees = [class_group]
-        db.session.add(session)
-        # Certains connecteurs MariaDB présentent un bug avec les insertions en
-        # lot exécutées via ``executemany`` et lèvent une ``SystemError`` sans
-        # message.  En vidant la session SQLAlchemy dès la création, chaque
-        # séance est insérée individuellement et on évite le chemin fautif.
-        db.session.flush()
+        _persist_sessions([session])
         return [session]
     return None
 
@@ -1679,9 +1806,8 @@ def _try_split_block(
                 end_time=seg_end,
             )
             session.attendees = [class_group]
-            db.session.add(session)
-            db.session.flush()
             sessions.append(session)
+        _persist_sessions(sessions)
         return sessions
     return None
 
@@ -1858,8 +1984,7 @@ def _cm_try_full_block(
             end_time=end_dt,
         )
         session.attendees = list(class_groups)
-        db.session.add(session)
-        db.session.flush()
+        _persist_sessions([session])
         return [session]
     return None
 
@@ -2002,9 +2127,8 @@ def _cm_try_split_block(
                 end_time=seg_end,
             )
             session.attendees = list(class_groups)
-            db.session.add(session)
-            db.session.flush()
             sessions.append(session)
+        _persist_sessions(sessions)
         return sessions
     return None
 
@@ -2642,6 +2766,16 @@ def generate_schedule(
                         and day.weekday() == continuity_weekday
                     ):
                         offsets.append(continuity_slot_index)
+                    if desired_hours == 1:
+                        adjacency_offsets = _one_hour_adjacency_offsets(
+                            [class_group],
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=subgroup_label,
+                        )
+                        for offset in adjacency_offsets:
+                            if offset not in offsets:
+                                offsets.append(offset)
                     preferred_slot = _preferred_slot_index_for_groups(
                         course,
                         [class_group],
