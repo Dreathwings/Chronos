@@ -456,25 +456,27 @@ def _describe_teacher_unavailability(
     link: CourseClassLink | None = None,
     subgroup_label: str | None = None,
     segments: Optional[list[tuple[datetime, datetime]]] = None,
+    allow_teacher_fallback: bool = True,
 ) -> str:
     preferred: list[Teacher] = []
     if link is not None:
         for assigned in link.preferred_teachers(subgroup_label):
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
-        fallback_pool = link.assigned_teachers()
-    else:
-        fallback_pool = []
 
     course_teachers = [teacher for teacher in getattr(course, "teachers", []) if teacher]
-    if link is not None:
-        fallback_pool.extend(
-            teacher for teacher in course_teachers if teacher not in fallback_pool
-        )
-    elif course_teachers:
-        fallback_pool = list(course_teachers)
+    if allow_teacher_fallback:
+        if link is not None:
+            fallback_pool = link.assigned_teachers()
+            fallback_pool.extend(
+                teacher for teacher in course_teachers if teacher not in fallback_pool
+            )
+        elif course_teachers:
+            fallback_pool = list(course_teachers)
+        else:
+            fallback_pool = Teacher.query.all()
     else:
-        fallback_pool = Teacher.query.all()
+        fallback_pool = []
 
     candidates = preferred + [teacher for teacher in fallback_pool if teacher not in preferred]
     if not candidates:
@@ -1043,6 +1045,7 @@ def find_available_teacher(
     segments: Optional[list[tuple[datetime, datetime]]] = None,
     target_class_ids: Set[int] | None = None,
     pending_sessions: Iterable[Session] = (),
+    allow_teacher_fallback: bool = True,
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
     if link is not None:
@@ -1051,15 +1054,18 @@ def find_available_teacher(
                 preferred.append(assigned)
 
     course_teachers = [teacher for teacher in getattr(course, "teachers", []) if teacher]
-    if link is not None:
-        fallback_pool = link.assigned_teachers()
-        fallback_pool.extend(
-            teacher for teacher in course_teachers if teacher not in fallback_pool
-        )
-    elif course_teachers:
-        fallback_pool = list(course_teachers)
+    if allow_teacher_fallback:
+        if link is not None:
+            fallback_pool = link.assigned_teachers()
+            fallback_pool.extend(
+                teacher for teacher in course_teachers if teacher not in fallback_pool
+            )
+        elif course_teachers:
+            fallback_pool = list(course_teachers)
+        else:
+            fallback_pool = Teacher.query.all()
     else:
-        fallback_pool = Teacher.query.all()
+        fallback_pool = []
 
     def _append_unique(target: list[Teacher], items: Iterable[Teacher]) -> None:
         seen = {teacher.id for teacher in target if teacher.id is not None}
@@ -1119,14 +1125,15 @@ def find_available_teacher(
 
     _append_unique(candidates, preferred)
 
-    fallback_candidates = [teacher for teacher in fallback_pool if teacher is not None]
-    fallback_candidates.sort(
-        key=lambda t: (
-            usage_counts.get(getattr(t, "id", None), 0),
-            t.name.lower(),
+    if allow_teacher_fallback:
+        fallback_candidates = [teacher for teacher in fallback_pool if teacher is not None]
+        fallback_candidates.sort(
+            key=lambda t: (
+                usage_counts.get(getattr(t, "id", None), 0),
+                t.name.lower(),
+            )
         )
-    )
-    _append_unique(candidates, fallback_candidates)
+        _append_unique(candidates, fallback_candidates)
 
     for teacher in candidates:
         segments_to_check = segments or [(start, end)]
@@ -1518,19 +1525,21 @@ def _schedule_block_for_day(
     context = class_group.name
     if subgroup_label:
         context += f" — groupe {subgroup_label.upper()}"
-    placement = _try_full_block(
-        course=course,
-        class_group=class_group,
-        link=link,
-        subgroup_label=subgroup_label,
-        day=day,
-        desired_hours=desired_hours,
-        base_offset=base_offset,
-        pending_sessions=pending_sessions,
-        diagnostics=diagnostics,
-    )
-    if placement:
-        return placement, diagnostics
+    for allow_fallback in (False, True):
+        placement = _try_full_block(
+            course=course,
+            class_group=class_group,
+            link=link,
+            subgroup_label=subgroup_label,
+            day=day,
+            desired_hours=desired_hours,
+            base_offset=base_offset,
+            pending_sessions=pending_sessions,
+            diagnostics=diagnostics if allow_fallback else None,
+            allow_teacher_fallback=allow_fallback,
+        )
+        if placement:
+            return placement, diagnostics
     if desired_hours <= 1:
         diagnostics.emit(
             reporter,
@@ -1538,19 +1547,21 @@ def _schedule_block_for_day(
             day=day,
         )
         return None, diagnostics
-    placement = _try_split_block(
-        course=course,
-        class_group=class_group,
-        link=link,
-        subgroup_label=subgroup_label,
-        day=day,
-        desired_hours=desired_hours,
-        base_offset=base_offset,
-        pending_sessions=pending_sessions,
-        diagnostics=diagnostics,
-    )
-    if placement:
-        return placement, diagnostics
+    for allow_fallback in (False, True):
+        placement = _try_split_block(
+            course=course,
+            class_group=class_group,
+            link=link,
+            subgroup_label=subgroup_label,
+            day=day,
+            desired_hours=desired_hours,
+            base_offset=base_offset,
+            pending_sessions=pending_sessions,
+            diagnostics=diagnostics if allow_fallback else None,
+            allow_teacher_fallback=allow_fallback,
+        )
+        if placement:
+            return placement, diagnostics
     diagnostics.emit(
         reporter,
         context_label=context,
@@ -1570,6 +1581,7 @@ def _try_full_block(
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
     diagnostics: PlacementDiagnostics | None = None,
+    allow_teacher_fallback: bool = True,
 ) -> list[Session] | None:
     required_capacity = course.capacity_needed_for(class_group)
     target_class_ids = (
@@ -1598,6 +1610,7 @@ def _try_full_block(
             subgroup_label=subgroup_label,
             target_class_ids=target_class_ids or None,
             pending_sessions=pending_sessions,
+            allow_teacher_fallback=allow_teacher_fallback,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1608,6 +1621,7 @@ def _try_full_block(
                         end_dt,
                         link=link,
                         subgroup_label=subgroup_label,
+                        allow_teacher_fallback=allow_teacher_fallback,
                     )
                 )
             continue
@@ -1672,6 +1686,7 @@ def _try_split_block(
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
     diagnostics: PlacementDiagnostics | None = None,
+    allow_teacher_fallback: bool = True,
 ) -> list[Session] | None:
     segment_lengths = [2, 2] if desired_hours == 4 else [1] * desired_hours
     segment_count = sum(segment_lengths)
@@ -1733,6 +1748,7 @@ def _try_split_block(
             segments=segment_datetimes,
             target_class_ids=target_class_ids or None,
             pending_sessions=pending_sessions,
+            allow_teacher_fallback=allow_teacher_fallback,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1744,6 +1760,7 @@ def _try_split_block(
                         link=link,
                         subgroup_label=subgroup_label,
                         segments=segment_datetimes,
+                        allow_teacher_fallback=allow_teacher_fallback,
                     )
                 )
             continue
@@ -1845,18 +1862,20 @@ def _cm_schedule_block_for_day(
 ) -> tuple[list[Session] | None, PlacementDiagnostics]:
     diagnostics = PlacementDiagnostics()
     context = ", ".join(group.name for group in class_groups) or course.name
-    placement = _cm_try_full_block(
-        course=course,
-        class_groups=class_groups,
-        primary_link=primary_link,
-        day=day,
-        desired_hours=desired_hours,
-        base_offset=base_offset,
-        pending_sessions=pending_sessions,
-        diagnostics=diagnostics,
-    )
-    if placement:
-        return placement, diagnostics
+    for allow_fallback in (False, True):
+        placement = _cm_try_full_block(
+            course=course,
+            class_groups=class_groups,
+            primary_link=primary_link,
+            day=day,
+            desired_hours=desired_hours,
+            base_offset=base_offset,
+            pending_sessions=pending_sessions,
+            diagnostics=diagnostics if allow_fallback else None,
+            allow_teacher_fallback=allow_fallback,
+        )
+        if placement:
+            return placement, diagnostics
     if desired_hours <= 1:
         diagnostics.emit(
             reporter,
@@ -1864,18 +1883,20 @@ def _cm_schedule_block_for_day(
             day=day,
         )
         return None, diagnostics
-    placement = _cm_try_split_block(
-        course=course,
-        class_groups=class_groups,
-        primary_link=primary_link,
-        day=day,
-        desired_hours=desired_hours,
-        base_offset=base_offset,
-        pending_sessions=pending_sessions,
-        diagnostics=diagnostics,
-    )
-    if placement:
-        return placement, diagnostics
+    for allow_fallback in (False, True):
+        placement = _cm_try_split_block(
+            course=course,
+            class_groups=class_groups,
+            primary_link=primary_link,
+            day=day,
+            desired_hours=desired_hours,
+            base_offset=base_offset,
+            pending_sessions=pending_sessions,
+            diagnostics=diagnostics if allow_fallback else None,
+            allow_teacher_fallback=allow_fallback,
+        )
+        if placement:
+            return placement, diagnostics
     diagnostics.emit(
         reporter,
         context_label=context,
@@ -1894,6 +1915,7 @@ def _cm_try_full_block(
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
     diagnostics: PlacementDiagnostics | None = None,
+    allow_teacher_fallback: bool = True,
 ) -> list[Session] | None:
     if not class_groups:
         return None
@@ -1929,6 +1951,7 @@ def _cm_try_full_block(
             subgroup_label=None,
             target_class_ids=target_class_ids or None,
             pending_sessions=pending_sessions,
+            allow_teacher_fallback=allow_teacher_fallback,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1939,6 +1962,7 @@ def _cm_try_full_block(
                         end_dt,
                         link=primary_link,
                         subgroup_label=None,
+                        allow_teacher_fallback=allow_teacher_fallback,
                     )
                 )
             continue
@@ -2002,6 +2026,7 @@ def _cm_try_split_block(
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
     diagnostics: PlacementDiagnostics | None = None,
+    allow_teacher_fallback: bool = True,
 ) -> list[Session] | None:
     if not class_groups:
         return None
@@ -2053,6 +2078,7 @@ def _cm_try_split_block(
             segments=segment_datetimes,
             target_class_ids=target_class_ids or None,
             pending_sessions=pending_sessions,
+            allow_teacher_fallback=allow_teacher_fallback,
         )
         if not teacher:
             if diagnostics is not None:
@@ -2064,6 +2090,7 @@ def _cm_try_split_block(
                         link=primary_link,
                         subgroup_label=None,
                         segments=segment_datetimes,
+                        allow_teacher_fallback=allow_teacher_fallback,
                     )
                 )
             continue
