@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% block title %}Étudiants — Chronos{% endblock %}
+
+{% block stylesheets %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/students.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="students-view">
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
+        <div>
+          <h1 class="h4 mb-1">Étudiants</h1>
+          <p class="text-muted mb-0">Recherchez un étudiant et filtrez par classe, groupe, phase ou parcours.</p>
+        </div>
+        <div class="text-muted small">
+          {{ students|length }} étudiant{{ students|length > 1 and 's' or '' }} affiché{{ students|length > 1 and 's' or '' }}
+        </div>
+      </div>
+      <form class="row g-3 students-filters" method="get">
+        <div class="col-lg-4 col-md-6">
+          <label class="form-label">Recherche</label>
+          <input type="search" class="form-control" name="q" value="{{ search_query }}" placeholder="Nom, e-mail, ID...">
+        </div>
+        <div class="col-lg-2 col-md-6">
+          <label class="form-label">Classe</label>
+          <select class="form-select" name="class_id">
+            <option value="">Toutes</option>
+            {% for class_group in class_groups %}
+            <option value="{{ class_group.id }}" {% if selected_class_id == class_group.id %}selected{% endif %}>{{ class_group.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-2 col-md-6">
+          <label class="form-label">Groupe</label>
+          <select class="form-select" name="group">
+            <option value="">Tous</option>
+            {% for group in group_options %}
+            <option value="{{ group }}" {% if selected_group == group %}selected{% endif %}>{{ group }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-2 col-md-6">
+          <label class="form-label">Phase</label>
+          <select class="form-select" name="phase">
+            <option value="">Toutes</option>
+            {% for phase in phase_options %}
+            <option value="{{ phase }}" {% if selected_phase == phase %}selected{% endif %}>{{ phase }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-2 col-md-6">
+          <label class="form-label">Parcours</label>
+          <select class="form-select" name="pathway">
+            <option value="">Tous</option>
+            {% for value, label in pathway_choices.items() %}
+            <option value="{{ value }}" {% if selected_pathway == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12 d-flex gap-2 justify-content-end">
+          <button type="submit" class="btn btn-primary">Filtrer</button>
+          {% if has_active_filters %}
+          <a href="{{ url_for('main.students_list') }}" class="btn btn-outline-secondary">Réinitialiser</a>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mt-4">
+    <div class="card-body p-0">
+      {% if students %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 students-table">
+          <thead class="table-light">
+            <tr>
+              <th>Étudiant</th>
+              <th>Classe</th>
+              <th>Groupe</th>
+              <th>Phase</th>
+              <th>Parcours</th>
+              <th>ID INA</th>
+              <th>ID UB</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for student in students %}
+            <tr>
+              <td>
+                <div class="fw-semibold">
+                  <a href="{{ url_for('main.student_detail', student_id=student.id) }}">{{ student.display_name }}</a>
+                </div>
+                <div class="text-muted small">{{ student.email or '—' }}</div>
+              </td>
+              <td>{{ student.class_group.name if student.class_group else '—' }}</td>
+              <td>{{ student.group_label or '—' }}</td>
+              <td>{{ student.phase or '—' }}</td>
+              <td>
+                {% set pathway_label = student.pathway_label or '—' %}
+                {% if student.pathway == 'alternance' %}
+                <span class="badge bg-info text-dark">{{ pathway_label }}</span>
+                {% else %}
+                <span class="badge bg-secondary">{{ pathway_label }}</span>
+                {% endif %}
+              </td>
+              <td>{{ student.ina_id or '—' }}</td>
+              <td>{{ student.ub_id or '—' }}</td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.student_detail', student_id=student.id) }}">Ouvrir</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="p-4">
+        <p class="mb-0 text-muted">Aucun étudiant ne correspond à ces critères.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

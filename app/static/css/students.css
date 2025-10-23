@@ -1,0 +1,38 @@
+.students-view .card,
+.student-detail-view .card {
+  border: none;
+  border-radius: 1rem;
+  box-shadow: 0 0.25rem 1.5rem rgba(15, 23, 42, 0.08);
+}
+
+.students-filters label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6c757d;
+}
+
+.students-table table {
+  min-width: 960px;
+}
+
+.students-table td,
+.students-table th {
+  vertical-align: middle;
+}
+
+.student-summary dt {
+  font-weight: 600;
+  color: #6c757d;
+}
+
+.student-summary dd {
+  margin-bottom: 0.5rem;
+}
+
+@media (max-width: 991.98px) {
+  .students-table table {
+    min-width: 720px;
+  }
+}

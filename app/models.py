@@ -1166,9 +1166,22 @@ class Student(db.Model, TimeStampedModel):
     )
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[Optional[str]] = mapped_column(String(255))
+    group_label: Mapped[Optional[str]] = mapped_column(String(50))
+    phase: Mapped[Optional[str]] = mapped_column(String(50))
+    pathway: Mapped[str] = mapped_column(
+        String(20), default="initial", server_default="initial", nullable=False
+    )
+    alternance_details: Mapped[Optional[str]] = mapped_column(Text)
+    ina_id: Mapped[Optional[str]] = mapped_column(String(50))
+    ub_id: Mapped[Optional[str]] = mapped_column(String(50))
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
     class_group: Mapped[ClassGroup] = relationship("ClassGroup", back_populates="students")
+
+    PATHWAY_LABELS = {
+        "initial": "Initial",
+        "alternance": "Alternance",
+    }
 
     __table_args__ = (
         UniqueConstraint(
@@ -1181,6 +1194,10 @@ class Student(db.Model, TimeStampedModel):
     @property
     def display_name(self) -> str:
         return self.full_name
+
+    @property
+    def pathway_label(self) -> str:
+        return self.PATHWAY_LABELS.get(self.pathway, self.pathway or "")
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"Student<{self.id} {self.full_name}>"

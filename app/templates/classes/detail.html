@@ -87,6 +87,7 @@
                   {% endif %}
                 </td>
                 <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary me-2" href="{{ url_for('main.student_detail', student_id=student.id) }}">Profil</a>
                   <form method="post" class="d-inline">
                     <input type="hidden" name="form" value="remove-student">
                     <input type="hidden" name="student_id" value="{{ student.id }}">
