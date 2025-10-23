@@ -149,19 +149,31 @@ def _teacher_names_for_context(
         names.append(label)
 
     if primary_link is not None:
-        for teacher in primary_link.preferred_teachers(subgroup_label):
+        teacher = primary_link.teacher_for_label(subgroup_label)
+        if teacher is not None:
             add_teacher(teacher)
+        else:
+            for candidate in primary_link.preferred_teachers(subgroup_label):
+                add_teacher(candidate)
+                break
 
     if class_groups is not None:
         for group in class_groups:
             link = course.class_link_for(group)
             if link is None:
                 continue
-            for teacher in link.preferred_teachers(None):
+            teacher = link.teacher_for_label(None)
+            if teacher is not None:
                 add_teacher(teacher)
+                continue
+            for candidate in link.preferred_teachers(None):
+                add_teacher(candidate)
+                break
 
-    for teacher in course.teachers:
-        add_teacher(teacher)
+    if not names:
+        for teacher in course.teachers:
+            add_teacher(teacher)
+            break
 
     return names
 
