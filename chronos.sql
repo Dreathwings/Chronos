@@ -1,75 +1,65 @@
--- phpMyAdmin SQL Dump
--- version 5.2.1
--- https://www.phpmyadmin.net/
---
--- Hôte : 127.0.0.1
--- Généré le : mer. 15 oct. 2025 à 16:00
--- Version du serveur : 10.4.32-MariaDB
--- Version de PHP : 8.2.12
-
-SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
-START TRANSACTION;
-SET time_zone = "+00:00";
-
-
-/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
-/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
-/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
-/*!40101 SET NAMES utf8mb4 */;
-
---
--- Base de données : `chronos`
---
-
+-- --------------------------------------------------------
+-- Hôte:                         localhost
+-- Version du serveur:           10.5.29-MariaDB-log - Source distribution
+-- SE du serveur:                Linux
+-- HeidiSQL Version:             12.8.0.6908
 -- --------------------------------------------------------
 
---
--- Structure de la table `class_group`
---
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET NAMES utf8 */;
+/*!50503 SET NAMES utf8mb4 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
-CREATE TABLE `class_group` (
-  `id` int(11) NOT NULL,
+
+-- Listage de la structure de la base pour chronos
+CREATE DATABASE IF NOT EXISTS `chronos` /*!40100 DEFAULT CHARACTER SET utf8 COLLATE utf8_bin */;
+USE `chronos`;
+
+-- Listage de la structure de table chronos. class_group
+CREATE TABLE IF NOT EXISTS `class_group` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(150) NOT NULL,
   `size` int(11) NOT NULL,
   `unavailable_dates` text DEFAULT NULL,
   `notes` text DEFAULT NULL,
   `created_at` datetime NOT NULL,
-  `updated_at` datetime NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`)
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Déchargement des données de la table `class_group`
---
-
+-- Listage des données de la table chronos.class_group : ~4 rows (environ)
 INSERT INTO `class_group` (`id`, `name`, `size`, `unavailable_dates`, `notes`, `created_at`, `updated_at`) VALUES
-(1, 'A1', 20, '', '', '2025-10-15 09:10:02', '2025-10-15 09:10:02'),
-(2, 'A2', 20, '', '', '2025-10-15 09:10:06', '2025-10-15 09:10:06'),
-(3, 'C1', 20, '', '', '2025-10-15 09:10:09', '2025-10-15 09:10:09'),
-(4, 'B1', 20, '', '', '2025-10-15 09:10:13', '2025-10-15 09:10:13');
+	(1, 'A1', 20, '', '', '2025-10-15 21:10:42', '2025-10-15 21:10:42'),
+	(2, 'A2', 20, '', '', '2025-10-15 21:10:46', '2025-10-15 21:10:46'),
+	(3, 'A3', 20, '', '', '2025-10-15 21:10:49', '2025-10-15 21:10:49'),
+	(4, 'A4', 20, '', '', '2025-10-15 21:10:52', '2025-10-15 21:10:52');
 
--- --------------------------------------------------------
-
---
--- Structure de la table `closing_period`
---
-
-CREATE TABLE `closing_period` (
-  `id` int(11) NOT NULL,
+-- Listage de la structure de table chronos. closing_period
+CREATE TABLE IF NOT EXISTS `closing_period` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `start_date` date NOT NULL,
   `end_date` date NOT NULL,
   `label` varchar(255) DEFAULT NULL,
   `created_at` datetime NOT NULL,
-  `updated_at` datetime NOT NULL
-) ;
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  CONSTRAINT `chk_closing_period_range` CHECK (`end_date` >= `start_date`)
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
--- --------------------------------------------------------
+-- Listage des données de la table chronos.closing_period : ~3 rows (environ)
+INSERT INTO `closing_period` (`id`, `start_date`, `end_date`, `label`, `created_at`, `updated_at`) VALUES
+	(5, '2025-10-25', '2025-11-02', NULL, '2025-10-22 13:14:34', '2025-10-22 13:14:34'),
+	(6, '2025-11-11', '2025-11-11', NULL, '2025-10-22 13:14:34', '2025-10-22 13:14:34'),
+	(7, '2025-12-20', '2026-01-04', NULL, '2025-10-22 13:14:34', '2025-10-22 13:14:34');
 
---
--- Structure de la table `course`
---
-
-CREATE TABLE `course` (
-  `id` int(11) NOT NULL,
+-- Listage de la structure de table chronos. course
+CREATE TABLE IF NOT EXISTS `course` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(200) NOT NULL,
   `description` text DEFAULT NULL,
   `session_length_hours` int(11) NOT NULL,
@@ -83,80 +73,375 @@ CREATE TABLE `course` (
   `requires_computers` tinyint(1) NOT NULL,
   `computers_required` int(11) NOT NULL,
   `created_at` datetime NOT NULL,
-  `updated_at` datetime NOT NULL
-) ;
+  `updated_at` datetime NOT NULL,
+  `sae_split_consecutive` tinyint(1) NOT NULL DEFAULT 1,
+  `sae_split_sessions` tinyint(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`),
+  KEY `course_name_id` (`course_name_id`),
+  CONSTRAINT `course_ibfk_1` FOREIGN KEY (`course_name_id`) REFERENCES `course_name` (`id`),
+  CONSTRAINT `chk_session_length_positive` CHECK (`session_length_hours` > 0),
+  CONSTRAINT `chk_session_required_positive` CHECK (`sessions_required` > 0),
+  CONSTRAINT `chk_course_computers_non_negative` CHECK (`computers_required` >= 0),
+  CONSTRAINT `chk_course_type_valid` CHECK (`course_type` in ('CM','TD','TP','SAE')),
+  CONSTRAINT `chk_course_semester_valid` CHECK (`semester` in ('S1','S2','S3','S4','S5','S6'))
+) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Déchargement des données de la table `course`
---
+-- Listage des données de la table chronos.course : ~16 rows (environ)
+INSERT INTO `course` (`id`, `name`, `description`, `session_length_hours`, `sessions_required`, `start_date`, `end_date`, `priority`, `course_type`, `semester`, `course_name_id`, `requires_computers`, `computers_required`, `created_at`, `updated_at`, `sae_split_consecutive`, `sae_split_sessions`) VALUES
+	(1, 'TP - Anglais - S1', '', 2, 12, '2025-09-08', '2025-11-30', 3, 'TP', 'S1', 3, 0, 0, '2025-10-15 21:10:15', '2025-10-22 12:27:06', 1, 0),
+	(2, 'SAE - SAE - S1', '', 4, 14, '2025-09-08', '2025-12-06', 10, 'SAE', 'S1', 6, 1, 12, '2025-10-15 22:20:41', '2025-10-23 07:26:06', 1, 1),
+	(3, 'TD - Informatique - S1', '', 2, 5, NULL, NULL, 6, 'TD', 'S1', 2, 1, 20, '2025-10-16 21:52:40', '2025-10-20 16:33:53', 1, 0),
+	(4, 'TP - Informatique - S1', '', 2, 13, NULL, NULL, 4, 'TP', 'S1', 2, 1, 12, '2025-10-16 22:05:22', '2025-10-20 16:34:03', 1, 0),
+	(5, 'CM - Electronique - S1', '', 1, 8, NULL, NULL, 10, 'CM', 'S1', 1, 0, 0, '2025-10-19 22:02:36', '2025-10-20 06:20:32', 1, 0),
+	(6, 'TD - Electronique - S1', '', 2, 12, NULL, NULL, 6, 'TD', 'S1', 1, 1, 20, '2025-10-19 22:05:09', '2025-10-20 23:41:59', 1, 0),
+	(7, 'TP - Electronique - S1', '', 2, 13, NULL, NULL, 4, 'TP', 'S1', 1, 1, 8, '2025-10-19 22:15:05', '2025-10-20 23:35:14', 1, 0),
+	(8, 'TD - Culture Communication - S1', '', 2, 13, NULL, NULL, 4, 'TD', 'S1', 12, 0, 0, '2025-10-20 13:39:39', '2025-10-20 13:39:39', 1, 0),
+	(9, 'CM - Automatisme - S1', '', 1, 4, NULL, NULL, 1, 'CM', 'S1', 8, 0, 0, '2025-10-21 20:59:53', '2025-10-21 21:00:39', 1, 0),
+	(10, 'TD - Automatisme - S1', '', 2, 8, NULL, NULL, 1, 'TD', 'S1', 8, 1, 24, '2025-10-21 21:02:25', '2025-10-21 21:03:33', 1, 0),
+	(11, 'TP - Automatisme - S1', '', 2, 8, NULL, NULL, 1, 'TP', 'S1', 8, 1, 12, '2025-10-21 21:05:24', '2025-10-21 21:06:04', 1, 0),
+	(12, 'CM - Energie - S1', '', 2, 3, NULL, NULL, 1, 'CM', 'S1', 4, 0, 0, '2025-10-21 22:46:15', '2025-10-21 22:47:08', 1, 0),
+	(13, 'TD - Energie - S1', '', 2, 12, NULL, NULL, 1, 'TD', 'S1', 4, 1, 24, '2025-10-21 22:54:28', '2025-10-21 22:55:43', 1, 0),
+	(14, 'TP - Energie - S1', '', 2, 12, NULL, NULL, 1, 'TP', 'S1', 4, 1, 6, '2025-10-21 22:58:22', '2025-10-21 23:01:29', 1, 0),
+	(15, 'CM - OML - S1', '', 1, 9, NULL, NULL, 1, 'CM', 'S1', 10, 0, 0, '2025-10-21 23:43:25', '2025-10-21 23:44:31', 1, 0),
+	(16, 'TD - OML - S1', '', 2, 7, NULL, NULL, 1, 'TD', 'S1', 10, 1, 24, '2025-10-21 23:52:32', '2025-10-22 06:57:49', 1, 0);
 
-INSERT INTO `course` (`id`, `name`, `description`, `session_length_hours`, `sessions_required`, `start_date`, `end_date`, `priority`, `course_type`, `semester`, `course_name_id`, `requires_computers`, `computers_required`, `created_at`, `updated_at`) VALUES
-(1, 'CM Elec', '', 2, 2, '2025-09-15', '2025-11-15', 1, 'CM', 'S1', NULL, 0, 0, '2025-10-15 09:11:48', '2025-10-15 09:13:43'),
-(3, 'TD Elec', '', 2, 8, '2025-09-15', '2025-11-15', 1, 'TD', 'S1', NULL, 1, 0, '2025-10-15 09:13:09', '2025-10-15 09:13:23'),
-(4, 'TP Elec', '', 2, 8, '2025-09-15', '2025-11-15', 1, 'TP', 'S1', NULL, 1, 0, '2025-10-15 09:16:09', '2025-10-15 09:16:16'),
-(5, 'ppp', '', 2, 2, '2025-09-01', '2025-09-14', 1, 'TP', 'S1', NULL, 0, 0, '2025-10-15 09:44:56', '2025-10-15 09:53:46');
+-- Listage de la structure de table chronos. course_allowed_week
+CREATE TABLE IF NOT EXISTS `course_allowed_week` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `course_id` int(11) NOT NULL,
+  `week_start` date NOT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_course_allowed_week_unique` (`course_id`,`week_start`),
+  CONSTRAINT `course_allowed_week_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=175 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
--- --------------------------------------------------------
+-- Listage des données de la table chronos.course_allowed_week : ~153 rows (environ)
+INSERT INTO `course_allowed_week` (`id`, `course_id`, `week_start`, `created_at`, `updated_at`) VALUES
+	(2, 2, '2025-09-08', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(3, 2, '2025-09-15', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(4, 2, '2025-09-22', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(5, 2, '2025-09-29', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(6, 2, '2025-10-06', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(7, 2, '2025-10-13', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(10, 2, '2025-11-03', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(11, 2, '2025-11-10', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(12, 2, '2025-11-17', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(14, 2, '2025-12-01', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(15, 2, '2025-12-08', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(16, 2, '2025-12-15', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(19, 2, '2026-01-05', '2025-10-16 13:00:06', '2025-10-16 13:00:06'),
+	(20, 2, '2025-10-20', '2025-10-16 14:31:18', '2025-10-16 14:31:18'),
+	(25, 1, '2025-09-08', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(26, 1, '2025-09-15', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(27, 1, '2025-09-22', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(28, 1, '2025-09-29', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(29, 1, '2025-10-06', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(30, 1, '2025-10-13', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(31, 1, '2025-10-20', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(33, 1, '2025-11-03', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(34, 1, '2025-11-10', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(35, 1, '2025-11-17', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(37, 1, '2025-12-01', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(38, 1, '2025-12-08', '2025-10-16 20:03:17', '2025-10-16 20:03:17'),
+	(43, 3, '2025-09-08', '2025-10-16 22:02:03', '2025-10-16 22:02:03'),
+	(44, 3, '2025-09-15', '2025-10-16 22:02:03', '2025-10-16 22:02:03'),
+	(45, 3, '2025-09-22', '2025-10-16 22:02:03', '2025-10-16 22:02:03'),
+	(46, 3, '2025-09-29', '2025-10-16 22:02:03', '2025-10-16 22:02:03'),
+	(47, 3, '2025-10-06', '2025-10-16 22:02:03', '2025-10-16 22:02:03'),
+	(49, 4, '2025-09-08', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(50, 4, '2025-09-15', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(51, 4, '2025-09-22', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(52, 4, '2025-09-29', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(53, 4, '2025-10-06', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(54, 4, '2025-10-13', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(55, 4, '2025-10-20', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(57, 4, '2025-11-03', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(58, 4, '2025-11-10', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(59, 4, '2025-11-17', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(60, 4, '2025-12-01', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(61, 4, '2025-12-08', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(62, 4, '2025-12-15', '2025-10-16 22:06:47', '2025-10-16 22:06:47'),
+	(66, 5, '2025-09-01', '2025-10-19 22:03:40', '2025-10-19 22:03:40'),
+	(67, 5, '2025-09-08', '2025-10-19 22:03:40', '2025-10-19 22:03:40'),
+	(68, 5, '2025-09-22', '2025-10-19 22:03:40', '2025-10-19 22:03:40'),
+	(69, 5, '2025-09-29', '2025-10-19 22:03:40', '2025-10-19 22:03:40'),
+	(70, 5, '2025-10-13', '2025-10-19 22:03:40', '2025-10-19 22:03:40'),
+	(71, 5, '2025-10-20', '2025-10-19 22:03:40', '2025-10-19 22:03:40'),
+	(72, 5, '2025-11-10', '2025-10-19 22:03:40', '2025-10-19 22:03:40'),
+	(73, 5, '2025-11-17', '2025-10-19 22:03:40', '2025-10-19 22:03:40'),
+	(74, 6, '2025-09-08', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(75, 6, '2025-09-15', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(76, 6, '2025-09-22', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(77, 6, '2025-09-29', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(78, 6, '2025-10-06', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(79, 6, '2025-10-13', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(80, 6, '2025-10-20', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(81, 6, '2025-11-03', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(82, 6, '2025-11-10', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(83, 6, '2025-11-17', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(84, 6, '2025-12-01', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(85, 6, '2025-12-08', '2025-10-19 22:06:44', '2025-10-19 22:06:44'),
+	(86, 7, '2025-09-15', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(87, 7, '2025-09-22', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(88, 7, '2025-09-29', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(89, 7, '2025-10-06', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(90, 7, '2025-10-13', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(91, 7, '2025-10-20', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(92, 7, '2025-11-03', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(93, 7, '2025-11-10', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(94, 7, '2025-11-17', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(95, 7, '2025-12-01', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(96, 7, '2025-12-08', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(97, 7, '2025-12-15', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(98, 7, '2026-01-05', '2025-10-19 22:18:02', '2025-10-19 22:18:02'),
+	(99, 8, '2025-09-08', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(100, 8, '2025-09-15', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(101, 8, '2025-09-22', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(102, 8, '2025-09-29', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(103, 8, '2025-10-06', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(104, 8, '2025-10-13', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(105, 8, '2025-10-20', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(106, 8, '2025-11-03', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(107, 8, '2025-11-10', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(108, 8, '2025-11-17', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(109, 8, '2025-12-01', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(110, 8, '2025-12-08', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(111, 8, '2025-12-15', '2025-10-20 13:41:09', '2025-10-20 13:41:09'),
+	(112, 9, '2025-09-08', '2025-10-21 21:00:39', '2025-10-21 21:00:39'),
+	(113, 9, '2025-09-15', '2025-10-21 21:00:39', '2025-10-21 21:00:39'),
+	(114, 9, '2025-09-22', '2025-10-21 21:00:39', '2025-10-21 21:00:39'),
+	(115, 9, '2025-09-29', '2025-10-21 21:00:39', '2025-10-21 21:00:39'),
+	(116, 10, '2025-09-08', '2025-10-21 21:03:33', '2025-10-21 21:03:33'),
+	(117, 10, '2025-09-15', '2025-10-21 21:03:33', '2025-10-21 21:03:33'),
+	(118, 10, '2025-09-22', '2025-10-21 21:03:33', '2025-10-21 21:03:33'),
+	(119, 10, '2025-09-29', '2025-10-21 21:03:33', '2025-10-21 21:03:33'),
+	(120, 10, '2025-10-06', '2025-10-21 21:03:33', '2025-10-21 21:03:33'),
+	(121, 10, '2025-10-13', '2025-10-21 21:03:33', '2025-10-21 21:03:33'),
+	(122, 10, '2025-10-20', '2025-10-21 21:03:33', '2025-10-21 21:03:33'),
+	(123, 10, '2025-11-03', '2025-10-21 21:03:33', '2025-10-21 21:03:33'),
+	(124, 11, '2025-10-20', '2025-10-21 21:06:04', '2025-10-21 21:06:04'),
+	(125, 11, '2025-11-03', '2025-10-21 21:06:04', '2025-10-21 21:06:04'),
+	(126, 11, '2025-11-10', '2025-10-21 21:06:04', '2025-10-21 21:06:04'),
+	(127, 11, '2025-11-17', '2025-10-21 21:06:04', '2025-10-21 21:06:04'),
+	(128, 11, '2025-12-01', '2025-10-21 21:06:04', '2025-10-21 21:06:04'),
+	(129, 11, '2025-12-08', '2025-10-21 21:06:04', '2025-10-21 21:06:04'),
+	(130, 11, '2025-12-15', '2025-10-21 21:06:04', '2025-10-21 21:06:04'),
+	(131, 11, '2026-01-05', '2025-10-21 21:06:04', '2025-10-21 21:06:04'),
+	(132, 12, '2025-12-08', '2025-10-21 22:47:08', '2025-10-21 22:47:08'),
+	(133, 12, '2025-12-15', '2025-10-21 22:47:08', '2025-10-21 22:47:08'),
+	(134, 12, '2026-01-05', '2025-10-21 22:47:08', '2025-10-21 22:47:08'),
+	(135, 13, '2025-09-08', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(136, 13, '2025-09-15', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(137, 13, '2025-09-22', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(138, 13, '2025-09-29', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(139, 13, '2025-10-13', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(140, 13, '2025-10-20', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(141, 13, '2025-11-03', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(142, 13, '2025-11-10', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(143, 13, '2025-11-17', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(144, 13, '2025-12-01', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(145, 13, '2025-12-08', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(146, 13, '2025-12-15', '2025-10-21 22:55:43', '2025-10-21 22:55:43'),
+	(147, 14, '2025-09-22', '2025-10-21 23:01:28', '2025-10-21 23:01:28'),
+	(148, 14, '2025-09-29', '2025-10-21 23:01:28', '2025-10-21 23:01:28'),
+	(149, 14, '2025-10-06', '2025-10-21 23:01:29', '2025-10-21 23:01:29'),
+	(150, 14, '2025-10-13', '2025-10-21 23:01:29', '2025-10-21 23:01:29'),
+	(151, 14, '2025-10-20', '2025-10-21 23:01:29', '2025-10-21 23:01:29'),
+	(152, 14, '2025-11-03', '2025-10-21 23:01:29', '2025-10-21 23:01:29'),
+	(153, 14, '2025-11-10', '2025-10-21 23:01:29', '2025-10-21 23:01:29'),
+	(154, 14, '2025-11-17', '2025-10-21 23:01:29', '2025-10-21 23:01:29'),
+	(155, 14, '2025-12-01', '2025-10-21 23:01:29', '2025-10-21 23:01:29'),
+	(156, 14, '2025-12-08', '2025-10-21 23:01:29', '2025-10-21 23:01:29'),
+	(157, 14, '2025-12-15', '2025-10-21 23:01:29', '2025-10-21 23:01:29'),
+	(158, 14, '2026-01-05', '2025-10-21 23:01:29', '2025-10-21 23:01:29'),
+	(159, 15, '2025-09-01', '2025-10-21 23:44:31', '2025-10-21 23:44:31'),
+	(160, 15, '2025-09-15', '2025-10-21 23:44:31', '2025-10-21 23:44:31'),
+	(161, 15, '2025-09-22', '2025-10-21 23:44:31', '2025-10-21 23:44:31'),
+	(162, 15, '2025-09-29', '2025-10-21 23:44:31', '2025-10-21 23:44:31'),
+	(163, 15, '2025-10-13', '2025-10-21 23:44:31', '2025-10-21 23:44:31'),
+	(164, 15, '2025-10-20', '2025-10-21 23:44:31', '2025-10-21 23:44:31'),
+	(165, 15, '2025-11-03', '2025-10-21 23:44:31', '2025-10-21 23:44:31'),
+	(166, 15, '2025-11-10', '2025-10-21 23:44:31', '2025-10-21 23:44:31'),
+	(167, 15, '2025-12-01', '2025-10-21 23:44:31', '2025-10-21 23:44:31'),
+	(168, 16, '2025-09-15', '2025-10-22 06:57:49', '2025-10-22 06:57:49'),
+	(169, 16, '2025-09-29', '2025-10-22 06:57:49', '2025-10-22 06:57:49'),
+	(170, 16, '2025-10-13', '2025-10-22 06:57:49', '2025-10-22 06:57:49'),
+	(171, 16, '2025-10-20', '2025-10-22 06:57:49', '2025-10-22 06:57:49'),
+	(172, 16, '2025-11-03', '2025-10-22 06:57:49', '2025-10-22 06:57:49'),
+	(173, 16, '2025-11-17', '2025-10-22 06:57:49', '2025-10-22 06:57:49'),
+	(174, 16, '2025-12-15', '2025-10-22 06:57:49', '2025-10-22 06:57:49');
 
---
--- Structure de la table `course_class`
---
-
-CREATE TABLE `course_class` (
+-- Listage de la structure de table chronos. course_class
+CREATE TABLE IF NOT EXISTS `course_class` (
   `course_id` int(11) NOT NULL,
   `class_group_id` int(11) NOT NULL,
   `group_count` int(11) NOT NULL,
   `teacher_a_id` int(11) DEFAULT NULL,
   `teacher_b_id` int(11) DEFAULT NULL,
   `subgroup_a_course_name_id` int(11) DEFAULT NULL,
-  `subgroup_b_course_name_id` int(11) DEFAULT NULL
-) ;
+  `subgroup_b_course_name_id` int(11) DEFAULT NULL,
+  PRIMARY KEY (`course_id`,`class_group_id`),
+  KEY `class_group_id` (`class_group_id`),
+  KEY `teacher_a_id` (`teacher_a_id`),
+  KEY `teacher_b_id` (`teacher_b_id`),
+  KEY `subgroup_a_course_name_id` (`subgroup_a_course_name_id`),
+  KEY `subgroup_b_course_name_id` (`subgroup_b_course_name_id`),
+  CONSTRAINT `course_class_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
+  CONSTRAINT `course_class_ibfk_2` FOREIGN KEY (`class_group_id`) REFERENCES `class_group` (`id`),
+  CONSTRAINT `course_class_ibfk_3` FOREIGN KEY (`teacher_a_id`) REFERENCES `teacher` (`id`),
+  CONSTRAINT `course_class_ibfk_4` FOREIGN KEY (`teacher_b_id`) REFERENCES `teacher` (`id`),
+  CONSTRAINT `course_class_ibfk_5` FOREIGN KEY (`subgroup_a_course_name_id`) REFERENCES `course_name` (`id`),
+  CONSTRAINT `course_class_ibfk_6` FOREIGN KEY (`subgroup_b_course_name_id`) REFERENCES `course_name` (`id`),
+  CONSTRAINT `chk_course_class_group_count` CHECK (`group_count` >= 1 and `group_count` <= 2)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Déchargement des données de la table `course_class`
---
-
+-- Listage des données de la table chronos.course_class : ~64 rows (environ)
 INSERT INTO `course_class` (`course_id`, `class_group_id`, `group_count`, `teacher_a_id`, `teacher_b_id`, `subgroup_a_course_name_id`, `subgroup_b_course_name_id`) VALUES
-(1, 1, 1, 5, NULL, NULL, NULL),
-(1, 2, 1, 5, NULL, NULL, NULL),
-(3, 1, 1, 6, NULL, NULL, NULL),
-(3, 2, 1, 1, NULL, NULL, NULL),
-(4, 1, 2, NULL, NULL, NULL, NULL),
-(4, 2, 2, NULL, NULL, NULL, NULL),
-(5, 1, 2, NULL, NULL, NULL, NULL);
+	(1, 1, 2, 48, 48, NULL, NULL),
+	(1, 2, 2, 48, 48, NULL, NULL),
+	(1, 3, 2, 59, 59, NULL, NULL),
+	(1, 4, 2, 48, 48, NULL, NULL),
+	(2, 1, 1, 4, 2, NULL, NULL),
+	(2, 2, 1, 15, 46, NULL, NULL),
+	(2, 3, 1, 11, 4, NULL, NULL),
+	(2, 4, 1, 4, 56, NULL, NULL),
+	(3, 1, 1, 51, NULL, NULL, NULL),
+	(3, 2, 1, 30, NULL, NULL, NULL),
+	(3, 3, 1, 57, NULL, NULL, NULL),
+	(3, 4, 1, 56, NULL, NULL, NULL),
+	(4, 1, 2, 51, 51, NULL, NULL),
+	(4, 2, 2, 30, 30, NULL, NULL),
+	(4, 3, 2, 30, 57, NULL, NULL),
+	(4, 4, 2, 56, 56, NULL, NULL),
+	(5, 1, 1, 15, NULL, NULL, NULL),
+	(5, 2, 1, 15, NULL, NULL, NULL),
+	(5, 3, 1, 15, NULL, NULL, NULL),
+	(5, 4, 1, 15, NULL, NULL, NULL),
+	(6, 1, 1, 26, NULL, NULL, NULL),
+	(6, 2, 1, 15, NULL, NULL, NULL),
+	(6, 3, 1, 17, NULL, NULL, NULL),
+	(6, 4, 1, 31, NULL, NULL, NULL),
+	(7, 1, 2, 8, 31, NULL, NULL),
+	(7, 2, 2, 17, 15, NULL, NULL),
+	(7, 3, 2, 29, 35, NULL, NULL),
+	(7, 4, 2, 26, 58, NULL, NULL),
+	(8, 1, 1, 34, NULL, NULL, NULL),
+	(8, 2, 1, 34, NULL, NULL, NULL),
+	(8, 3, 1, 53, NULL, NULL, NULL),
+	(8, 4, 1, 53, NULL, NULL, NULL),
+	(9, 1, 1, 28, NULL, NULL, NULL),
+	(9, 2, 1, 28, NULL, NULL, NULL),
+	(9, 3, 1, 28, NULL, NULL, NULL),
+	(9, 4, 1, 28, NULL, NULL, NULL),
+	(10, 1, 1, 16, NULL, NULL, NULL),
+	(10, 2, 1, 28, NULL, NULL, NULL),
+	(10, 3, 1, 1, NULL, NULL, NULL),
+	(10, 4, 1, 41, NULL, NULL, NULL),
+	(11, 1, 2, 31, 41, NULL, NULL),
+	(11, 2, 2, 2, 28, NULL, NULL),
+	(11, 3, 2, 16, 47, NULL, NULL),
+	(11, 4, 2, 15, 1, NULL, NULL),
+	(12, 1, 1, 25, NULL, NULL, NULL),
+	(12, 2, 1, 25, NULL, NULL, NULL),
+	(12, 3, 1, 25, NULL, NULL, NULL),
+	(12, 4, 1, 25, NULL, NULL, NULL),
+	(13, 1, 1, 13, NULL, NULL, NULL),
+	(13, 2, 1, 46, NULL, NULL, NULL),
+	(13, 3, 1, 46, NULL, NULL, NULL),
+	(13, 4, 1, 29, NULL, NULL, NULL),
+	(14, 1, 2, 46, 46, NULL, NULL),
+	(14, 2, 2, 29, 23, NULL, NULL),
+	(14, 3, 2, 13, 25, NULL, NULL),
+	(14, 4, 2, 2, 2, NULL, NULL),
+	(15, 1, 1, 3, NULL, NULL, NULL),
+	(15, 2, 1, 3, NULL, NULL, NULL),
+	(15, 3, 1, 3, NULL, NULL, NULL),
+	(15, 4, 1, 3, NULL, NULL, NULL),
+	(16, 1, 1, 3, NULL, NULL, NULL),
+	(16, 2, 1, 3, NULL, NULL, NULL),
+	(16, 3, 1, 3, NULL, NULL, NULL),
+	(16, 4, 1, 27, NULL, NULL, NULL);
 
--- --------------------------------------------------------
-
---
--- Structure de la table `course_equipment`
---
-
-CREATE TABLE `course_equipment` (
+-- Listage de la structure de table chronos. course_equipment
+CREATE TABLE IF NOT EXISTS `course_equipment` (
   `course_id` int(11) NOT NULL,
-  `equipment_id` int(11) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `equipment_id` int(11) NOT NULL,
+  PRIMARY KEY (`course_id`,`equipment_id`),
+  KEY `equipment_id` (`equipment_id`),
+  CONSTRAINT `course_equipment_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
+  CONSTRAINT `course_equipment_ibfk_2` FOREIGN KEY (`equipment_id`) REFERENCES `equipment` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
--- --------------------------------------------------------
+-- Listage des données de la table chronos.course_equipment : ~4 rows (environ)
+INSERT INTO `course_equipment` (`course_id`, `equipment_id`) VALUES
+	(2, 2),
+	(7, 4),
+	(11, 6),
+	(14, 8);
 
---
--- Structure de la table `course_name`
---
-
-CREATE TABLE `course_name` (
-  `id` int(11) NOT NULL,
+-- Listage de la structure de table chronos. course_name
+CREATE TABLE IF NOT EXISTS `course_name` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(120) NOT NULL,
   `created_at` datetime NOT NULL,
-  `updated_at` datetime NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`)
+) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
--- --------------------------------------------------------
+-- Listage des données de la table chronos.course_name : ~12 rows (environ)
+INSERT INTO `course_name` (`id`, `name`, `created_at`, `updated_at`) VALUES
+	(1, 'Electronique', '2025-10-15 20:43:49', '2025-10-15 20:43:49'),
+	(2, 'Informatique', '2025-10-15 20:43:55', '2025-10-15 20:43:55'),
+	(3, 'Anglais', '2025-10-15 20:44:11', '2025-10-15 20:44:11'),
+	(4, 'Energie', '2025-10-15 20:45:35', '2025-10-15 20:45:35'),
+	(5, 'Physique appliquée', '2025-10-15 20:45:47', '2025-10-15 20:45:47'),
+	(6, 'SAE', '2025-10-15 20:47:12', '2025-10-15 20:47:12'),
+	(7, 'E&C', '2025-10-15 20:55:15', '2025-10-15 20:55:15'),
+	(8, 'Automatisme', '2025-10-15 21:00:19', '2025-10-15 21:00:19'),
+	(9, 'HTUT', '2025-10-15 21:00:39', '2025-10-15 21:00:39'),
+	(10, 'OML', '2025-10-15 21:01:11', '2025-10-15 21:01:11'),
+	(11, 'Portfolio', '2025-10-15 21:01:27', '2025-10-15 21:01:27'),
+	(12, 'Culture Communication', '2025-10-20 13:39:09', '2025-10-20 13:39:09');
 
---
--- Structure de la table `course_schedule_log`
---
+-- Listage de la structure de table chronos. course_name_preferred_room
+CREATE TABLE IF NOT EXISTS `course_name_preferred_room` (
+  `course_name_id` int(11) NOT NULL,
+  `room_id` int(11) NOT NULL,
+  PRIMARY KEY (`course_name_id`,`room_id`),
+  KEY `room_id` (`room_id`),
+  CONSTRAINT `course_name_preferred_room_ibfk_1` FOREIGN KEY (`course_name_id`) REFERENCES `course_name` (`id`),
+  CONSTRAINT `course_name_preferred_room_ibfk_2` FOREIGN KEY (`room_id`) REFERENCES `room` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
-CREATE TABLE `course_schedule_log` (
-  `id` int(11) NOT NULL,
+-- Listage des données de la table chronos.course_name_preferred_room : ~19 rows (environ)
+INSERT INTO `course_name_preferred_room` (`course_name_id`, `room_id`) VALUES
+	(1, 4),
+	(1, 9),
+	(2, 7),
+	(2, 8),
+	(2, 15),
+	(2, 20),
+	(3, 1),
+	(3, 2),
+	(4, 12),
+	(4, 13),
+	(4, 16),
+	(4, 17),
+	(6, 10),
+	(6, 11),
+	(8, 22),
+	(10, 6),
+	(10, 19),
+	(12, 24),
+	(12, 26);
+
+-- Listage de la structure de table chronos. course_schedule_log
+CREATE TABLE IF NOT EXISTS `course_schedule_log` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `course_id` int(11) NOT NULL,
   `status` varchar(20) NOT NULL,
   `summary` text DEFAULT NULL,
@@ -164,144 +449,209 @@ CREATE TABLE `course_schedule_log` (
   `window_start` date DEFAULT NULL,
   `window_end` date DEFAULT NULL,
   `created_at` datetime NOT NULL,
-  `updated_at` datetime NOT NULL
-) ;
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_course_schedule_log_course_id` (`course_id`),
+  CONSTRAINT `course_schedule_log_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
+  CONSTRAINT `chk_course_schedule_log_status` CHECK (`status` in ('success','warning','error'))
+) ENGINE=InnoDB AUTO_INCREMENT=1343 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Déchargement des données de la table `course_schedule_log`
---
+-- Listage des données de la table chronos.course_schedule_log : ~0 rows (environ)
 
-INSERT INTO `course_schedule_log` (`id`, `course_id`, `status`, `summary`, `messages`, `window_start`, `window_end`, `created_at`, `updated_at`) VALUES
-(1, 1, 'warning', 'Aucune séance générée — vérifier les avertissements', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 2 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Heures requises : 4 h — déjà planifiées : 0 h\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 15/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 16/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 17/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 18/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 19/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 22/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 23/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 24/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 25/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 26/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 29/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 30/09/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 01/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 02/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 03/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 06/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 07/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 08/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 09/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 10/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 13/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 14/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 15/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 16/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 17/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 20/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 21/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 22/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 23/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 24/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 27/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 28/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 29/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 30/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 31/10/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 03/11/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 04/11/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 05/11/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 06/11/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 07/11/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 10/11/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 11/11/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 12/11/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 13/11/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 14/11/2025 : iza est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 4 heure(s) supplémentaire(s) (cours magistral)\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 0\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:17:12', '2025-10-15 09:17:12'),
-(2, 3, 'warning', 'Aucune séance générée — vérifier les avertissements', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 8 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"warning\", \"message\": \"A1 — 15/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 16/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 17/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 18/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 19/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 22/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 23/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 24/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 25/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 26/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 29/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 30/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 01/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 02/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 03/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 06/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 07/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 08/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 09/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 10/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 13/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 14/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 15/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 16/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 17/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 20/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 21/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 22/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 23/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 24/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 27/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 28/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 29/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 30/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 31/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 03/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 04/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 05/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 06/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 07/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 10/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 11/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 12/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 13/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — 14/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A1\"}, {\"level\": \"warning\", \"message\": \"A2 — 15/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 16/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 17/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 18/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 19/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 22/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 23/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 24/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 25/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 26/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 29/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 30/09/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 01/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 02/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 03/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 06/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 07/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 08/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 09/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 10/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 13/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 14/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 15/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 16/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 17/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 20/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 21/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 22/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 23/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 24/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 27/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 28/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 29/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 30/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 31/10/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 03/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 04/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 05/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 06/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 07/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 10/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 11/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 12/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 13/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — 14/11/2025 : Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A2\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 0\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:17:13', '2025-10-15 09:17:13');
-INSERT INTO `course_schedule_log` (`id`, `course_id`, `status`, `summary`, `messages`, `window_start`, `window_end`, `created_at`, `updated_at`) VALUES
-(3, 4, 'warning', 'Aucune séance générée — vérifier les avertissements', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 8 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 16/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 17/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 18/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 19/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 22/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 23/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 24/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 25/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 26/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 29/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 30/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 01/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 02/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 03/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 06/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 07/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 08/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 09/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 10/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 13/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 14/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 16/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 17/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 20/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 21/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 22/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 23/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 24/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 27/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 28/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 29/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 30/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 31/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 03/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 04/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 05/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 06/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 07/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 10/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 11/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 12/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 13/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 14/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A1\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 16/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 17/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 18/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 19/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 22/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 23/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 24/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 25/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 26/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 29/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 30/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 01/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 02/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 03/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 06/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 07/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 08/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 09/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 10/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 13/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 14/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 16/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 17/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 20/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 21/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 22/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 23/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 24/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 27/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 28/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 29/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 30/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 31/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 03/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 04/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 05/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 06/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 07/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 10/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 11/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 12/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 13/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 14/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A1\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 15/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 16/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 17/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 18/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 19/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 22/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 23/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 24/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 25/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 26/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 29/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 30/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 01/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 02/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 03/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 06/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 07/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 08/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 09/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 10/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 13/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 14/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 15/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 16/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 17/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 20/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 21/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 22/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 23/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 24/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 27/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 28/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 29/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 30/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 31/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 03/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 04/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 05/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 06/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 07/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 10/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 11/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 12/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 13/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 14/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A2\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 15/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 16/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 17/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 18/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 19/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 22/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 23/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 24/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 25/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 26/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 29/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 30/09/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 01/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 02/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 03/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 06/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 07/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 08/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 09/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 10/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 13/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 14/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 15/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 16/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 17/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 20/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 21/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 22/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 23/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 24/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 27/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 28/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 29/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 30/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 31/10/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 03/11/2025 : Francois est déclaré indisponible sur ce créneau. ; Gilles est déclaré indisponible sur ce créneau. ; iza est déclaré indisponible sur ce créneau. ; Loic  est déclaré indisponible sur ce créneau. ; pierre est déclaré indisponible sur ce créneau. ; Tim est déclaré indisponible sur ce créneau.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 04/11/2025 : Fran', '2025-09-15', '2025-11-15', '2025-10-15 09:17:18', '2025-10-15 09:17:18');
-INSERT INTO `course_schedule_log` (`id`, `course_id`, `status`, `summary`, `messages`, `window_start`, `window_end`, `created_at`, `updated_at`) VALUES
-(4, 1, 'warning', 'Aucune séance générée — vérifier les avertissements', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 2 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Heures requises : 4 h — déjà planifiées : 0 h\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 15/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 16/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 17/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 18/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 19/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 22/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 23/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 24/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 25/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 26/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 29/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 30/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 01/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 02/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 03/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 06/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 07/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 08/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 09/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 10/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 13/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 14/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 15/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 16/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 17/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 20/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 21/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 22/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 23/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 24/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 27/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 28/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 29/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 30/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 31/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 03/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 04/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 05/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 06/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 07/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 10/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 11/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 12/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 13/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 14/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 4 heure(s) supplémentaire(s) (cours magistral)\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 0\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:18:54', '2025-10-15 09:18:54'),
-(5, 3, 'warning', 'Aucune séance générée — vérifier les avertissements', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 8 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"warning\", \"message\": \"A1 — 15/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 16/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 17/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 18/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 19/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 22/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 23/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 24/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 25/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 26/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 29/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 30/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 01/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 02/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 03/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 06/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 07/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 08/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 09/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 10/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 13/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 14/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 15/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 16/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 17/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 20/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 21/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 22/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 23/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 24/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 27/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 28/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 29/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 30/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 31/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 03/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 04/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 05/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 06/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 07/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 10/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 11/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 12/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 13/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — 14/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A1\"}, {\"level\": \"warning\", \"message\": \"A2 — 15/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 16/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 17/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 18/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 19/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 22/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 23/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 24/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 25/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 26/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 29/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 30/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 01/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 02/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 03/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 06/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 07/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 08/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 09/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 10/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 13/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 14/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 15/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 16/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 17/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 20/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 21/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 22/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 23/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 24/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 27/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 28/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 29/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 30/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 31/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 03/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 04/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 05/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 06/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 07/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 10/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 11/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 12/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 13/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — 14/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A2\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 0\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:18:56', '2025-10-15 09:18:56'),
-(6, 4, 'warning', 'Aucune séance générée — vérifier les avertissements', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 8 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 16/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 17/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 18/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 19/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 22/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 23/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 24/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 25/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 26/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 29/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 30/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 01/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 02/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 03/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 06/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 07/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 08/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 09/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 10/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 13/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 14/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 16/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 17/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 20/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 21/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 22/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 23/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 24/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 27/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 28/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 29/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 30/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 31/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 03/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 04/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 05/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 06/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 07/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 10/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 11/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 12/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 13/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 14/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A1\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 16/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 17/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 18/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 19/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 22/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 23/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 24/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 25/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 26/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 29/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 30/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 01/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 02/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 03/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 06/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 07/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 08/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 09/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 10/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 13/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 14/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 16/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 17/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 20/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 21/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 22/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 23/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 24/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 27/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 28/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 29/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 30/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 31/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 03/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 04/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 05/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 06/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 07/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 10/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 11/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 12/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 13/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 14/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A1\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 15/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 16/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 17/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 18/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 19/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 22/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 23/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 24/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 25/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 26/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 29/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 30/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 01/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 02/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 03/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 06/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 07/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 08/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 09/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 10/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 13/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 14/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 15/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 16/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 17/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 20/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 21/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 22/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 23/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 24/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 27/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 28/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 29/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 30/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 31/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 03/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 04/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 05/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 06/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 07/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 10/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 11/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 12/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 13/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe A — 14/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A2\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 15/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 16/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 17/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 18/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 19/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 22/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 23/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 24/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 25/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 26/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 29/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 30/09/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 01/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 02/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 03/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 06/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 07/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 08/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 09/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 10/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 13/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 14/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 15/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 16/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 17/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 20/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 21/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 22/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 23/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 24/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 27/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 28/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 29/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 30/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 31/10/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 03/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 04/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 05/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 06/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 07/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 10/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 11/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 12/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 13/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"A2 — groupe B — 14/11/2025 : Aucune salle ne dispose du nombre de postes informatiques requis.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 16 heure(s) pour A2\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 0\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:19:02', '2025-10-15 09:19:02'),
-(7, 1, 'warning', 'Aucune séance générée — vérifier les avertissements', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 2 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Heures requises : 4 h — déjà planifiées : 0 h\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 15/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 16/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 17/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 18/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 19/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 22/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 23/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 24/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 25/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 26/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 29/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 30/09/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 01/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 02/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 03/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 06/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 07/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 08/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 09/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 10/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 13/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 14/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 15/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 16/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 17/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 20/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 21/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 22/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 23/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 24/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 27/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 28/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 29/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 30/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 31/10/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 03/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 04/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 05/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 06/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 07/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 10/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 11/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 12/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 13/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"A1, A2 — 14/11/2025 : Aucune salle n\'atteint la capacité requise.\"}, {\"level\": \"warning\", \"message\": \"Impossible de planifier 4 heure(s) supplémentaire(s) (cours magistral)\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 0\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:19:49', '2025-10-15 09:19:49');
-INSERT INTO `course_schedule_log` (`id`, `course_id`, `status`, `summary`, `messages`, `window_start`, `window_end`, `created_at`, `updated_at`) VALUES
-(8, 3, 'success', '16 séance(s) générée(s)', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 8 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 16\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:19:49', '2025-10-15 09:19:49'),
-(9, 4, 'success', '32 séance(s) générée(s)', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 8 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 32\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:19:50', '2025-10-15 09:19:50'),
-(10, 1, 'success', '2 séance(s) générée(s)', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 2 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Heures requises : 4 h — déjà planifiées : 0 h\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 08:00 → 10:00 (2 h) — A1, A2 avec iza en salle AMPHI\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 08:00 → 10:00 (2 h) — A1, A2 avec iza en salle AMPHI\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 2\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:20:56', '2025-10-15 09:20:56'),
-(11, 3, 'success', '16 séance(s) générée(s)', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 8 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 10:15 → 12:15 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 10:15 → 12:15 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 10:15 → 12:15 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 10:15 → 12:15 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 16\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:20:57', '2025-10-15 09:20:57'),
-(12, 4, 'success', '32 séance(s) générée(s)', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 8 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 15:45 → 17:45 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 15:45 → 17:45 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 15:45 → 17:45 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 15:45 → 17:45 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 32\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:20:57', '2025-10-15 09:20:57'),
-(13, 1, 'success', '2 séance(s) générée(s)', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 2 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Heures requises : 4 h — déjà planifiées : 0 h\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 08:00 → 10:00 (2 h) — A1, A2 avec iza en salle AMPHI\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 08:00 → 10:00 (2 h) — A1, A2 avec iza en salle AMPHI\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 2\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(14, 3, 'success', '16 séance(s) générée(s)', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 8 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 10:15 → 12:15 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 08:00 → 10:00 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 10:15 → 12:15 (2 h) — A1 avec Loic  en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 10:15 → 12:15 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 08:00 → 10:00 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 10:15 → 12:15 (2 h) — A2 avec pierre en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 16\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(15, 4, 'success', '32 séance(s) générée(s)', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-15 → 2025-11-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 8 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1, A2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 15:45 → 17:45 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 13:30 → 15:30 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 15:45 → 17:45 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 10:15 → 12:15 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 15/09/2025 15:45 → 17:45 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 23/09/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 02/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 10/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 20/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 28/10/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 06/11/2025 13:30 → 15:30 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 14/11/2025 15:45 → 17:45 (2 h) — A2 avec Gilles en salle SAE 2\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 32\"}]', '2025-09-15', '2025-11-15', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(16, 5, 'warning', '4 séance(s) générée(s) avec avertissements', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-01 → 2025-09-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 2 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 01/09/2025 08:00 → 10:00 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 08:00 à 09:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 08:00 à 10:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 09:00 à 10:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 10:15 à 11:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 10:15 à 12:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 11:15 à 12:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 13:30 à 14:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 13:30 à 15:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 14:30 à 15:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 15:45 à 16:45.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 15:45 à 17:45.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 16:45 à 17:45.\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 12/09/2025 08:00 → 10:00 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 01/09/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 08:00 à 09:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 08:00 à 10:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 09:00 à 10:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 10:15 à 11:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 10:15 à 12:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 11:15 à 12:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 13:30 à 14:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 13:30 à 15:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 14:30 à 15:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 15:45 à 16:45.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 15:45 à 17:45.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 16:45 à 17:45.\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 12/09/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 4\"}]', '2025-09-01', '2025-09-15', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(17, 5, 'warning', '4 séance(s) générée(s) avec avertissements', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-01 → 2025-09-15\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 2 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 01/09/2025 08:00 → 10:00 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 08:00 à 09:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 08:00 à 10:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 09:00 à 10:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 10:15 à 11:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 10:15 à 12:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 11:15 à 12:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 13:30 à 14:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 13:30 à 15:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 14:30 à 15:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 15:45 à 16:45.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 15:45 à 17:45.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe A — 15/09/2025 : A1 est indisponible de 16:45 à 17:45.\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 12/09/2025 08:00 → 10:00 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 01/09/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 08:00 à 09:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 08:00 à 10:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 09:00 à 10:00.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 10:15 à 11:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 10:15 à 12:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 11:15 à 12:15.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 13:30 à 14:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 13:30 à 15:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 14:30 à 15:30.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 15:45 à 16:45.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 15:45 à 17:45.\"}, {\"level\": \"warning\", \"message\": \"A1 — groupe B — 15/09/2025 : A1 est indisponible de 16:45 à 17:45.\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 12/09/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 4\"}]', '2025-09-01', '2025-09-15', '2025-10-15 09:51:18', '2025-10-15 09:51:18'),
-(18, 5, 'success', '4 séance(s) générée(s)', '[{\"level\": \"info\", \"message\": \"Fenêtre de planification : 2025-09-01 → 2025-09-14\"}, {\"level\": \"info\", \"message\": \"Durée cible des séances : 2 h — 2 occurrence(s) par groupe\"}, {\"level\": \"info\", \"message\": \"Classes associées : A1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 01/09/2025 08:00 → 10:00 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 12/09/2025 08:00 → 10:00 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 01/09/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Séance planifiée le 12/09/2025 10:15 → 12:15 (2 h) — A1 avec Francois en salle SAE 1\"}, {\"level\": \"info\", \"message\": \"Total de séances générées : 4\"}]', '2025-09-01', '2025-09-14', '2025-10-15 09:53:56', '2025-10-15 09:53:56');
-
--- --------------------------------------------------------
-
---
--- Structure de la table `course_software`
---
-
-CREATE TABLE `course_software` (
+-- Listage de la structure de table chronos. course_software
+CREATE TABLE IF NOT EXISTS `course_software` (
   `course_id` int(11) NOT NULL,
-  `software_id` int(11) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `software_id` int(11) NOT NULL,
+  PRIMARY KEY (`course_id`,`software_id`),
+  KEY `software_id` (`software_id`),
+  CONSTRAINT `course_software_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
+  CONSTRAINT `course_software_ibfk_2` FOREIGN KEY (`software_id`) REFERENCES `software` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
--- --------------------------------------------------------
+-- Listage des données de la table chronos.course_software : ~2 rows (environ)
+INSERT INTO `course_software` (`course_id`, `software_id`) VALUES
+	(2, 2),
+	(2, 4);
 
---
--- Structure de la table `course_teacher`
---
-
-CREATE TABLE `course_teacher` (
+-- Listage de la structure de table chronos. course_teacher
+CREATE TABLE IF NOT EXISTS `course_teacher` (
   `course_id` int(11) NOT NULL,
-  `teacher_id` int(11) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `teacher_id` int(11) NOT NULL,
+  PRIMARY KEY (`course_id`,`teacher_id`),
+  KEY `teacher_id` (`teacher_id`),
+  CONSTRAINT `course_teacher_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
+  CONSTRAINT `course_teacher_ibfk_2` FOREIGN KEY (`teacher_id`) REFERENCES `teacher` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Déchargement des données de la table `course_teacher`
---
-
+-- Listage des données de la table chronos.course_teacher : ~59 rows (environ)
 INSERT INTO `course_teacher` (`course_id`, `teacher_id`) VALUES
-(1, 5),
-(3, 1),
-(3, 6);
+	(1, 48),
+	(1, 59),
+	(2, 2),
+	(2, 4),
+	(2, 11),
+	(2, 15),
+	(2, 46),
+	(2, 56),
+	(3, 30),
+	(3, 51),
+	(3, 56),
+	(3, 57),
+	(4, 30),
+	(4, 51),
+	(4, 56),
+	(4, 57),
+	(5, 15),
+	(5, 52),
+	(6, 15),
+	(6, 17),
+	(6, 26),
+	(6, 31),
+	(7, 8),
+	(7, 15),
+	(7, 17),
+	(7, 26),
+	(7, 29),
+	(7, 31),
+	(7, 35),
+	(7, 58),
+	(8, 34),
+	(8, 53),
+	(9, 28),
+	(10, 1),
+	(10, 16),
+	(10, 28),
+	(10, 41),
+	(11, 1),
+	(11, 2),
+	(11, 15),
+	(11, 16),
+	(11, 28),
+	(11, 31),
+	(11, 41),
+	(11, 47),
+	(12, 25),
+	(13, 13),
+	(13, 29),
+	(13, 46),
+	(14, 2),
+	(14, 13),
+	(14, 23),
+	(14, 25),
+	(14, 29),
+	(14, 46),
+	(15, 3),
+	(16, 3),
+	(16, 20),
+	(16, 27);
 
--- --------------------------------------------------------
+-- Listage de la structure de table chronos. equipment
+CREATE TABLE IF NOT EXISTS `equipment` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(120) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`)
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Structure de la table `course_name_preferred_room`
---
+-- Listage des données de la table chronos.equipment : ~8 rows (environ)
+INSERT INTO `equipment` (`id`, `name`) VALUES
+	(4, 'Elec 1'),
+	(5, 'Elec 2'),
+	(8, 'Energie 1'),
+	(6, 'FESTO'),
+	(7, 'Habilitation Elec'),
+	(1, 'SAE'),
+	(2, 'SAE 1'),
+	(3, 'SAE 2');
 
-CREATE TABLE `course_name_preferred_room` (
-  `course_name_id` int(11) NOT NULL,
-  `room_id` int(11) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- --------------------------------------------------------
-
---
--- Structure de la table `equipment`
---
-
-CREATE TABLE `equipment` (
-  `id` int(11) NOT NULL,
-  `name` varchar(120) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- --------------------------------------------------------
-
---
--- Structure de la table `room`
---
-
-CREATE TABLE `room` (
-  `id` int(11) NOT NULL,
+-- Listage de la structure de table chronos. room
+CREATE TABLE IF NOT EXISTS `room` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(120) NOT NULL,
   `capacity` int(11) NOT NULL,
   `computers` int(11) NOT NULL,
   `notes` text DEFAULT NULL,
   `created_at` datetime NOT NULL,
-  `updated_at` datetime NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`)
+) ENGINE=InnoDB AUTO_INCREMENT=34 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Déchargement des données de la table `room`
---
-
+-- Listage des données de la table chronos.room : ~33 rows (environ)
 INSERT INTO `room` (`id`, `name`, `capacity`, `computers`, `notes`, `created_at`, `updated_at`) VALUES
-(1, 'SAE 1', 24, 12, '', '2025-10-15 09:10:20', '2025-10-15 09:19:15'),
-(2, 'SAE 2', 24, 12, '', '2025-10-15 09:10:25', '2025-10-15 09:19:29'),
-(3, 'AMPHI', 160, 0, '', '2025-10-15 09:20:30', '2025-10-15 09:20:37');
+	(1, '011 Anglais', 25, 26, '', '2025-10-14 23:41:35', '2025-10-16 23:00:10'),
+	(2, '012 Anglais', 14, 14, '', '2025-10-14 23:43:03', '2025-10-16 23:00:21'),
+	(3, '016 LSI', 20, 0, '', '2025-10-14 23:43:08', '2025-10-14 23:43:08'),
+	(4, '019 TP ELN 2A', 24, 12, '', '2025-10-14 23:43:14', '2025-10-20 14:22:05'),
+	(5, '020 CAfIEM', 24, 12, '', '2025-10-14 23:43:17', '2025-10-20 14:22:30'),
+	(6, '021 TPOL1', 25, 25, '', '2025-10-14 23:43:22', '2025-10-20 14:22:47'),
+	(7, '023 TP II 2A', 20, 8, '', '2025-10-14 23:43:27', '2025-10-15 09:38:09'),
+	(8, '024 TP II 1A', 16, 15, '', '2025-10-14 23:43:32', '2025-10-20 14:23:23'),
+	(9, '025 TP ELN 1A', 15, 8, '', '2025-10-14 23:43:35', '2025-10-20 14:23:35'),
+	(10, '026 SAE 1A', 20, 28, '', '2025-10-14 23:43:38', '2025-10-15 09:38:31'),
+	(11, '027 SAE 2A', 20, 24, '', '2025-10-14 23:43:42', '2025-10-15 09:38:54'),
+	(12, '028.a Energie 2A', 20, 9, '', '2025-10-14 23:43:47', '2025-10-15 09:38:59'),
+	(13, '028.b MEEDD', 20, 0, '', '2025-10-14 23:43:50', '2025-10-14 23:43:50'),
+	(14, '029 Hab. Elec.', 5, 0, '', '2025-10-14 23:43:53', '2025-10-16 22:27:30'),
+	(15, '030 Réseau', 24, 12, '23?', '2025-10-14 23:43:57', '2025-10-20 14:24:11'),
+	(16, '031 Energie 1', 12, 6, '', '2025-10-14 23:44:00', '2025-10-20 14:24:22'),
+	(17, '032 Energie 3', 12, 6, '', '2025-10-14 23:44:02', '2025-10-20 14:24:29'),
+	(18, '033 Automatique', 20, 10, '', '2025-10-14 23:44:05', '2025-10-20 14:24:42'),
+	(19, '037 TPOL2 La PLAGE', 30, 28, '', '2025-10-14 23:44:08', '2025-10-20 14:23:11'),
+	(20, '101.a Robotique', 25, 18, '', '2025-10-14 23:44:11', '2025-10-15 09:36:18'),
+	(21, '101.b Festo', 1, 0, '', '2025-10-14 23:44:14', '2025-10-15 00:05:00'),
+	(22, '101.c Automatisme', 24, 29, '', '2025-10-14 23:44:17', '2025-10-15 09:36:45'),
+	(23, '102', 20, 0, '', '2025-10-14 23:44:21', '2025-10-14 23:44:21'),
+	(24, '103 C&C', 20, 0, '', '2025-10-14 23:44:24', '2025-10-14 23:44:24'),
+	(25, '104', 20, 0, '', '2025-10-14 23:44:27', '2025-10-14 23:44:27'),
+	(26, '105 C&C', 26, 0, '', '2025-10-14 23:44:30', '2025-10-20 13:48:00'),
+	(27, '106', 20, 0, '', '2025-10-14 23:44:33', '2025-10-14 23:44:33'),
+	(28, '108-110 Automatisme', 24, 0, '', '2025-10-14 23:44:36', '2025-10-15 00:07:44'),
+	(29, '112', 20, 0, '', '2025-10-14 23:44:38', '2025-10-14 23:44:38'),
+	(30, '114', 20, 0, '', '2025-10-14 23:44:42', '2025-10-14 23:44:42'),
+	(31, 'Reunion', 20, 0, '', '2025-10-14 23:44:47', '2025-10-14 23:44:47'),
+	(32, '022 AMPHI GEII', 160, 0, '', '2025-10-15 07:52:43', '2025-10-19 22:44:10'),
+	(33, 'AMPHI GMP', 20, 0, '', '2025-10-15 07:52:56', '2025-10-15 07:52:56');
 
--- --------------------------------------------------------
-
---
--- Structure de la table `room_equipment`
---
-
-CREATE TABLE `room_equipment` (
+-- Listage de la structure de table chronos. room_equipment
+CREATE TABLE IF NOT EXISTS `room_equipment` (
   `room_id` int(11) NOT NULL,
-  `equipment_id` int(11) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `equipment_id` int(11) NOT NULL,
+  PRIMARY KEY (`room_id`,`equipment_id`),
+  KEY `equipment_id` (`equipment_id`),
+  CONSTRAINT `room_equipment_ibfk_1` FOREIGN KEY (`room_id`) REFERENCES `room` (`id`),
+  CONSTRAINT `room_equipment_ibfk_2` FOREIGN KEY (`equipment_id`) REFERENCES `equipment` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
--- --------------------------------------------------------
+-- Listage des données de la table chronos.room_equipment : ~7 rows (environ)
+INSERT INTO `room_equipment` (`room_id`, `equipment_id`) VALUES
+	(4, 5),
+	(9, 4),
+	(10, 2),
+	(11, 3),
+	(14, 7),
+	(16, 8),
+	(22, 6);
 
---
--- Structure de la table `room_software`
---
-
-CREATE TABLE `room_software` (
+-- Listage de la structure de table chronos. room_software
+CREATE TABLE IF NOT EXISTS `room_software` (
   `room_id` int(11) NOT NULL,
-  `software_id` int(11) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `software_id` int(11) NOT NULL,
+  PRIMARY KEY (`room_id`,`software_id`),
+  KEY `software_id` (`software_id`),
+  CONSTRAINT `room_software_ibfk_1` FOREIGN KEY (`room_id`) REFERENCES `room` (`id`),
+  CONSTRAINT `room_software_ibfk_2` FOREIGN KEY (`software_id`) REFERENCES `software` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
--- --------------------------------------------------------
+-- Listage des données de la table chronos.room_software : ~3 rows (environ)
+INSERT INTO `room_software` (`room_id`, `software_id`) VALUES
+	(10, 2),
+	(10, 3),
+	(10, 4);
 
---
--- Structure de la table `session`
---
-
-CREATE TABLE `session` (
-  `id` int(11) NOT NULL,
+-- Listage de la structure de table chronos. session
+CREATE TABLE IF NOT EXISTS `session` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `course_id` int(11) NOT NULL,
   `teacher_id` int(11) NOT NULL,
   `room_id` int(11) NOT NULL,
@@ -310,626 +660,555 @@ CREATE TABLE `session` (
   `start_time` datetime NOT NULL,
   `end_time` datetime NOT NULL,
   `created_at` datetime NOT NULL,
-  `updated_at` datetime NOT NULL
-) ;
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_room_start_time` (`room_id`,`start_time`),
+  UNIQUE KEY `uq_class_start_time` (`class_group_id`,`subgroup_label`,`start_time`),
+  KEY `course_id` (`course_id`),
+  KEY `teacher_id` (`teacher_id`),
+  CONSTRAINT `session_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
+  CONSTRAINT `session_ibfk_2` FOREIGN KEY (`teacher_id`) REFERENCES `teacher` (`id`),
+  CONSTRAINT `session_ibfk_3` FOREIGN KEY (`room_id`) REFERENCES `room` (`id`),
+  CONSTRAINT `session_ibfk_4` FOREIGN KEY (`class_group_id`) REFERENCES `class_group` (`id`),
+  CONSTRAINT `chk_session_time_order` CHECK (`end_time` > `start_time`)
+) ENGINE=InnoDB AUTO_INCREMENT=79211 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Déchargement des données de la table `session`
---
+-- Listage des données de la table chronos.session : ~0 rows (environ)
 
-INSERT INTO `session` (`id`, `course_id`, `teacher_id`, `room_id`, `class_group_id`, `subgroup_label`, `start_time`, `end_time`, `created_at`, `updated_at`) VALUES
-(99, 1, 5, 3, 1, NULL, '2025-09-15 08:00:00', '2025-09-15 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(100, 1, 5, 3, 1, NULL, '2025-11-14 08:00:00', '2025-11-14 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(101, 3, 1, 1, 1, NULL, '2025-09-15 10:15:00', '2025-09-15 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(102, 3, 1, 1, 1, NULL, '2025-09-23 08:00:00', '2025-09-23 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(103, 3, 1, 1, 1, NULL, '2025-10-02 08:00:00', '2025-10-02 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(104, 3, 1, 1, 1, NULL, '2025-10-10 08:00:00', '2025-10-10 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(105, 3, 1, 1, 1, NULL, '2025-10-20 08:00:00', '2025-10-20 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(106, 3, 1, 1, 1, NULL, '2025-10-28 08:00:00', '2025-10-28 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(107, 3, 1, 1, 1, NULL, '2025-11-06 08:00:00', '2025-11-06 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(108, 3, 1, 1, 1, NULL, '2025-11-14 10:15:00', '2025-11-14 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(109, 3, 6, 2, 2, NULL, '2025-09-15 10:15:00', '2025-09-15 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(110, 3, 6, 2, 2, NULL, '2025-09-23 08:00:00', '2025-09-23 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(111, 3, 6, 2, 2, NULL, '2025-10-02 08:00:00', '2025-10-02 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(112, 3, 6, 2, 2, NULL, '2025-10-10 08:00:00', '2025-10-10 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(113, 3, 6, 2, 2, NULL, '2025-10-20 08:00:00', '2025-10-20 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(114, 3, 6, 2, 2, NULL, '2025-10-28 08:00:00', '2025-10-28 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(115, 3, 6, 2, 2, NULL, '2025-11-06 08:00:00', '2025-11-06 10:00:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(116, 3, 6, 2, 2, NULL, '2025-11-14 10:15:00', '2025-11-14 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(117, 4, 3, 1, 1, 'A', '2025-09-15 13:30:00', '2025-09-15 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(118, 4, 3, 1, 1, 'A', '2025-09-23 10:15:00', '2025-09-23 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(119, 4, 3, 1, 1, 'A', '2025-10-02 10:15:00', '2025-10-02 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(120, 4, 3, 1, 1, 'A', '2025-10-10 10:15:00', '2025-10-10 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(121, 4, 3, 1, 1, 'A', '2025-10-20 10:15:00', '2025-10-20 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(122, 4, 3, 1, 1, 'A', '2025-10-28 10:15:00', '2025-10-28 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(123, 4, 3, 1, 1, 'A', '2025-11-06 10:15:00', '2025-11-06 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(124, 4, 3, 1, 1, 'A', '2025-11-14 13:30:00', '2025-11-14 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(125, 4, 3, 1, 1, 'B', '2025-09-15 15:45:00', '2025-09-15 17:45:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(126, 4, 3, 1, 1, 'B', '2025-09-23 13:30:00', '2025-09-23 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(127, 4, 3, 1, 1, 'B', '2025-10-02 13:30:00', '2025-10-02 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(128, 4, 3, 1, 1, 'B', '2025-10-10 13:30:00', '2025-10-10 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(129, 4, 3, 1, 1, 'B', '2025-10-20 13:30:00', '2025-10-20 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(130, 4, 3, 1, 1, 'B', '2025-10-28 13:30:00', '2025-10-28 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(131, 4, 3, 1, 1, 'B', '2025-11-06 13:30:00', '2025-11-06 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(132, 4, 3, 1, 1, 'B', '2025-11-14 15:45:00', '2025-11-14 17:45:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(133, 4, 4, 2, 2, 'A', '2025-09-15 13:30:00', '2025-09-15 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(134, 4, 4, 2, 2, 'A', '2025-09-23 10:15:00', '2025-09-23 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(135, 4, 4, 2, 2, 'A', '2025-10-02 10:15:00', '2025-10-02 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(136, 4, 4, 2, 2, 'A', '2025-10-10 10:15:00', '2025-10-10 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(137, 4, 4, 2, 2, 'A', '2025-10-20 10:15:00', '2025-10-20 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(138, 4, 4, 2, 2, 'A', '2025-10-28 10:15:00', '2025-10-28 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(139, 4, 4, 2, 2, 'A', '2025-11-06 10:15:00', '2025-11-06 12:15:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(140, 4, 4, 2, 2, 'A', '2025-11-14 13:30:00', '2025-11-14 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(141, 4, 4, 2, 2, 'B', '2025-09-15 15:45:00', '2025-09-15 17:45:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(142, 4, 4, 2, 2, 'B', '2025-09-23 13:30:00', '2025-09-23 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(143, 4, 4, 2, 2, 'B', '2025-10-02 13:30:00', '2025-10-02 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(144, 4, 4, 2, 2, 'B', '2025-10-10 13:30:00', '2025-10-10 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(145, 4, 4, 2, 2, 'B', '2025-10-20 13:30:00', '2025-10-20 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(146, 4, 4, 2, 2, 'B', '2025-10-28 13:30:00', '2025-10-28 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(147, 4, 4, 2, 2, 'B', '2025-11-06 13:30:00', '2025-11-06 15:30:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(148, 4, 4, 2, 2, 'B', '2025-11-14 15:45:00', '2025-11-14 17:45:00', '2025-10-15 09:45:17', '2025-10-15 09:45:17'),
-(157, 5, 3, 1, 1, 'A', '2025-09-01 08:00:00', '2025-09-01 10:00:00', '2025-10-15 09:53:56', '2025-10-15 09:53:56'),
-(158, 5, 3, 1, 1, 'A', '2025-09-12 08:00:00', '2025-09-12 10:00:00', '2025-10-15 09:53:56', '2025-10-15 09:53:56'),
-(159, 5, 3, 1, 1, 'B', '2025-09-01 10:15:00', '2025-09-01 12:15:00', '2025-10-15 09:53:56', '2025-10-15 09:53:56'),
-(160, 5, 3, 1, 1, 'B', '2025-09-12 10:15:00', '2025-09-12 12:15:00', '2025-10-15 09:53:56', '2025-10-15 09:53:56');
-
--- --------------------------------------------------------
-
---
--- Structure de la table `session_attendance`
---
-
-CREATE TABLE `session_attendance` (
+-- Listage de la structure de table chronos. session_attendance
+CREATE TABLE IF NOT EXISTS `session_attendance` (
   `session_id` int(11) NOT NULL,
-  `class_group_id` int(11) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `class_group_id` int(11) NOT NULL,
+  PRIMARY KEY (`session_id`,`class_group_id`),
+  KEY `class_group_id` (`class_group_id`),
+  CONSTRAINT `session_attendance_ibfk_1` FOREIGN KEY (`session_id`) REFERENCES `session` (`id`),
+  CONSTRAINT `session_attendance_ibfk_2` FOREIGN KEY (`class_group_id`) REFERENCES `class_group` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Déchargement des données de la table `session_attendance`
---
+-- Listage des données de la table chronos.session_attendance : ~0 rows (environ)
 
-INSERT INTO `session_attendance` (`session_id`, `class_group_id`) VALUES
-(99, 1),
-(99, 2),
-(100, 1),
-(100, 2),
-(101, 1),
-(102, 1),
-(103, 1),
-(104, 1),
-(105, 1),
-(106, 1),
-(107, 1),
-(108, 1),
-(109, 2),
-(110, 2),
-(111, 2),
-(112, 2),
-(113, 2),
-(114, 2),
-(115, 2),
-(116, 2),
-(117, 1),
-(118, 1),
-(119, 1),
-(120, 1),
-(121, 1),
-(122, 1),
-(123, 1),
-(124, 1),
-(125, 1),
-(126, 1),
-(127, 1),
-(128, 1),
-(129, 1),
-(130, 1),
-(131, 1),
-(132, 1),
-(133, 2),
-(134, 2),
-(135, 2),
-(136, 2),
-(137, 2),
-(138, 2),
-(139, 2),
-(140, 2),
-(141, 2),
-(142, 2),
-(143, 2),
-(144, 2),
-(145, 2),
-(146, 2),
-(147, 2),
-(148, 2),
-(157, 1),
-(158, 1),
-(159, 1),
-(160, 1);
+-- Listage de la structure de table chronos. software
+CREATE TABLE IF NOT EXISTS `software` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(120) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`)
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
--- --------------------------------------------------------
+-- Listage des données de la table chronos.software : ~6 rows (environ)
+INSERT INTO `software` (`id`, `name`) VALUES
+	(2, 'Arduino'),
+	(4, 'Kicad'),
+	(6, 'Proteus'),
+	(3, 'Python'),
+	(1, 'Vs Code'),
+	(5, 'uSimmics');
 
---
--- Structure de la table `software`
---
-
-CREATE TABLE `software` (
-  `id` int(11) NOT NULL,
-  `name` varchar(120) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- --------------------------------------------------------
-
---
--- Structure de la table `teacher`
---
-
-CREATE TABLE `teacher` (
-  `id` int(11) NOT NULL,
+-- Listage de la structure de table chronos. teacher
+CREATE TABLE IF NOT EXISTS `teacher` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(120) NOT NULL,
   `email` varchar(255) DEFAULT NULL,
   `phone` varchar(50) DEFAULT NULL,
   `unavailable_dates` text DEFAULT NULL,
   `notes` text DEFAULT NULL,
   `created_at` datetime NOT NULL,
-  `updated_at` datetime NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`)
+) ENGINE=InnoDB AUTO_INCREMENT=60 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Déchargement des données de la table `teacher`
---
-
+-- Listage des données de la table chronos.teacher : ~59 rows (environ)
 INSERT INTO `teacher` (`id`, `name`, `email`, `phone`, `unavailable_dates`, `notes`, `created_at`, `updated_at`) VALUES
-(1, 'Loic ', '', '', NULL, '', '2025-10-15 09:09:57', '2025-10-15 09:09:57'),
-(2, 'Tim', '', '', NULL, '', '2025-10-15 09:13:49', '2025-10-15 09:13:49'),
-(3, 'Francois', '', '', NULL, '', '2025-10-15 09:13:59', '2025-10-15 09:13:59'),
-(4, 'Gilles', '', '', NULL, '', '2025-10-15 09:14:08', '2025-10-15 09:14:08'),
-(5, 'iza', '', '', NULL, '', '2025-10-15 09:14:14', '2025-10-15 09:14:14'),
-(6, 'pierre', '', '', NULL, '', '2025-10-15 09:14:30', '2025-10-15 09:14:30');
+	(1, 'LEVI Timothée', 'timothee.levi@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:01:33', '2025-10-14 22:01:33'),
+	(2, 'ADEL Abderrahamane', 'abderrahmane.adel.1@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:28:54', '2025-10-14 22:28:54'),
+	(3, 'ARNAL Florent', 'florent.arnal@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:29:09', '2025-10-14 22:29:09'),
+	(4, 'AUGEREAU François', 'francois.augereau@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:29:55', '2025-10-14 22:29:55'),
+	(5, 'BAJULE Ludovic', 'ludovic.bajule@reseau.sncf.fr', '', NULL, '', '2025-10-14 22:30:19', '2025-10-14 22:30:19'),
+	(6, 'BEL HAJ FREJ Ghazi', 'ghazi.bel-haj-frej@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:30:50', '2025-10-14 22:30:50'),
+	(7, 'BEVIA Frederic', 'f.bevia@gironde.fr', '', NULL, '', '2025-10-14 22:31:01', '2025-10-14 22:31:01'),
+	(8, 'BIGOURD Damien', 'damien.bigourd@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:31:21', '2025-10-14 22:31:21'),
+	(9, 'BLANCHARD Damien', 'damien.blanchard@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:31:36', '2025-10-14 22:31:36'),
+	(10, 'BONJA Aude', 'ab@bonja-avocat.com', '', NULL, '', '2025-10-14 22:31:58', '2025-10-14 22:31:58'),
+	(11, 'BORD MAJEK Isabelle', 'isabelle.bord-majek@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:32:12', '2025-10-14 22:32:12'),
+	(12, 'BOUTER Serge', 'serge.bouter@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:32:29', '2025-10-14 22:32:29'),
+	(13, 'BRIAT Olivier', 'olivier.briat@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:32:44', '2025-10-14 22:32:44'),
+	(14, 'CAILLY Alexis', '', '', NULL, '', '2025-10-14 22:32:55', '2025-10-14 22:32:55'),
+	(15, 'CAZAUX Pierre', 'pierre.cazaux@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:33:25', '2025-10-14 22:33:25'),
+	(16, 'CIESLAK Jerome', 'jerome.cieslak@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:33:36', '2025-10-14 22:33:36'),
+	(17, 'CHAMPION Frédéric', 'fred.champ11@gmail.com', '', NULL, '', '2025-10-14 22:33:50', '2025-10-14 22:33:50'),
+	(18, 'COMBASTEL Christophe', 'christophe.combastel@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:34:35', '2025-10-14 22:34:35'),
+	(19, 'D\'ANNA Wilfried', 'wdanna@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:34:47', '2025-10-14 22:34:47'),
+	(20, 'DE VILLEDON Arnaud', 'arnaud.devilledon@free.fr', '', NULL, '', '2025-10-14 22:34:59', '2025-10-14 22:34:59'),
+	(21, 'DEMONTOUX François', 'francois.demontoux@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:35:13', '2025-10-14 22:35:13'),
+	(22, 'DENJEAN Frederic', 'frederic.denjean@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:35:29', '2025-10-14 22:35:29'),
+	(23, 'DILHAIRE Stefan', 'stefan.dilhaire@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:35:39', '2025-10-14 22:35:39'),
+	(24, 'ESSELY Fabien', 'f.essely@serma.com', '', NULL, '', '2025-10-14 22:35:50', '2025-10-14 22:35:50'),
+	(25, 'FRADET Michael', 'michael.fradet@enedis.fr', '', NULL, '', '2025-10-14 22:36:03', '2025-10-14 22:36:03'),
+	(26, 'FREMONT Hélène', 'helene.fremont@ims-bordeaux.fr', '', NULL, '', '2025-10-14 22:36:16', '2025-10-14 22:36:16'),
+	(27, 'GRAUBY Stéphane', 'stephane.grauby@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:36:26', '2025-10-14 22:36:26'),
+	(28, 'GUCIK-DERIGNY David', 'david.gucik-derigny@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:36:43', '2025-10-14 22:36:43'),
+	(29, 'GUEUNIER-FARRET Marie', 'marie.gueunier-farret@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:36:56', '2025-10-14 22:36:56'),
+	(30, 'GUILLET Jean-Paul', 'jean-paul.guillet@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:37:10', '2025-10-14 22:37:10'),
+	(31, 'HALLIL Hamida', 'hamida.hallil-abbas@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:37:21', '2025-10-14 22:37:21'),
+	(32, 'HEMOUR Simon', 'simon.hemour@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:37:30', '2025-10-14 22:37:30'),
+	(33, 'HILICO Adèle', 'adele.hilico@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:37:52', '2025-10-14 22:37:52'),
+	(34, 'HOHNSBEIN Axel', 'axel.hohnsbein@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:38:09', '2025-10-14 22:38:09'),
+	(35, 'JOLY Simon', 'simon.joly@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:38:19', '2025-10-14 22:38:19'),
+	(36, 'KREDDIA Meriem', 'meriem.kreddia@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:38:30', '2025-10-14 22:38:30'),
+	(37, 'LACOTTE Jean-Eric', '', '', NULL, '', '2025-10-14 22:38:37', '2025-10-14 22:38:37'),
+	(38, 'LEYNEY Martial', 'martial.leyney@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:38:50', '2025-10-14 22:38:50'),
+	(39, 'MALTI Rachid', 'rachid.malti@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:39:01', '2025-10-14 22:39:01'),
+	(40, 'MELKI Paul', 'paul.melki@exxact-robotics.com', '', NULL, '', '2025-10-14 22:39:12', '2025-10-14 22:39:12'),
+	(41, 'MOVAHEDKHAH Ilham', 'imovahedkhah@gmail.com', '', NULL, '', '2025-10-14 22:39:28', '2025-10-14 22:39:28'),
+	(42, 'N\'KAOUA Gilles', 'gilles.nkaoua@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:39:39', '2025-10-14 22:39:39'),
+	(43, 'PARDINI Maxime', 'pardinimaxime@gmail.com', '', NULL, '', '2025-10-14 22:39:48', '2025-10-14 22:39:48'),
+	(44, 'PAPAZIAN Stéphanie', 'stephanie.papazian@yahoo.fr', '', NULL, '', '2025-10-14 22:39:58', '2025-10-14 22:39:58'),
+	(45, 'PERNET Pascal', '', '', NULL, '', '2025-10-14 22:40:09', '2025-10-14 22:40:09'),
+	(46, 'PERRIER Laurence', 'laurence.perrier@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:40:21', '2025-10-14 22:40:21'),
+	(47, 'SABATIER Jocelyn', 'jocelyn.sabatier@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:40:37', '2025-10-14 22:40:37'),
+	(48, 'SAUZEAU Lea', 'lea.sauzeau@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:40:48', '2025-10-14 22:40:48'),
+	(49, 'SCHMITZ Etienne', '', '', NULL, '', '2025-10-14 22:40:58', '2025-10-14 22:40:58'),
+	(50, 'TARISIEN Medhi', 'medhi.tarisien@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:41:06', '2025-10-14 22:41:06'),
+	(51, 'TETELIN Angélique', 'angelique.tetelin@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:41:15', '2025-10-14 22:41:15'),
+	(52, 'THEOLIER Loic', 'loic.theolier@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:41:35', '2025-10-14 22:41:35'),
+	(53, 'VERGELY Pascale', 'pascale.vergely@u-bordeaux.fr', '', NULL, '', '2025-10-14 22:41:45', '2025-10-14 22:41:45'),
+	(54, 'WATRIN Emmanuelle', 'emmanuelle.watrin@educagri.fr', '', NULL, '', '2025-10-14 22:42:00', '2025-10-14 22:42:00'),
+	(55, 'WILBOURNE Helen', 'hw912@free.fr', '', NULL, '', '2025-10-14 22:42:12', '2025-10-14 22:42:12'),
+	(56, 'QUEHEILLE Remi', 'remi.queheille@u-bordeaux.fr', '', NULL, '', '2025-10-15 22:25:15', '2025-10-15 22:25:15'),
+	(57, 'BAILLY Landry', 'landry.bailly@u-bordeaux.fr', '', NULL, '', '2025-10-16 22:02:38', '2025-10-16 22:02:38'),
+	(58, 'REBIERE Dominique', '', '', NULL, '', '2025-10-19 22:19:27', '2025-10-19 22:19:27'),
+	(59, 'DORE Juju', '', '', NULL, '', '2025-10-22 12:26:41', '2025-10-22 12:26:41');
 
--- --------------------------------------------------------
-
---
--- Structure de la table `teacher_availability`
---
-
-CREATE TABLE `teacher_availability` (
-  `id` int(11) NOT NULL,
+-- Listage de la structure de table chronos. teacher_availability
+CREATE TABLE IF NOT EXISTS `teacher_availability` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
   `teacher_id` int(11) NOT NULL,
   `weekday` int(11) NOT NULL,
   `start_time` time NOT NULL,
   `end_time` time NOT NULL,
   `created_at` datetime NOT NULL,
-  `updated_at` datetime NOT NULL
-) ;
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `teacher_id` (`teacher_id`),
+  CONSTRAINT `teacher_availability_ibfk_1` FOREIGN KEY (`teacher_id`) REFERENCES `teacher` (`id`),
+  CONSTRAINT `chk_availability_time_order` CHECK (`end_time` > `start_time`),
+  CONSTRAINT `chk_availability_weekday_range` CHECK (`weekday` >= 0 and `weekday` <= 6)
+) ENGINE=InnoDB AUTO_INCREMENT=704 DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
---
--- Déchargement des données de la table `teacher_availability`
---
-
+-- Listage des données de la table chronos.teacher_availability : ~408 rows (environ)
 INSERT INTO `teacher_availability` (`id`, `teacher_id`, `weekday`, `start_time`, `end_time`, `created_at`, `updated_at`) VALUES
-(1, 3, 0, '08:00:00', '10:00:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(2, 3, 0, '10:15:00', '12:15:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(3, 3, 0, '13:30:00', '15:30:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(4, 3, 0, '15:45:00', '17:45:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(5, 3, 1, '08:00:00', '10:00:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(6, 3, 1, '10:15:00', '12:15:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(7, 3, 1, '13:30:00', '15:30:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(8, 3, 1, '15:45:00', '17:45:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(9, 3, 2, '08:00:00', '10:00:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(10, 3, 2, '10:15:00', '12:15:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(11, 3, 2, '13:30:00', '15:30:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(12, 3, 2, '15:45:00', '17:45:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(13, 3, 3, '08:00:00', '10:00:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(14, 3, 3, '10:15:00', '12:15:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(15, 3, 3, '13:30:00', '15:30:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(16, 3, 3, '15:45:00', '17:45:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(17, 3, 4, '08:00:00', '10:00:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(18, 3, 4, '10:15:00', '12:15:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(19, 3, 4, '13:30:00', '15:30:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(20, 3, 4, '15:45:00', '17:45:00', '2025-10-15 09:18:13', '2025-10-15 09:18:13'),
-(21, 4, 0, '08:00:00', '10:00:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(22, 4, 0, '10:15:00', '12:15:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(23, 4, 0, '13:30:00', '15:30:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(24, 4, 0, '15:45:00', '17:45:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(25, 4, 1, '08:00:00', '10:00:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(26, 4, 1, '10:15:00', '12:15:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(27, 4, 1, '13:30:00', '15:30:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(28, 4, 1, '15:45:00', '17:45:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(29, 4, 2, '08:00:00', '10:00:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(30, 4, 2, '10:15:00', '12:15:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(31, 4, 2, '13:30:00', '15:30:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(32, 4, 2, '15:45:00', '17:45:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(33, 4, 3, '08:00:00', '10:00:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(34, 4, 3, '10:15:00', '12:15:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(35, 4, 3, '13:30:00', '15:30:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(36, 4, 3, '15:45:00', '17:45:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(37, 4, 4, '08:00:00', '10:00:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(38, 4, 4, '10:15:00', '12:15:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(39, 4, 4, '13:30:00', '15:30:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(40, 4, 4, '15:45:00', '17:45:00', '2025-10-15 09:18:17', '2025-10-15 09:18:17'),
-(41, 5, 0, '08:00:00', '10:00:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(42, 5, 0, '10:15:00', '12:15:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(43, 5, 0, '13:30:00', '15:30:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(44, 5, 0, '15:45:00', '17:45:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(45, 5, 1, '08:00:00', '10:00:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(46, 5, 1, '10:15:00', '12:15:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(47, 5, 1, '13:30:00', '15:30:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(48, 5, 1, '15:45:00', '17:45:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(49, 5, 2, '08:00:00', '10:00:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(50, 5, 2, '10:15:00', '12:15:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(51, 5, 2, '13:30:00', '15:30:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(52, 5, 2, '15:45:00', '17:45:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(53, 5, 3, '08:00:00', '10:00:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(54, 5, 3, '10:15:00', '12:15:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(55, 5, 3, '13:30:00', '15:30:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(56, 5, 3, '15:45:00', '17:45:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(57, 5, 4, '08:00:00', '10:00:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(58, 5, 4, '10:15:00', '12:15:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(59, 5, 4, '13:30:00', '15:30:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(60, 5, 4, '15:45:00', '17:45:00', '2025-10-15 09:18:21', '2025-10-15 09:18:21'),
-(61, 1, 0, '08:00:00', '10:00:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(62, 1, 0, '10:15:00', '12:15:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(63, 1, 0, '13:30:00', '15:30:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(64, 1, 0, '15:45:00', '17:45:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(65, 1, 1, '08:00:00', '10:00:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(66, 1, 1, '10:15:00', '12:15:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(67, 1, 1, '13:30:00', '15:30:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(68, 1, 1, '15:45:00', '17:45:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(69, 1, 2, '08:00:00', '10:00:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(70, 1, 2, '10:15:00', '12:15:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(71, 1, 2, '13:30:00', '15:30:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(72, 1, 2, '15:45:00', '17:45:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(73, 1, 3, '08:00:00', '10:00:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(74, 1, 3, '10:15:00', '12:15:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(75, 1, 3, '13:30:00', '15:30:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(76, 1, 3, '15:45:00', '17:45:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(77, 1, 4, '08:00:00', '10:00:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(78, 1, 4, '10:15:00', '12:15:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(79, 1, 4, '13:30:00', '15:30:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(80, 1, 4, '15:45:00', '17:45:00', '2025-10-15 09:18:27', '2025-10-15 09:18:27'),
-(81, 6, 0, '08:00:00', '10:00:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(82, 6, 0, '10:15:00', '12:15:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(83, 6, 0, '13:30:00', '15:30:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(84, 6, 0, '15:45:00', '17:45:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(85, 6, 1, '08:00:00', '10:00:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(86, 6, 1, '10:15:00', '12:15:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(87, 6, 1, '13:30:00', '15:30:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(88, 6, 1, '15:45:00', '17:45:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(89, 6, 2, '08:00:00', '10:00:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(90, 6, 2, '10:15:00', '12:15:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(91, 6, 2, '13:30:00', '15:30:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(92, 6, 2, '15:45:00', '17:45:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(93, 6, 3, '08:00:00', '10:00:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(94, 6, 3, '10:15:00', '12:15:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(95, 6, 3, '13:30:00', '15:30:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(96, 6, 3, '15:45:00', '17:45:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(97, 6, 4, '08:00:00', '10:00:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(98, 6, 4, '10:15:00', '12:15:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(99, 6, 4, '13:30:00', '15:30:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(100, 6, 4, '15:45:00', '17:45:00', '2025-10-15 09:18:31', '2025-10-15 09:18:31'),
-(101, 2, 0, '08:00:00', '10:00:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(102, 2, 0, '10:15:00', '12:15:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(103, 2, 0, '13:30:00', '15:30:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(104, 2, 0, '15:45:00', '17:45:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(105, 2, 1, '08:00:00', '10:00:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(106, 2, 1, '10:15:00', '12:15:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(107, 2, 1, '13:30:00', '15:30:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(108, 2, 1, '15:45:00', '17:45:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(109, 2, 2, '08:00:00', '10:00:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(110, 2, 2, '10:15:00', '12:15:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(111, 2, 2, '13:30:00', '15:30:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(112, 2, 2, '15:45:00', '17:45:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(113, 2, 3, '08:00:00', '10:00:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(114, 2, 3, '10:15:00', '12:15:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(115, 2, 3, '13:30:00', '15:30:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(116, 2, 3, '15:45:00', '17:45:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(117, 2, 4, '08:00:00', '10:00:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(118, 2, 4, '10:15:00', '12:15:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(119, 2, 4, '13:30:00', '15:30:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33'),
-(120, 2, 4, '15:45:00', '17:45:00', '2025-10-15 09:18:33', '2025-10-15 09:18:33');
+	(44, 4, 0, '08:00:00', '10:00:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(45, 4, 0, '10:15:00', '12:15:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(46, 4, 0, '13:30:00', '15:30:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(47, 4, 0, '15:45:00', '17:45:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(48, 4, 1, '08:00:00', '10:00:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(49, 4, 1, '10:15:00', '12:15:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(50, 4, 1, '13:30:00', '15:30:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(51, 4, 1, '15:45:00', '17:45:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(52, 4, 2, '08:00:00', '10:00:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(53, 4, 2, '10:15:00', '12:15:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(54, 4, 2, '13:30:00', '15:30:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(55, 4, 3, '10:15:00', '12:15:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(56, 4, 4, '10:15:00', '12:15:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(57, 4, 4, '13:30:00', '15:30:00', '2025-10-15 22:28:18', '2025-10-15 22:28:18'),
+	(142, 20, 0, '13:30:00', '15:30:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(143, 20, 0, '15:45:00', '17:45:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(144, 20, 1, '08:00:00', '10:00:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(145, 20, 1, '10:15:00', '12:15:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(146, 20, 1, '13:30:00', '15:30:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(147, 20, 1, '15:45:00', '17:45:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(148, 20, 2, '08:00:00', '10:00:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(149, 20, 2, '10:15:00', '12:15:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(150, 20, 2, '13:30:00', '15:30:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(151, 20, 2, '15:45:00', '17:45:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(152, 20, 3, '08:00:00', '10:00:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(153, 20, 3, '10:15:00', '12:15:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(154, 20, 3, '13:30:00', '15:30:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(155, 20, 3, '15:45:00', '17:45:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(156, 20, 4, '08:00:00', '10:00:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(157, 20, 4, '10:15:00', '12:15:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(158, 20, 4, '13:30:00', '15:30:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(159, 20, 4, '15:45:00', '17:45:00', '2025-10-16 10:04:23', '2025-10-16 10:04:23'),
+	(160, 2, 0, '08:00:00', '10:00:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(161, 2, 0, '10:15:00', '12:15:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(162, 2, 0, '13:30:00', '15:30:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(163, 2, 0, '15:45:00', '17:45:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(164, 2, 1, '08:00:00', '10:00:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(165, 2, 1, '10:15:00', '12:15:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(166, 2, 1, '13:30:00', '15:30:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(167, 2, 1, '15:45:00', '17:45:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(168, 2, 2, '08:00:00', '10:00:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(169, 2, 2, '10:15:00', '12:15:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(170, 2, 2, '13:30:00', '15:30:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(171, 2, 2, '15:45:00', '17:45:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(172, 2, 3, '08:00:00', '10:00:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(173, 2, 3, '10:15:00', '12:15:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(174, 2, 4, '08:00:00', '10:00:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(175, 2, 4, '10:15:00', '12:15:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(176, 2, 4, '13:30:00', '15:30:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(177, 2, 4, '15:45:00', '17:45:00', '2025-10-16 14:36:01', '2025-10-16 14:36:01'),
+	(214, 30, 0, '08:00:00', '10:00:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(215, 30, 0, '10:15:00', '12:15:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(216, 30, 0, '13:30:00', '15:30:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(217, 30, 0, '15:45:00', '17:45:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(218, 30, 1, '08:00:00', '10:00:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(219, 30, 1, '10:15:00', '12:15:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(220, 30, 1, '13:30:00', '15:30:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(221, 30, 1, '15:45:00', '17:45:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(222, 30, 2, '08:00:00', '10:00:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(223, 30, 2, '10:15:00', '12:15:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(224, 30, 2, '13:30:00', '15:30:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(225, 30, 2, '15:45:00', '17:45:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(226, 30, 4, '08:00:00', '10:00:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(227, 30, 4, '10:15:00', '12:15:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(228, 30, 4, '13:30:00', '15:30:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(229, 30, 4, '15:45:00', '17:45:00', '2025-10-16 22:13:15', '2025-10-16 22:13:15'),
+	(230, 51, 0, '13:30:00', '15:30:00', '2025-10-16 22:14:34', '2025-10-16 22:14:34'),
+	(231, 51, 0, '15:45:00', '17:45:00', '2025-10-16 22:14:34', '2025-10-16 22:14:34'),
+	(232, 51, 1, '13:30:00', '15:30:00', '2025-10-16 22:14:34', '2025-10-16 22:14:34'),
+	(233, 51, 1, '15:45:00', '17:45:00', '2025-10-16 22:14:34', '2025-10-16 22:14:34'),
+	(234, 51, 2, '13:30:00', '15:30:00', '2025-10-16 22:14:34', '2025-10-16 22:14:34'),
+	(235, 51, 2, '15:45:00', '17:45:00', '2025-10-16 22:14:34', '2025-10-16 22:14:34'),
+	(236, 51, 4, '13:30:00', '15:30:00', '2025-10-16 22:14:34', '2025-10-16 22:14:34'),
+	(237, 51, 4, '15:45:00', '17:45:00', '2025-10-16 22:14:34', '2025-10-16 22:14:34'),
+	(238, 56, 0, '08:00:00', '10:00:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(239, 56, 0, '10:15:00', '12:15:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(240, 56, 0, '13:30:00', '15:30:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(241, 56, 0, '15:45:00', '17:45:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(242, 56, 1, '08:00:00', '10:00:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(243, 56, 1, '10:15:00', '12:15:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(244, 56, 1, '13:30:00', '15:30:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(245, 56, 1, '15:45:00', '17:45:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(246, 56, 2, '08:00:00', '10:00:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(247, 56, 2, '10:15:00', '12:15:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(248, 56, 2, '13:30:00', '15:30:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(249, 56, 2, '15:45:00', '17:45:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(250, 56, 3, '08:00:00', '10:00:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(251, 56, 3, '10:15:00', '12:15:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(252, 56, 4, '08:00:00', '10:00:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(253, 56, 4, '10:15:00', '12:15:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(254, 56, 4, '13:30:00', '15:30:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(255, 56, 4, '15:45:00', '17:45:00', '2025-10-16 22:18:56', '2025-10-16 22:18:56'),
+	(256, 57, 0, '08:00:00', '10:00:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(257, 57, 0, '10:15:00', '12:15:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(258, 57, 0, '13:30:00', '15:30:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(259, 57, 0, '15:45:00', '17:45:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(260, 57, 1, '08:00:00', '10:00:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(261, 57, 1, '10:15:00', '12:15:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(262, 57, 2, '08:00:00', '10:00:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(263, 57, 2, '10:15:00', '12:15:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(264, 57, 2, '13:30:00', '15:30:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(265, 57, 2, '15:45:00', '17:45:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(266, 57, 3, '08:00:00', '10:00:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(267, 57, 3, '10:15:00', '11:15:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(268, 57, 4, '08:00:00', '10:00:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(269, 57, 4, '10:15:00', '12:15:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(270, 57, 4, '13:30:00', '15:30:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(271, 57, 4, '15:45:00', '17:45:00', '2025-10-19 22:30:35', '2025-10-19 22:30:35'),
+	(272, 11, 0, '10:15:00', '12:15:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(273, 11, 0, '13:30:00', '15:30:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(274, 11, 0, '15:45:00', '17:45:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(275, 11, 1, '10:15:00', '12:15:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(276, 11, 1, '13:30:00', '15:30:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(277, 11, 1, '15:45:00', '17:45:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(278, 11, 2, '08:00:00', '10:00:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(279, 11, 2, '10:15:00', '12:15:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(280, 11, 2, '13:30:00', '15:30:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(281, 11, 3, '08:00:00', '10:00:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(282, 11, 3, '10:15:00', '12:15:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(283, 11, 3, '13:30:00', '15:30:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(284, 11, 3, '15:45:00', '17:45:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(285, 11, 4, '08:00:00', '10:00:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(286, 11, 4, '10:15:00', '12:15:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(287, 11, 4, '13:30:00', '15:30:00', '2025-10-19 22:30:42', '2025-10-19 22:30:42'),
+	(314, 52, 1, '10:15:00', '12:15:00', '2025-10-19 22:34:26', '2025-10-19 22:34:26'),
+	(315, 52, 1, '13:30:00', '15:30:00', '2025-10-19 22:34:26', '2025-10-19 22:34:26'),
+	(316, 52, 1, '15:45:00', '17:45:00', '2025-10-19 22:34:26', '2025-10-19 22:34:26'),
+	(317, 52, 2, '10:15:00', '12:15:00', '2025-10-19 22:34:26', '2025-10-19 22:34:26'),
+	(318, 52, 2, '13:30:00', '15:30:00', '2025-10-19 22:34:26', '2025-10-19 22:34:26'),
+	(319, 52, 2, '15:45:00', '17:45:00', '2025-10-19 22:34:26', '2025-10-19 22:34:26'),
+	(320, 52, 3, '10:15:00', '12:15:00', '2025-10-19 22:34:26', '2025-10-19 22:34:26'),
+	(321, 52, 4, '10:15:00', '12:15:00', '2025-10-19 22:34:26', '2025-10-19 22:34:26'),
+	(322, 52, 4, '13:30:00', '15:30:00', '2025-10-19 22:34:26', '2025-10-19 22:34:26'),
+	(323, 52, 4, '15:45:00', '17:45:00', '2025-10-19 22:34:26', '2025-10-19 22:34:26'),
+	(324, 58, 1, '13:30:00', '15:30:00', '2025-10-19 22:34:59', '2025-10-19 22:34:59'),
+	(325, 58, 1, '15:45:00', '17:45:00', '2025-10-19 22:34:59', '2025-10-19 22:34:59'),
+	(326, 58, 2, '08:00:00', '10:00:00', '2025-10-19 22:34:59', '2025-10-19 22:34:59'),
+	(327, 58, 2, '10:15:00', '12:15:00', '2025-10-19 22:34:59', '2025-10-19 22:34:59'),
+	(328, 58, 2, '13:30:00', '15:30:00', '2025-10-19 22:34:59', '2025-10-19 22:34:59'),
+	(329, 58, 2, '15:45:00', '17:45:00', '2025-10-19 22:34:59', '2025-10-19 22:34:59'),
+	(330, 41, 0, '08:00:00', '10:00:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(331, 41, 0, '10:15:00', '12:15:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(332, 41, 0, '13:30:00', '15:30:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(333, 41, 0, '15:45:00', '17:45:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(334, 41, 1, '08:00:00', '10:00:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(335, 41, 1, '10:15:00', '12:15:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(336, 41, 1, '13:30:00', '15:30:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(337, 41, 1, '15:45:00', '17:45:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(338, 41, 2, '08:00:00', '10:00:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(339, 41, 2, '10:15:00', '12:15:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(340, 41, 2, '13:30:00', '15:30:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(341, 41, 2, '15:45:00', '17:45:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(342, 41, 3, '08:00:00', '10:00:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(343, 41, 3, '10:15:00', '12:15:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(344, 41, 4, '08:00:00', '10:00:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(345, 41, 4, '10:15:00', '12:15:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(346, 41, 4, '13:30:00', '15:30:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(347, 41, 4, '15:45:00', '17:45:00', '2025-10-19 22:35:50', '2025-10-19 22:35:50'),
+	(358, 1, 0, '10:15:00', '12:15:00', '2025-10-19 22:37:16', '2025-10-19 22:37:16'),
+	(359, 1, 0, '13:30:00', '15:30:00', '2025-10-19 22:37:16', '2025-10-19 22:37:16'),
+	(360, 1, 0, '15:45:00', '17:45:00', '2025-10-19 22:37:16', '2025-10-19 22:37:16'),
+	(361, 1, 3, '08:00:00', '10:00:00', '2025-10-19 22:37:16', '2025-10-19 22:37:16'),
+	(362, 1, 3, '10:15:00', '12:15:00', '2025-10-19 22:37:16', '2025-10-19 22:37:16'),
+	(363, 1, 4, '10:15:00', '12:15:00', '2025-10-19 22:37:16', '2025-10-19 22:37:16'),
+	(364, 1, 4, '13:30:00', '15:30:00', '2025-10-19 22:37:16', '2025-10-19 22:37:16'),
+	(365, 1, 4, '15:45:00', '17:45:00', '2025-10-19 22:37:16', '2025-10-19 22:37:16'),
+	(366, 35, 0, '13:30:00', '15:30:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(367, 35, 0, '15:45:00', '17:45:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(368, 35, 1, '08:00:00', '10:00:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(369, 35, 1, '10:15:00', '12:15:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(370, 35, 1, '13:30:00', '15:30:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(371, 35, 1, '15:45:00', '17:45:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(372, 35, 2, '08:00:00', '10:00:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(373, 35, 2, '10:15:00', '12:15:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(374, 35, 2, '13:30:00', '15:30:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(375, 35, 2, '15:45:00', '17:45:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(376, 35, 3, '08:00:00', '10:00:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(377, 35, 3, '10:15:00', '12:15:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(378, 35, 4, '13:30:00', '15:30:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(379, 35, 4, '15:45:00', '17:45:00', '2025-10-19 22:38:03', '2025-10-19 22:38:03'),
+	(380, 31, 0, '08:00:00', '10:00:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(381, 31, 0, '10:15:00', '12:15:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(382, 31, 0, '13:30:00', '15:30:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(383, 31, 0, '15:45:00', '17:45:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(384, 31, 1, '08:00:00', '10:00:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(385, 31, 1, '10:15:00', '12:15:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(386, 31, 1, '13:30:00', '15:30:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(387, 31, 1, '15:45:00', '17:45:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(388, 31, 2, '08:00:00', '10:00:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(389, 31, 2, '10:15:00', '12:15:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(390, 31, 2, '13:30:00', '15:30:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(391, 31, 2, '15:45:00', '17:45:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(392, 31, 3, '08:00:00', '10:00:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(393, 31, 3, '10:15:00', '12:15:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(394, 31, 4, '08:00:00', '10:00:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(395, 31, 4, '10:15:00', '12:15:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(396, 31, 4, '13:30:00', '15:30:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(397, 31, 4, '15:45:00', '17:45:00', '2025-10-19 22:39:13', '2025-10-19 22:39:13'),
+	(398, 26, 0, '08:00:00', '10:00:00', '2025-10-19 22:40:25', '2025-10-19 22:40:25'),
+	(399, 26, 0, '10:15:00', '12:15:00', '2025-10-19 22:40:25', '2025-10-19 22:40:25'),
+	(400, 26, 0, '13:30:00', '15:30:00', '2025-10-19 22:40:25', '2025-10-19 22:40:25'),
+	(401, 26, 0, '15:45:00', '17:45:00', '2025-10-19 22:40:25', '2025-10-19 22:40:25'),
+	(402, 26, 2, '08:00:00', '10:00:00', '2025-10-19 22:40:25', '2025-10-19 22:40:25'),
+	(403, 26, 2, '10:15:00', '12:15:00', '2025-10-19 22:40:25', '2025-10-19 22:40:25'),
+	(404, 26, 2, '13:30:00', '15:30:00', '2025-10-19 22:40:25', '2025-10-19 22:40:25'),
+	(405, 26, 2, '15:45:00', '17:45:00', '2025-10-19 22:40:25', '2025-10-19 22:40:25'),
+	(406, 26, 4, '08:00:00', '10:00:00', '2025-10-19 22:40:25', '2025-10-19 22:40:25'),
+	(407, 26, 4, '10:15:00', '12:15:00', '2025-10-19 22:40:25', '2025-10-19 22:40:25'),
+	(408, 8, 0, '08:00:00', '10:00:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(409, 8, 0, '10:15:00', '12:15:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(410, 8, 0, '13:30:00', '15:30:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(411, 8, 0, '15:45:00', '17:45:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(412, 8, 1, '08:00:00', '10:00:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(413, 8, 1, '10:15:00', '12:15:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(414, 8, 1, '13:30:00', '15:30:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(415, 8, 1, '15:45:00', '17:45:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(416, 8, 2, '08:00:00', '10:00:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(417, 8, 2, '10:15:00', '12:15:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(418, 8, 2, '13:30:00', '15:30:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(419, 8, 2, '15:45:00', '17:45:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(420, 8, 3, '08:00:00', '10:00:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(421, 8, 3, '10:15:00', '12:15:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(422, 8, 4, '08:00:00', '10:00:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(423, 8, 4, '10:15:00', '12:15:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(424, 8, 4, '13:30:00', '15:30:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(425, 8, 4, '15:45:00', '17:45:00', '2025-10-19 22:47:26', '2025-10-19 22:47:26'),
+	(426, 17, 0, '08:00:00', '10:00:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(427, 17, 0, '10:15:00', '12:15:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(428, 17, 0, '13:30:00', '15:30:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(429, 17, 0, '15:45:00', '17:45:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(430, 17, 1, '08:00:00', '10:00:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(431, 17, 1, '10:15:00', '12:15:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(432, 17, 1, '13:30:00', '15:30:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(433, 17, 1, '15:45:00', '17:45:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(434, 17, 2, '08:00:00', '10:00:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(435, 17, 2, '10:15:00', '12:15:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(436, 17, 2, '13:30:00', '15:30:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(437, 17, 2, '15:45:00', '17:45:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(438, 17, 3, '08:00:00', '10:00:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(439, 17, 3, '10:15:00', '12:15:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(440, 17, 4, '08:00:00', '10:00:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(441, 17, 4, '10:15:00', '12:15:00', '2025-10-19 22:48:25', '2025-10-19 22:48:25'),
+	(457, 34, 0, '08:00:00', '10:00:00', '2025-10-20 13:43:08', '2025-10-20 13:43:08'),
+	(458, 34, 0, '10:15:00', '12:15:00', '2025-10-20 13:43:08', '2025-10-20 13:43:08'),
+	(459, 34, 0, '13:30:00', '15:30:00', '2025-10-20 13:43:08', '2025-10-20 13:43:08'),
+	(460, 34, 0, '15:45:00', '17:45:00', '2025-10-20 13:43:08', '2025-10-20 13:43:08'),
+	(461, 34, 1, '08:00:00', '10:00:00', '2025-10-20 13:43:08', '2025-10-20 13:43:08'),
+	(462, 34, 1, '10:15:00', '12:15:00', '2025-10-20 13:43:08', '2025-10-20 13:43:08'),
+	(463, 34, 3, '08:00:00', '10:00:00', '2025-10-20 13:43:08', '2025-10-20 13:43:08'),
+	(464, 34, 3, '10:15:00', '12:15:00', '2025-10-20 13:43:08', '2025-10-20 13:43:08'),
+	(465, 34, 4, '13:30:00', '15:30:00', '2025-10-20 13:43:08', '2025-10-20 13:43:08'),
+	(466, 34, 4, '15:45:00', '17:45:00', '2025-10-20 13:43:08', '2025-10-20 13:43:08'),
+	(467, 53, 2, '08:00:00', '10:00:00', '2025-10-20 13:43:51', '2025-10-20 13:43:51'),
+	(468, 53, 2, '10:15:00', '12:15:00', '2025-10-20 13:43:51', '2025-10-20 13:43:51'),
+	(469, 53, 2, '13:30:00', '15:30:00', '2025-10-20 13:43:51', '2025-10-20 13:43:51'),
+	(470, 53, 2, '15:45:00', '17:45:00', '2025-10-20 13:43:51', '2025-10-20 13:43:51'),
+	(471, 53, 3, '08:00:00', '10:00:00', '2025-10-20 13:43:51', '2025-10-20 13:43:51'),
+	(472, 53, 3, '10:15:00', '12:15:00', '2025-10-20 13:43:51', '2025-10-20 13:43:51'),
+	(473, 53, 4, '08:00:00', '10:00:00', '2025-10-20 13:43:51', '2025-10-20 13:43:51'),
+	(474, 53, 4, '10:15:00', '12:15:00', '2025-10-20 13:43:51', '2025-10-20 13:43:51'),
+	(475, 53, 4, '13:30:00', '15:30:00', '2025-10-20 13:43:51', '2025-10-20 13:43:51'),
+	(476, 53, 4, '15:45:00', '17:45:00', '2025-10-20 13:43:51', '2025-10-20 13:43:51'),
+	(477, 3, 0, '08:00:00', '10:00:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(478, 3, 0, '10:15:00', '12:15:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(479, 3, 0, '13:30:00', '15:30:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(480, 3, 1, '08:00:00', '10:00:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(481, 3, 1, '10:15:00', '12:15:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(482, 3, 1, '13:30:00', '15:30:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(483, 3, 2, '08:00:00', '10:00:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(484, 3, 2, '10:15:00', '12:15:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(485, 3, 2, '13:30:00', '15:30:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(486, 3, 4, '08:00:00', '10:00:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(487, 3, 4, '10:15:00', '12:15:00', '2025-10-21 21:08:18', '2025-10-21 21:08:18'),
+	(499, 16, 0, '10:15:00', '12:15:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(500, 16, 0, '13:30:00', '15:30:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(501, 16, 1, '08:00:00', '10:00:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(502, 16, 1, '10:15:00', '12:15:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(503, 16, 1, '13:30:00', '15:30:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(504, 16, 2, '08:00:00', '10:00:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(505, 16, 2, '10:15:00', '12:15:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(506, 16, 3, '08:00:00', '10:00:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(507, 16, 3, '10:15:00', '12:15:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(508, 16, 4, '08:00:00', '10:00:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(509, 16, 4, '10:15:00', '12:15:00', '2025-10-21 21:09:47', '2025-10-21 21:09:47'),
+	(510, 28, 0, '08:00:00', '10:00:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(511, 28, 0, '10:15:00', '12:15:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(512, 28, 0, '13:30:00', '15:30:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(513, 28, 0, '15:45:00', '17:45:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(514, 28, 1, '08:00:00', '10:00:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(515, 28, 1, '10:15:00', '12:15:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(516, 28, 1, '13:30:00', '15:30:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(517, 28, 1, '15:45:00', '17:45:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(518, 28, 2, '08:00:00', '10:00:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(519, 28, 2, '10:15:00', '12:15:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(520, 28, 2, '13:30:00', '15:30:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(521, 28, 2, '15:45:00', '17:45:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(522, 28, 3, '08:00:00', '10:00:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(523, 28, 3, '10:15:00', '12:15:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(524, 28, 4, '08:00:00', '10:00:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(525, 28, 4, '10:15:00', '12:15:00', '2025-10-21 21:10:26', '2025-10-21 21:10:26'),
+	(526, 47, 0, '13:30:00', '15:30:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(527, 47, 0, '15:45:00', '17:45:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(528, 47, 1, '08:00:00', '10:00:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(529, 47, 1, '10:15:00', '12:15:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(530, 47, 1, '13:30:00', '15:30:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(531, 47, 1, '15:45:00', '17:45:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(532, 47, 2, '08:00:00', '10:00:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(533, 47, 2, '10:15:00', '12:15:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(534, 47, 2, '13:30:00', '15:30:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(535, 47, 2, '15:45:00', '17:45:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(536, 47, 3, '08:00:00', '10:00:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(537, 47, 3, '10:15:00', '12:15:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(538, 47, 4, '08:00:00', '10:00:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(539, 47, 4, '10:15:00', '12:15:00', '2025-10-21 22:31:05', '2025-10-21 22:31:05'),
+	(550, 13, 0, '08:00:00', '10:00:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(551, 13, 0, '10:15:00', '12:15:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(552, 13, 0, '13:30:00', '15:30:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(553, 13, 0, '15:45:00', '17:45:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(554, 13, 1, '08:00:00', '10:00:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(555, 13, 1, '10:15:00', '12:15:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(556, 13, 1, '13:30:00', '15:30:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(557, 13, 1, '15:45:00', '17:45:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(558, 13, 2, '08:00:00', '10:00:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(559, 13, 2, '10:15:00', '12:15:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(560, 13, 2, '13:30:00', '15:30:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(561, 13, 2, '15:45:00', '17:45:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(562, 13, 4, '08:00:00', '10:00:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(563, 13, 4, '10:15:00', '12:15:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(564, 13, 4, '13:30:00', '15:30:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(565, 13, 4, '15:45:00', '17:45:00', '2025-10-21 22:51:52', '2025-10-21 22:51:52'),
+	(566, 29, 1, '08:00:00', '10:00:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(567, 29, 1, '10:15:00', '12:15:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(568, 29, 1, '13:30:00', '15:30:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(569, 29, 1, '15:45:00', '17:45:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(570, 29, 2, '08:00:00', '10:00:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(571, 29, 2, '10:15:00', '12:15:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(572, 29, 2, '13:30:00', '15:30:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(573, 29, 3, '08:00:00', '10:00:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(574, 29, 3, '10:15:00', '12:15:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(575, 29, 4, '08:00:00', '10:00:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(576, 29, 4, '10:15:00', '12:15:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(577, 29, 4, '13:30:00', '15:30:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(578, 29, 4, '15:45:00', '17:45:00', '2025-10-21 22:52:33', '2025-10-21 22:52:33'),
+	(592, 25, 0, '08:00:00', '10:00:00', '2025-10-21 23:06:21', '2025-10-21 23:06:21'),
+	(593, 25, 0, '10:15:00', '12:15:00', '2025-10-21 23:06:21', '2025-10-21 23:06:21'),
+	(594, 25, 0, '13:30:00', '15:30:00', '2025-10-21 23:06:21', '2025-10-21 23:06:21'),
+	(595, 25, 2, '08:00:00', '10:00:00', '2025-10-21 23:06:21', '2025-10-21 23:06:21'),
+	(596, 25, 2, '10:15:00', '12:15:00', '2025-10-21 23:06:21', '2025-10-21 23:06:21'),
+	(597, 25, 2, '13:30:00', '15:30:00', '2025-10-21 23:06:21', '2025-10-21 23:06:21'),
+	(598, 25, 4, '08:00:00', '10:00:00', '2025-10-21 23:06:21', '2025-10-21 23:06:21'),
+	(599, 25, 4, '10:15:00', '12:15:00', '2025-10-21 23:06:21', '2025-10-21 23:06:21'),
+	(600, 23, 0, '08:00:00', '10:00:00', '2025-10-21 23:13:11', '2025-10-21 23:13:11'),
+	(601, 23, 0, '15:45:00', '17:45:00', '2025-10-21 23:13:11', '2025-10-21 23:13:11'),
+	(602, 23, 2, '08:00:00', '10:00:00', '2025-10-21 23:13:11', '2025-10-21 23:13:11'),
+	(603, 23, 2, '15:45:00', '17:45:00', '2025-10-21 23:13:11', '2025-10-21 23:13:11'),
+	(604, 23, 3, '08:00:00', '10:00:00', '2025-10-21 23:13:11', '2025-10-21 23:13:11'),
+	(605, 23, 3, '10:15:00', '12:15:00', '2025-10-21 23:13:11', '2025-10-21 23:13:11'),
+	(606, 23, 4, '08:00:00', '10:00:00', '2025-10-21 23:13:11', '2025-10-21 23:13:11'),
+	(607, 23, 4, '10:15:00', '12:15:00', '2025-10-21 23:13:11', '2025-10-21 23:13:11'),
+	(608, 23, 4, '13:30:00', '15:30:00', '2025-10-21 23:13:11', '2025-10-21 23:13:11'),
+	(609, 23, 4, '15:45:00', '17:45:00', '2025-10-21 23:13:11', '2025-10-21 23:13:11'),
+	(622, 15, 0, '10:15:00', '12:15:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(623, 15, 0, '13:30:00', '15:30:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(624, 15, 0, '15:45:00', '17:45:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(625, 15, 1, '08:00:00', '10:00:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(626, 15, 1, '10:15:00', '12:15:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(627, 15, 1, '13:30:00', '15:30:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(628, 15, 2, '10:15:00', '12:15:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(629, 15, 2, '13:30:00', '15:30:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(630, 15, 2, '15:45:00', '17:45:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(631, 15, 3, '08:00:00', '10:00:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(632, 15, 3, '10:15:00', '12:15:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(633, 15, 4, '10:15:00', '12:15:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(634, 15, 4, '13:30:00', '15:30:00', '2025-10-21 23:46:29', '2025-10-21 23:46:29'),
+	(635, 46, 0, '08:00:00', '10:00:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(636, 46, 0, '10:15:00', '12:15:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(637, 46, 0, '13:30:00', '15:30:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(638, 46, 0, '15:45:00', '17:45:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(639, 46, 1, '08:00:00', '10:00:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(640, 46, 1, '10:15:00', '12:15:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(641, 46, 1, '13:30:00', '15:30:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(642, 46, 3, '08:00:00', '10:00:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(643, 46, 3, '10:15:00', '12:15:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(644, 46, 4, '08:00:00', '10:00:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(645, 46, 4, '10:15:00', '12:15:00', '2025-10-22 06:42:30', '2025-10-22 06:42:30'),
+	(646, 27, 0, '15:45:00', '17:45:00', '2025-10-22 07:00:02', '2025-10-22 07:00:02'),
+	(647, 27, 1, '10:15:00', '12:15:00', '2025-10-22 07:00:02', '2025-10-22 07:00:02'),
+	(648, 27, 1, '13:30:00', '15:30:00', '2025-10-22 07:00:02', '2025-10-22 07:00:02'),
+	(649, 27, 1, '15:45:00', '17:45:00', '2025-10-22 07:00:02', '2025-10-22 07:00:02'),
+	(650, 27, 2, '10:15:00', '12:15:00', '2025-10-22 07:00:02', '2025-10-22 07:00:02'),
+	(651, 27, 2, '13:30:00', '15:30:00', '2025-10-22 07:00:02', '2025-10-22 07:00:02'),
+	(652, 27, 2, '15:45:00', '17:45:00', '2025-10-22 07:00:02', '2025-10-22 07:00:02'),
+	(653, 27, 3, '10:15:00', '12:15:00', '2025-10-22 07:00:02', '2025-10-22 07:00:02'),
+	(654, 27, 4, '15:45:00', '17:45:00', '2025-10-22 07:00:02', '2025-10-22 07:00:02'),
+	(668, 48, 0, '10:15:00', '12:15:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(669, 48, 0, '13:30:00', '15:30:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(670, 48, 0, '15:45:00', '17:45:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(671, 48, 1, '10:15:00', '12:15:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(672, 48, 1, '13:30:00', '15:30:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(673, 48, 1, '15:45:00', '17:45:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(674, 48, 2, '10:15:00', '12:15:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(675, 48, 2, '13:30:00', '15:30:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(676, 48, 2, '15:45:00', '17:45:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(677, 48, 4, '10:15:00', '12:15:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(678, 48, 4, '13:30:00', '15:30:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(679, 48, 4, '15:45:00', '17:45:00', '2025-10-22 12:27:30', '2025-10-22 12:27:30'),
+	(702, 59, 1, '13:30:00', '15:30:00', '2025-10-22 20:11:04', '2025-10-22 20:11:04'),
+	(703, 59, 1, '15:45:00', '17:45:00', '2025-10-22 20:11:04', '2025-10-22 20:11:04');
 
---
--- Index pour les tables déchargées
---
-
---
--- Index pour la table `class_group`
---
-ALTER TABLE `class_group`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `name` (`name`);
-
---
--- Index pour la table `closing_period`
---
-ALTER TABLE `closing_period`
-  ADD PRIMARY KEY (`id`);
-
---
--- Index pour la table `course`
---
-ALTER TABLE `course`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `name` (`name`),
-  ADD KEY `course_name_id` (`course_name_id`);
-
---
--- Index pour la table `course_class`
---
-ALTER TABLE `course_class`
-  ADD PRIMARY KEY (`course_id`,`class_group_id`),
-  ADD KEY `class_group_id` (`class_group_id`),
-  ADD KEY `teacher_a_id` (`teacher_a_id`),
-  ADD KEY `teacher_b_id` (`teacher_b_id`);
-
---
--- Index pour la table `course_equipment`
---
-ALTER TABLE `course_equipment`
-  ADD PRIMARY KEY (`course_id`,`equipment_id`),
-  ADD KEY `equipment_id` (`equipment_id`);
-
---
--- Index pour la table `course_name`
---
-ALTER TABLE `course_name`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `name` (`name`);
-
---
--- Index pour la table `course_schedule_log`
---
-ALTER TABLE `course_schedule_log`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `ix_course_schedule_log_course_id` (`course_id`);
-
---
--- Index pour la table `course_software`
---
-ALTER TABLE `course_software`
-  ADD PRIMARY KEY (`course_id`,`software_id`),
-  ADD KEY `software_id` (`software_id`);
-
---
--- Index pour la table `course_teacher`
---
-ALTER TABLE `course_teacher`
-  ADD PRIMARY KEY (`course_id`,`teacher_id`),
-  ADD KEY `teacher_id` (`teacher_id`);
-
---
--- Index pour la table `course_name_preferred_room`
---
-ALTER TABLE `course_name_preferred_room`
-  ADD PRIMARY KEY (`course_name_id`,`room_id`),
-  ADD KEY `room_id` (`room_id`);
-
---
--- Index pour la table `equipment`
---
-ALTER TABLE `equipment`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `name` (`name`);
-
---
--- Index pour la table `room`
---
-ALTER TABLE `room`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `name` (`name`);
-
---
--- Index pour la table `room_equipment`
---
-ALTER TABLE `room_equipment`
-  ADD PRIMARY KEY (`room_id`,`equipment_id`),
-  ADD KEY `equipment_id` (`equipment_id`);
-
---
--- Index pour la table `room_software`
---
-ALTER TABLE `room_software`
-  ADD PRIMARY KEY (`room_id`,`software_id`),
-  ADD KEY `software_id` (`software_id`);
-
---
--- Index pour la table `session`
---
-ALTER TABLE `session`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `uq_room_start_time` (`room_id`,`start_time`),
-  ADD UNIQUE KEY `uq_class_start_time` (`class_group_id`,`start_time`),
-  ADD KEY `course_id` (`course_id`),
-  ADD KEY `teacher_id` (`teacher_id`);
-
---
--- Index pour la table `session_attendance`
---
-ALTER TABLE `session_attendance`
-  ADD PRIMARY KEY (`session_id`,`class_group_id`),
-  ADD KEY `class_group_id` (`class_group_id`);
-
---
--- Index pour la table `software`
---
-ALTER TABLE `software`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `name` (`name`);
-
---
--- Index pour la table `teacher`
---
-ALTER TABLE `teacher`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `name` (`name`);
-
---
--- Index pour la table `teacher_availability`
---
-ALTER TABLE `teacher_availability`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `teacher_id` (`teacher_id`);
-
---
--- AUTO_INCREMENT pour les tables déchargées
---
-
---
--- AUTO_INCREMENT pour la table `class_group`
---
-ALTER TABLE `class_group`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
-
---
--- AUTO_INCREMENT pour la table `closing_period`
---
-ALTER TABLE `closing_period`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT pour la table `course`
---
-ALTER TABLE `course`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT pour la table `course_name`
---
-ALTER TABLE `course_name`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT pour la table `course_schedule_log`
---
-ALTER TABLE `course_schedule_log`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT pour la table `equipment`
---
-ALTER TABLE `equipment`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT pour la table `room`
---
-ALTER TABLE `room`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
-
---
--- AUTO_INCREMENT pour la table `session`
---
-ALTER TABLE `session`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT pour la table `software`
---
-ALTER TABLE `software`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT pour la table `teacher`
---
-ALTER TABLE `teacher`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
-
---
--- AUTO_INCREMENT pour la table `teacher_availability`
---
-ALTER TABLE `teacher_availability`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- Contraintes pour les tables déchargées
---
-
---
--- Contraintes pour la table `course`
---
-ALTER TABLE `course`
-  ADD CONSTRAINT `course_ibfk_1` FOREIGN KEY (`course_name_id`) REFERENCES `course_name` (`id`);
-
---
--- Contraintes pour la table `course_class`
---
-ALTER TABLE `course_class`
-  ADD CONSTRAINT `course_class_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
-  ADD CONSTRAINT `course_class_ibfk_2` FOREIGN KEY (`class_group_id`) REFERENCES `class_group` (`id`),
-  ADD CONSTRAINT `course_class_ibfk_3` FOREIGN KEY (`teacher_a_id`) REFERENCES `teacher` (`id`),
-  ADD CONSTRAINT `course_class_ibfk_4` FOREIGN KEY (`teacher_b_id`) REFERENCES `teacher` (`id`);
-
---
--- Contraintes pour la table `course_equipment`
---
-ALTER TABLE `course_equipment`
-  ADD CONSTRAINT `course_equipment_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
-  ADD CONSTRAINT `course_equipment_ibfk_2` FOREIGN KEY (`equipment_id`) REFERENCES `equipment` (`id`);
-
---
--- Contraintes pour la table `course_schedule_log`
---
-ALTER TABLE `course_schedule_log`
-  ADD CONSTRAINT `course_schedule_log_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`);
-
---
--- Contraintes pour la table `course_software`
---
-ALTER TABLE `course_software`
-  ADD CONSTRAINT `course_software_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
-  ADD CONSTRAINT `course_software_ibfk_2` FOREIGN KEY (`software_id`) REFERENCES `software` (`id`);
-
---
--- Contraintes pour la table `course_teacher`
---
-ALTER TABLE `course_teacher`
-  ADD CONSTRAINT `course_teacher_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
-  ADD CONSTRAINT `course_teacher_ibfk_2` FOREIGN KEY (`teacher_id`) REFERENCES `teacher` (`id`);
-
---
--- Contraintes pour la table `course_name_preferred_room`
---
-ALTER TABLE `course_name_preferred_room`
-  ADD CONSTRAINT `course_name_preferred_room_ibfk_1` FOREIGN KEY (`course_name_id`) REFERENCES `course_name` (`id`),
-  ADD CONSTRAINT `course_name_preferred_room_ibfk_2` FOREIGN KEY (`room_id`) REFERENCES `room` (`id`);
-
---
--- Contraintes pour la table `room_equipment`
---
-ALTER TABLE `room_equipment`
-  ADD CONSTRAINT `room_equipment_ibfk_1` FOREIGN KEY (`room_id`) REFERENCES `room` (`id`),
-  ADD CONSTRAINT `room_equipment_ibfk_2` FOREIGN KEY (`equipment_id`) REFERENCES `equipment` (`id`);
-
---
--- Contraintes pour la table `room_software`
---
-ALTER TABLE `room_software`
-  ADD CONSTRAINT `room_software_ibfk_1` FOREIGN KEY (`room_id`) REFERENCES `room` (`id`),
-  ADD CONSTRAINT `room_software_ibfk_2` FOREIGN KEY (`software_id`) REFERENCES `software` (`id`);
-
---
--- Contraintes pour la table `session`
---
-ALTER TABLE `session`
-  ADD CONSTRAINT `session_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
-  ADD CONSTRAINT `session_ibfk_2` FOREIGN KEY (`teacher_id`) REFERENCES `teacher` (`id`),
-  ADD CONSTRAINT `session_ibfk_3` FOREIGN KEY (`room_id`) REFERENCES `room` (`id`),
-  ADD CONSTRAINT `session_ibfk_4` FOREIGN KEY (`class_group_id`) REFERENCES `class_group` (`id`);
-
---
--- Contraintes pour la table `session_attendance`
---
-ALTER TABLE `session_attendance`
-  ADD CONSTRAINT `session_attendance_ibfk_1` FOREIGN KEY (`session_id`) REFERENCES `session` (`id`),
-  ADD CONSTRAINT `session_attendance_ibfk_2` FOREIGN KEY (`class_group_id`) REFERENCES `class_group` (`id`);
-
---
--- Contraintes pour la table `teacher_availability`
---
-ALTER TABLE `teacher_availability`
-  ADD CONSTRAINT `teacher_availability_ibfk_1` FOREIGN KEY (`teacher_id`) REFERENCES `teacher` (`id`);
-COMMIT;
-
+/*!40103 SET TIME_ZONE=IFNULL(@OLD_TIME_ZONE, 'system') */;
+/*!40101 SET SQL_MODE=IFNULL(@OLD_SQL_MODE, '') */;
+/*!40014 SET FOREIGN_KEY_CHECKS=IFNULL(@OLD_FOREIGN_KEY_CHECKS, 1) */;
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
-/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
-/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=IFNULL(@OLD_SQL_NOTES, 1) */;
