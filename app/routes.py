@@ -115,6 +115,8 @@ STUDENT_PATHWAY_CHOICES = {
     "alternance": "Alternance",
 }
 
+STUDENT_GROUP_CHOICES: tuple[str, ...] = ("A", "B")
+
 
 def _normalise_course_type(raw_value: str | None) -> str:
     if not raw_value:
@@ -1373,7 +1375,7 @@ def teacher_detail(teacher_id: int):
 def students_list():
     search_query = (request.args.get("q") or "").strip()
     class_id_raw = request.args.get("class_id")
-    group_filter = request.args.get("group") or None
+    group_filter = (request.args.get("group") or "").strip().upper() or None
     phase_filter = request.args.get("phase") or None
     pathway_filter = request.args.get("pathway") or None
 
@@ -1382,15 +1384,8 @@ def students_list():
     except (TypeError, ValueError):
         selected_class_id = None
 
-    group_options = [
-        value
-        for (value,) in db.session.query(Student.group_label)
-        .filter(Student.group_label.isnot(None), Student.group_label != "")
-        .distinct()
-        .order_by(Student.group_label.asc())
-        .all()
-    ]
-    if group_filter not in group_options:
+    group_options = list(STUDENT_GROUP_CHOICES)
+    if group_filter not in STUDENT_GROUP_CHOICES:
         group_filter = None
 
     phase_options = [
@@ -1453,6 +1448,104 @@ def students_list():
     )
 
 
+@bp.route("/etudiants/nouveau", methods=["GET", "POST"])
+def student_create():
+    class_groups = ClassGroup.query.order_by(ClassGroup.name.asc()).all()
+    phase_options = [
+        value
+        for (value,) in db.session.query(Student.phase)
+        .filter(Student.phase.isnot(None), Student.phase != "")
+        .distinct()
+        .order_by(Student.phase.asc())
+        .all()
+    ]
+
+    form_data = {
+        "full_name": "",
+        "email": "",
+        "class_group_id": "",
+        "group_label": "",
+        "phase": "",
+        "pathway": "initial",
+        "alternance_details": "",
+        "ina_id": "",
+        "ub_id": "",
+        "notes": "",
+    }
+
+    if request.method == "POST":
+        for key in form_data:
+            form_data[key] = (request.form.get(key) or "")
+        full_name = form_data["full_name"].strip()
+        if not full_name:
+            flash("Renseignez le nom de l'étudiant.", "warning")
+        else:
+            class_group: ClassGroup | None = None
+            class_group_id_raw = form_data.get("class_group_id") or ""
+            if class_group_id_raw:
+                try:
+                    class_group_id = int(class_group_id_raw)
+                except ValueError:
+                    flash("Classe invalide sélectionnée.", "danger")
+                    return render_template(
+                        "students/create.html",
+                        class_groups=class_groups,
+                        group_options=STUDENT_GROUP_CHOICES,
+                        phase_options=phase_options,
+                        pathway_choices=STUDENT_PATHWAY_CHOICES,
+                        form_data=form_data,
+                    )
+                class_group = db.session.get(ClassGroup, class_group_id)
+                if class_group is None:
+                    flash("Classe introuvable.", "danger")
+                    return render_template(
+                        "students/create.html",
+                        class_groups=class_groups,
+                        group_options=STUDENT_GROUP_CHOICES,
+                        phase_options=phase_options,
+                        pathway_choices=STUDENT_PATHWAY_CHOICES,
+                        form_data=form_data,
+                    )
+
+            group_label = form_data["group_label"].strip().upper() or None
+            if group_label not in STUDENT_GROUP_CHOICES:
+                group_label = None
+
+            pathway = form_data["pathway"] or "initial"
+            if pathway not in STUDENT_PATHWAY_CHOICES:
+                pathway = "initial"
+
+            alternance_details = form_data["alternance_details"].strip() or None
+            if pathway != "alternance":
+                alternance_details = None
+
+            student = Student(
+                full_name=full_name,
+                email=form_data["email"].strip() or None,
+                class_group=class_group,
+                group_label=group_label,
+                phase=form_data["phase"].strip() or None,
+                pathway=pathway,
+                alternance_details=alternance_details,
+                ina_id=form_data["ina_id"].strip() or None,
+                ub_id=form_data["ub_id"].strip() or None,
+                notes=form_data["notes"].strip() or None,
+            )
+            db.session.add(student)
+            db.session.commit()
+            flash("Étudiant créé", "success")
+            return redirect(url_for("main.student_detail", student_id=student.id))
+
+    return render_template(
+        "students/create.html",
+        class_groups=class_groups,
+        group_options=STUDENT_GROUP_CHOICES,
+        phase_options=phase_options,
+        pathway_choices=STUDENT_PATHWAY_CHOICES,
+        form_data=form_data,
+    )
+
+
 @bp.route("/etudiants/<int:student_id>", methods=["GET", "POST"])
 def student_detail(student_id: int):
     student = (
@@ -1469,14 +1562,7 @@ def student_detail(student_id: int):
         .order_by(Student.phase.asc())
         .all()
     ]
-    group_options = [
-        value
-        for (value,) in db.session.query(Student.group_label)
-        .filter(Student.group_label.isnot(None), Student.group_label != "")
-        .distinct()
-        .order_by(Student.group_label.asc())
-        .all()
-    ]
+    group_options = list(STUDENT_GROUP_CHOICES)
 
     if request.method == "POST":
         if request.form.get("form") == "update":
@@ -1484,15 +1570,21 @@ def student_detail(student_id: int):
             if full_name:
                 student.full_name = full_name
             student.email = (request.form.get("email") or "").strip() or None
-            student.group_label = (request.form.get("group_label") or "").strip() or None
+            group_label = (request.form.get("group_label") or "").strip().upper() or None
+            if group_label not in STUDENT_GROUP_CHOICES:
+                group_label = None
+            student.group_label = group_label
             student.phase = (request.form.get("phase") or "").strip() or None
             pathway = request.form.get("pathway") or student.pathway
             if pathway not in STUDENT_PATHWAY_CHOICES:
                 pathway = student.pathway
             student.pathway = pathway
-            student.alternance_details = (
+            alternance_details = (
                 (request.form.get("alternance_details") or "").strip() or None
             )
+            if student.pathway != "alternance":
+                alternance_details = None
+            student.alternance_details = alternance_details
             student.ina_id = (request.form.get("ina_id") or "").strip() or None
             student.ub_id = (request.form.get("ub_id") or "").strip() or None
             student.notes = (request.form.get("notes") or "").strip() or None
