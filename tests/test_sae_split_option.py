@@ -1,11 +1,13 @@
 import unittest
-from datetime import date, time
+from datetime import date, datetime, time, timedelta
 
 from app import create_app, db
 from app.models import (
     ClassGroup,
     Course,
     CourseClassLink,
+    CourseScheduleLog,
+    Session,
     Room,
     Teacher,
     TeacherAvailability,
@@ -87,6 +89,58 @@ class SaeSplitSchedulingTestCase(DatabaseTestCase):
                 window_start=date(2025, 9, 8),
                 window_end=date(2025, 9, 9),
             )
+
+    def test_split_session_deferred_to_following_week(self) -> None:
+        course = self._create_course(True)
+
+        blocking_course = Course(
+            name="Blocage CM",
+            course_type="CM",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+        )
+        blocking_link = CourseClassLink(class_group=self.class_group)
+        blocking_link.teacher_a = self.teacher
+        blocking_course.class_links.append(blocking_link)
+        blocking_course.teachers.append(self.teacher)
+        db.session.add(blocking_course)
+        db.session.commit()
+
+        for day in (date(2025, 9, 8), date(2025, 9, 9), date(2025, 9, 16)):
+            start_dt = datetime.combine(day, time(8, 0))
+            end_dt = start_dt + timedelta(hours=2)
+            session = Session(
+                course=blocking_course,
+                teacher=self.teacher,
+                room=self.room,
+                class_group=self.class_group,
+                start_time=start_dt,
+                end_time=end_dt,
+            )
+            session.attendees = [self.class_group]
+            db.session.add(session)
+        db.session.commit()
+
+        created = generate_schedule(
+            course,
+            window_start=date(2025, 9, 8),
+            window_end=date(2025, 9, 26),
+        )
+
+        self.assertEqual(len(created), 2)
+        session_days = sorted(session.start_time.date() for session in created)
+        self.assertEqual(
+            session_days,
+            [date(2025, 9, 15), date(2025, 9, 22)],
+        )
+
+        log = (
+            CourseScheduleLog.query.filter_by(course_id=course.id)
+            .order_by(CourseScheduleLog.created_at.desc())
+            .first()
+        )
+        self.assertIsNotNone(log)
 
 
 if __name__ == "__main__":

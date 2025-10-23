@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from functools import lru_cache, partial
 from datetime import date, datetime, time, timedelta
@@ -109,6 +109,12 @@ class SearchState:
     hours_remaining: float
     block_index: int
     score: tuple[float, float, float, float]
+
+
+@dataclass
+class DeferredBlock:
+    hours: int
+    earliest_week_index: int = 0
 
 
 @dataclass
@@ -2775,12 +2781,40 @@ def generate_schedule(
             link_lookup = {
                 link.class_group_id: link for link in links if link.class_group_id is not None
             }
+            week_by_day = {day: _week_start_for(day) for day in available_days}
+            ordered_weeks = sorted({week_by_day[day] for day in available_days})
+            pending_blocks: deque[DeferredBlock] = deque()
+            deferred_week_reports: set[date] = set()
+            aggregated_weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
+            aggregated_chronology_weeks: set[date] = set()
             while hours_remaining > 0:
+                if not pending_blocks:
+                    pending_blocks.append(
+                        DeferredBlock(
+                            hours=min(slot_length_hours, hours_remaining)
+                        )
+                    )
+                block = pending_blocks.popleft()
                 blocks_total = max(
                     (hours_remaining + slot_length_hours - 1) // slot_length_hours,
                     1,
                 )
-                desired_hours = min(slot_length_hours, hours_remaining)
+                desired_hours = block.hours
+                if not ordered_weeks:
+                    break
+                week_index = block.earliest_week_index
+                if week_index >= len(ordered_weeks):
+                    break
+                current_week_start = ordered_weeks[week_index]
+                current_week_days = [
+                    day for day in available_days if week_by_day[day] == current_week_start
+                ]
+                if not current_week_days:
+                    block.earliest_week_index += 1
+                    if block.earliest_week_index >= len(ordered_weeks):
+                        break
+                    pending_blocks.append(block)
+                    continue
                 if len(available_days) == 1:
                     anchor_index = 0
                 elif blocks_total == 1:
@@ -2845,7 +2879,7 @@ def generate_schedule(
 
                 ordered_days = [
                     day
-                    for day in sorted(available_days, key=_cm_day_sort_key)
+                    for day in sorted(current_week_days, key=_cm_day_sort_key)
                     if not _sae_split_day_limit_reached(
                         course=course,
                         per_day_hours=per_day_hours,
@@ -2949,7 +2983,7 @@ def generate_schedule(
                 placed = False
                 if (
                     continuity_target_date is not None
-                    and continuity_target_date in available_days
+                    and continuity_target_date in current_week_days
                 ):
                     placed = _attempt_day(continuity_target_date)
 
@@ -2968,7 +3002,7 @@ def generate_schedule(
                     cm_context = GlobalSearchContext(
                         course=course,
                         groups=class_groups,
-                        available_days=available_days,
+                        available_days=current_week_days,
                         day_indices=day_indices,
                         slot_length_hours=slot_length_hours,
                         subgroup_label=None,
@@ -3102,17 +3136,34 @@ def generate_schedule(
                             block_index = max(block_index - 1, 0)
                             relocation_executed = True
                     if relocation_executed:
-                        pass
-                    else:
-                        _warn_weekly_limit(reporter, weekly_limit_weeks)
-                        for week_start in sorted(chronology_weeks):
-                            reporter.warning(
-                                "Ordre CM → TD → TP impossible à respecter "
-                                f"la semaine du {week_start.strftime('%d/%m/%Y')}"
-                            )
+                        block.earliest_week_index = week_index
+                        pending_blocks.appendleft(block)
+                        continue
+                    for label, weeks in weekly_limit_weeks.items():
+                        aggregated_weekly_limit_weeks[label].update(weeks)
+                    aggregated_chronology_weeks.update(chronology_weeks)
+                    if current_week_start not in deferred_week_reports:
+                        reporter.info(
+                            "Aucune place disponible la semaine du "
+                            f"{current_week_start.strftime('%d/%m/%Y')} — "
+                            "nouvelle tentative la semaine suivante."
+                        )
+                        deferred_week_reports.add(current_week_start)
+                    block.earliest_week_index += 1
+                    if block.earliest_week_index >= len(ordered_weeks):
                         break
+                    pending_blocks.append(block)
+                    continue
 
             if hours_remaining > 0:
+                if aggregated_weekly_limit_weeks:
+                    _warn_weekly_limit(reporter, aggregated_weekly_limit_weeks)
+                if aggregated_chronology_weeks:
+                    for week_start in sorted(aggregated_chronology_weeks):
+                        reporter.warning(
+                            "Ordre CM → TD → TP impossible à respecter "
+                            f"la semaine du {week_start.strftime('%d/%m/%Y')}"
+                        )
                 message = (
                     "Impossible de planifier "
                     f"{hours_remaining} heure(s) supplémentaire(s) (cours magistral)"
@@ -3198,13 +3249,41 @@ def generate_schedule(
             block_index = 0
             hours_remaining = hours_needed
             relocation_weeks: set[date] = set()
+            week_by_day = {day: _week_start_for(day) for day in available_days}
+            ordered_weeks = sorted({week_by_day[day] for day in available_days})
+            pending_blocks: deque[DeferredBlock] = deque()
+            deferred_week_reports: set[date] = set()
+            aggregated_weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
+            aggregated_chronology_weeks: set[date] = set()
 
             while hours_remaining > 0:
+                if not pending_blocks:
+                    pending_blocks.append(
+                        DeferredBlock(
+                            hours=min(slot_length_hours, hours_remaining)
+                        )
+                    )
+                block = pending_blocks.popleft()
                 blocks_total = max(
                     (hours_remaining + slot_length_hours - 1) // slot_length_hours,
                     1,
                 )
-                desired_hours = min(slot_length_hours, hours_remaining)
+                desired_hours = block.hours
+                if not ordered_weeks:
+                    break
+                week_index = block.earliest_week_index
+                if week_index >= len(ordered_weeks):
+                    break
+                current_week_start = ordered_weeks[week_index]
+                current_week_days = [
+                    day for day in available_days if week_by_day[day] == current_week_start
+                ]
+                if not current_week_days:
+                    block.earliest_week_index += 1
+                    if block.earliest_week_index >= len(ordered_weeks):
+                        break
+                    pending_blocks.append(block)
+                    continue
                 if len(available_days) == 1:
                     anchor_index = 0
                 elif blocks_total == 1:
@@ -3269,7 +3348,7 @@ def generate_schedule(
 
                 ordered_days = [
                     day
-                    for day in sorted(available_days, key=_day_sort_key)
+                    for day in sorted(current_week_days, key=_day_sort_key)
                     if not _sae_split_day_limit_reached(
                         course=course,
                         per_day_hours=per_day_hours,
@@ -3408,7 +3487,7 @@ def generate_schedule(
                 placed = False
                 if (
                     continuity_target_date is not None
-                    and continuity_target_date in available_days
+                    and continuity_target_date in current_week_days
                 ):
                     placed = _attempt_day(continuity_target_date)
 
@@ -3427,7 +3506,7 @@ def generate_schedule(
                     group_context = GlobalSearchContext(
                         course=course,
                         groups=[class_group],
-                        available_days=available_days,
+                        available_days=current_week_days,
                         day_indices=day_indices,
                         slot_length_hours=slot_length_hours,
                         subgroup_label=subgroup_label,
@@ -3530,7 +3609,7 @@ def generate_schedule(
                                 candidate_days: list[date] = []
                                 if (
                                     continuity_target_date is not None
-                                    and continuity_target_date in available_days
+                                    and continuity_target_date in current_week_days
                                 ):
                                     candidate_days.append(continuity_target_date)
                                 for candidate_day in ordered_days:
@@ -3641,17 +3720,32 @@ def generate_schedule(
                                 block_index += 1
                                 relocation_executed = True
                     if relocation_executed:
-                        pass
-                    else:
-                        _warn_weekly_limit(reporter, weekly_limit_weeks)
-                        for week_start in sorted(chronology_weeks):
-                            reporter.warning(
-                                f"Chronologie CM → TD → TP impossible pour {class_group.name} "
-                                f"sur la semaine du {week_start.strftime('%d/%m/%Y')}"
-                            )
+                        continue
+                    for label, weeks in weekly_limit_weeks.items():
+                        aggregated_weekly_limit_weeks[label].update(weeks)
+                    aggregated_chronology_weeks.update(chronology_weeks)
+                    if current_week_start not in deferred_week_reports:
+                        reporter.info(
+                            f"Aucune place disponible pour {class_group.name} la semaine du "
+                            f"{current_week_start.strftime('%d/%m/%Y')} — nouvelle tentative"
+                            " la semaine suivante."
+                        )
+                        deferred_week_reports.add(current_week_start)
+                    block.earliest_week_index += 1
+                    if block.earliest_week_index >= len(ordered_weeks):
                         break
+                    pending_blocks.append(block)
+                    continue
 
             if hours_remaining > 0:
+                if aggregated_weekly_limit_weeks:
+                    _warn_weekly_limit(reporter, aggregated_weekly_limit_weeks)
+                if aggregated_chronology_weeks:
+                    for week_start in sorted(aggregated_chronology_weeks):
+                        reporter.warning(
+                            f"Chronologie CM → TD → TP impossible pour {class_group.name} "
+                            f"sur la semaine du {week_start.strftime('%d/%m/%Y')}"
+                        )
                 message = (
                     f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
                 )
