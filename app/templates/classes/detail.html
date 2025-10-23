@@ -130,6 +130,65 @@
       </div>
     </div>
     {% endif %}
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Étudiants</div>
+      <div class="card-body">
+        <form method="post" class="row g-2 align-items-end">
+          <input type="hidden" name="form" value="add-student">
+          <div class="col-md-4">
+            <label class="form-label small mb-1 text-muted">Prénom</label>
+            <input type="text" name="first_name" class="form-control" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small mb-1 text-muted">Nom</label>
+            <input type="text" name="last_name" class="form-control" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small mb-1 text-muted">Email</label>
+            <input type="email" name="email" class="form-control" placeholder="facultatif">
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-1 text-muted">Notes</label>
+            <textarea name="notes" class="form-control" rows="2" placeholder="Informations complémentaires"></textarea>
+          </div>
+          <div class="col-12 d-flex justify-content-end">
+            <button type="submit" class="btn btn-outline-primary">Ajouter</button>
+          </div>
+        </form>
+        <hr class="my-4">
+        {% if class_group.students %}
+        <div class="vstack gap-3">
+          {% for student in class_group.students %}
+          <form method="post" class="row g-2 align-items-end border rounded p-3">
+            <input type="hidden" name="student_id" value="{{ student.id }}">
+            <div class="col-md-3">
+              <label class="form-label small mb-1 text-muted">Prénom</label>
+              <input type="text" name="first_name" class="form-control form-control-sm" value="{{ student.first_name }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small mb-1 text-muted">Nom</label>
+              <input type="text" name="last_name" class="form-control form-control-sm" value="{{ student.last_name }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small mb-1 text-muted">Email</label>
+              <input type="email" name="email" class="form-control form-control-sm" value="{{ student.email }}" placeholder="facultatif">
+            </div>
+            <div class="col-md-12">
+              <label class="form-label small mb-1 text-muted">Notes</label>
+              <textarea name="notes" class="form-control form-control-sm" rows="2">{{ student.notes }}</textarea>
+            </div>
+            <div class="col-md-12 d-flex justify-content-end gap-2">
+              <button type="submit" name="form" value="update-student" class="btn btn-sm btn-outline-primary">Mettre à jour</button>
+              <button type="submit" name="form" value="delete-student" class="btn btn-sm btn-outline-danger" onclick="return confirm('Supprimer cet étudiant ?');">Supprimer</button>
+            </div>
+          </form>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">Aucun étudiant n'est enregistré pour cette classe.</p>
+        {% endif %}
+      </div>
+    </div>
   </div>
   <div class="col-xl-8">
     <div class="card shadow-sm">

@@ -119,6 +119,8 @@ class ScheduleReporter:
         self.summary: str | None = None
         self._finalised = False
         self._record: CourseScheduleLog | None = None
+        self.suggestions: list[str] = []
+        self._suggestion_keys: set[str] = set()
 
     def set_window(self, start: date, end: date) -> None:
         self.window_start = start
@@ -136,6 +138,16 @@ class ScheduleReporter:
     def error(self, message: str) -> None:
         self._add_entry("error", message)
         self.status = "error"
+
+    def suggest(self, message: str) -> None:
+        text = message.strip()
+        if not text:
+            return
+        key = text.lower()
+        if key in self._suggestion_keys:
+            return
+        self._suggestion_keys.add(key)
+        self.suggestions.append(text)
 
     def session_created(self, session: Session) -> None:
         start_label = session.start_time.strftime("%d/%m/%Y %H:%M")
@@ -173,6 +185,7 @@ class ScheduleReporter:
             messages=json.dumps(self._serialise_entries(), ensure_ascii=False),
             window_start=self.window_start,
             window_end=self.window_end,
+            suggestions=json.dumps(self.suggestions, ensure_ascii=False),
         )
         db.session.add(log)
         self._finalised = True
@@ -183,7 +196,7 @@ class ScheduleReporter:
         text = message.strip()
         if not text:
             return
-        if level != "info":
+        if level == "error":
             self.entries.append({"level": level, "message": text})
         logger = getattr(current_app, "logger", None)
         if logger is not None:
@@ -270,6 +283,32 @@ class PlacementDiagnostics:
             reporter.warning(
                 f"{context_label} — {day_label} : aucune option compatible trouvée sur ce créneau."
             )
+        for suggestion in self._build_suggestions(context_label, day_label):
+            reporter.suggest(suggestion)
+
+    def _build_suggestions(self, context_label: str, day_label: str) -> list[str]:
+        suggestions: list[str] = []
+        if self.class_reasons:
+            suggestions.append(
+                f"Assouplir les indisponibilités de {context_label} ou libérer ce créneau le {day_label}."
+            )
+        if self.teacher_reasons:
+            suggestions.append(
+                f"Adapter le planning ou le choix des enseignants pour {context_label} le {day_label}."
+            )
+        if self.room_reasons:
+            suggestions.append(
+                f"Réserver une salle alternative ou ajuster les exigences matérielles pour le {day_label}."
+            )
+        if self.other_reasons:
+            suggestions.append(
+                f"Revoir les contraintes complémentaires (chronologie, équipements) pour le {day_label}."
+            )
+        if not suggestions:
+            suggestions.append(
+                f"Étendre la fenêtre de planification ou autoriser un créneau supplémentaire le {day_label}."
+            )
+        return suggestions
 
 
 def daterange(start: date, end: date) -> Iterable[date]:
@@ -895,6 +934,13 @@ def _warn_weekly_limit(
                 f"(+{len(week_labels) - 3} autre(s))"
             )
         reporter.warning(message)
+        highlight = ", ".join(week_labels[:2])
+        reporter.suggest(
+            "Augmenter la limite hebdomadaire ou déplacer une séance "
+            f"pour {label} hors de la semaine {highlight}."
+            if highlight
+            else f"Augmenter la limite hebdomadaire ou déplacer une séance pour {label}."
+        )
 
 
 def respects_weekly_chronology(
@@ -1328,6 +1374,9 @@ def _report_one_hour_alignment(
         reporter.warning(
             "Séances d'1 h non consécutives détectées pour "
             f"{course.name} — {label} le {day.strftime('%d/%m/%Y')}"
+        )
+        reporter.suggest(
+            f"Réorganiser les séances d'1 h pour {label} le {day.strftime('%d/%m/%Y')} afin de les rendre consécutives."
         )
 
 
@@ -2472,6 +2521,10 @@ def generate_schedule(
                                 "Ordre CM → TD → TP impossible à respecter "
                                 f"la semaine du {week_start.strftime('%d/%m/%Y')}"
                             )
+                            reporter.suggest(
+                                "Autoriser un ordre plus souple (ex : TD avant CM) "
+                                f"pour la semaine du {week_start.strftime('%d/%m/%Y')}."
+                            )
                         break
 
             if hours_remaining > 0:
@@ -2480,6 +2533,10 @@ def generate_schedule(
                     f"{hours_remaining} heure(s) supplémentaire(s) (cours magistral)"
                 )
                 reporter.error(message)
+                reporter.suggest(
+                    f"Étendre la fenêtre du cours {course.name} ou libérer un créneau "
+                    "pour les classes concernées."
+                )
                 placement_failures.append(message)
         if not placement_failures:
             for group in class_groups:
@@ -2634,28 +2691,6 @@ def generate_schedule(
                 chronology_weeks: set[date] = set()
                 weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
 
-                def _candidate_base_offsets(day: date) -> list[int]:
-                    offsets: list[int] = []
-                    if (
-                        continuity_slot_index is not None
-                        and continuity_weekday is not None
-                        and day.weekday() == continuity_weekday
-                    ):
-                        offsets.append(continuity_slot_index)
-                    preferred_slot = _preferred_slot_index_for_groups(
-                        course,
-                        [class_group],
-                        day,
-                        pending_sessions=created_sessions,
-                        subgroup_label=subgroup_label,
-                    )
-                    if preferred_slot is not None and preferred_slot not in offsets:
-                        offsets.append(preferred_slot)
-                    fallback_offset = int(per_day_hours[day])
-                    if fallback_offset not in offsets:
-                        offsets.append(fallback_offset)
-                    return offsets
-
                 def _attempt_day(day: date) -> bool:
                     nonlocal hours_remaining, block_index
                     week_start, _ = _week_bounds(day)
@@ -2712,7 +2747,11 @@ def generate_schedule(
                     if fallback_offset not in preferred_offsets:
                         preferred_offsets.append(fallback_offset)
 
-                    for base_offset in _candidate_base_offsets(day):
+                    tried_offsets: set[int] = set()
+                    for base_offset in preferred_offsets:
+                        if base_offset in tried_offsets:
+                            continue
+                        tried_offsets.add(base_offset)
                         block_sessions = _schedule_block_for_day(
                             course=course,
                             class_group=class_group,
@@ -2896,6 +2935,10 @@ def generate_schedule(
                             f"Chronologie CM → TD → TP impossible pour {class_group.name} "
                             f"sur la semaine du {week_start.strftime('%d/%m/%Y')}"
                         )
+                        reporter.suggest(
+                            f"Permettre une dérogation à la chronologie pour {class_group.name} "
+                            f"la semaine du {week_start.strftime('%d/%m/%Y')}"
+                        )
                     break
 
             if hours_remaining > 0:
@@ -2903,6 +2946,9 @@ def generate_schedule(
                     f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
                 )
                 reporter.error(message)
+                reporter.suggest(
+                    f"Alléger les contraintes ou ouvrir un nouveau créneau pour {class_group.name}."
+                )
                 placement_failures.append(message)
     if not placement_failures:
         for link in links:

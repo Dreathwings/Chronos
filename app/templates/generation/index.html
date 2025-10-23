@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+{% block title %}Génération — Chronos{% endblock %}
+
+{% block stylesheets %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="row g-4 dashboard-layout">
+  <div class="col-xl-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Récapitulatif des cours</div>
+      <div class="card-body">
+        {% if course_summaries %}
+        {% set status_badge_classes = {'success': 'bg-success', 'warning': 'bg-warning text-dark', 'error': 'bg-danger', 'none': 'bg-secondary'} %}
+        <div class="list-group list-group-flush" data-course-summary-list>
+          {% for item in course_summaries %}
+          {% set required = item.required %}
+          {% set scheduled = item.scheduled %}
+          {% set progress = 0 if required == 0 else (scheduled / required * 100) %}
+          <div class="list-group-item px-0">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <div class="fw-semibold">{{ item.course.name }}</div>
+                <div class="text-muted small">
+                  {{ item.type_label }}
+                  {% if item.course.semester_start and item.course.semester_end %}
+                  — {{ item.course.semester_start }} → {{ item.course.semester_end }}
+                  {% endif %}
+                </div>
+              </div>
+              <div class="text-end d-flex flex-column align-items-end gap-1">
+                {% if item.display_status != 'none' %}
+                <span class="badge {{ status_badge_classes.get(item.display_status, 'bg-secondary') }}">{{ status_labels.get(item.display_status, item.display_status|title) }}</span>
+                {% else %}
+                <span class="badge {{ status_badge_classes.get('none') }}">Jamais généré</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="mt-2">
+              <div class="d-flex justify-content-between small text-muted">
+                <span>{{ scheduled }} / {{ required or 0 }} heures</span>
+                <span>
+                  {% if item.remaining > 0 %}
+                  Reste {{ item.remaining }} h
+                  {% else %}
+                  Planification terminée
+                  {% endif %}
+                </span>
+              </div>
+              <div class="progress" style="height: 6px;">
+                <div class="progress-bar{% if item.remaining == 0 and required > 0 %} bg-success{% endif %}" role="progressbar" style="width: {{ progress|round(0, 'floor') }}%"></div>
+              </div>
+            </div>
+            {% if item.latest_summary %}
+            <div class="text-muted small mt-2">{{ item.latest_summary }}</div>
+            {% elif item.display_status == 'none' %}
+            <div class="text-muted small mt-2">Jamais généré automatiquement.</div>
+            {% endif %}
+            {% if item.suggestions %}
+            <div class="mt-3">
+              <div class="fw-semibold small text-muted mb-1">Pistes de résolution</div>
+              <ul class="small text-muted mb-0 ps-3">
+                {% for suggestion in item.suggestions %}
+                <li>{{ suggestion }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endif %}
+            {% if item.latest_timestamp %}
+            <div class="text-muted small">Dernière génération : {{ item.latest_timestamp.strftime('%d/%m/%Y %H:%M') }}</div>
+            {% endif %}
+            <div class="d-flex align-items-center gap-2 mt-3">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.course_detail', course_id=item.course.id) }}">
+                Ouvrir
+              </a>
+              <form method="post" class="ms-auto">
+                <input type="hidden" name="form" value="clear-course-sessions">
+                <input type="hidden" name="course_id" value="{{ item.course.id }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger" {% if item.scheduled == 0 and item.latest_status == 'none' %}disabled{% endif %}>
+                  Supprimer la planification
+                </button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">Aucun cours n'est encore configuré.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Actions</div>
+      <div class="card-body">
+        <div class="vstack gap-3">
+          <form
+            method="post"
+            class="vstack gap-3"
+            data-chronos-progress
+            data-chronos-progress-async="true"
+            data-chronos-progress-context="bulk"
+            data-chronos-progress-hours="{{ total_remaining_hours }}"
+            data-chronos-progress-tasks="{{ courses_with_remaining }}"
+            data-chronos-progress-label="Synthèse : {{ total_remaining_hours }} heure(s) restante(s) sur {{ courses_with_remaining }} cours."
+          >
+            <input type="hidden" name="form" value="bulk-auto-schedule">
+            <div class="alert alert-info mb-0">
+              Configurez les semaines autorisées directement depuis les contraintes de chaque cours. Sans sélection, la période du cours sera utilisée.
+            </div>
+            <div class="form-text">Ordre appliqué : CM → SAE → TD → TP → Éval.</div>
+            <button type="submit" class="btn btn-primary">Générer l'ensemble des cours</button>
+          </form>
+          <form method="post" class="d-grid">
+            <input type="hidden" name="form" value="clear-all-sessions">
+            <button
+              type="submit"
+              class="btn btn-outline-danger"
+              {% if not has_any_scheduled_sessions %}disabled{% endif %}
+            >
+              Supprimer toutes les séances planifiées
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

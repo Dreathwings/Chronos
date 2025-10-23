@@ -35,6 +35,7 @@ from .models import (
     Equipment,
     Room,
     Session,
+    Student,
     Software,
     Teacher,
     TeacherAvailability,
@@ -245,6 +246,42 @@ def _effective_generation_status(
     if scheduled_total > 0 and math.isclose(remaining_hours, 0.0, abs_tol=1e-6):
         return "success"
     return status
+
+
+def _build_course_summaries(courses: Iterable[Course]) -> list[dict[str, object]]:
+    summaries: list[dict[str, object]] = []
+    for course in courses:
+        required_total = course.total_required_hours
+        scheduled_total = course.scheduled_hours
+        remaining = max(required_total - scheduled_total, 0)
+        latest_log = course.latest_generation_log
+        display_status = _effective_generation_status(
+            course,
+            latest_log,
+            remaining_hours=remaining,
+        )
+        suggestions = (
+            latest_log.parsed_suggestions() if latest_log is not None else []
+        )
+        summaries.append(
+            {
+                "course": course,
+                "type_label": COURSE_TYPE_LABELS.get(
+                    course.course_type, course.course_type
+                ),
+                "required": required_total,
+                "scheduled": scheduled_total,
+                "remaining": remaining,
+                "latest_status": latest_log.status if latest_log else "none",
+                "display_status": display_status,
+                "latest_summary": (
+                    latest_log.summary if latest_log and latest_log.summary else None
+                ),
+                "latest_timestamp": latest_log.created_at if latest_log else None,
+                "suggestions": suggestions,
+            }
+        )
+    return summaries
 
 
 def _closing_period_backgrounds() -> list[dict[str, object]]:
@@ -961,7 +998,46 @@ def dashboard():
             db.session.commit()
             flash("Séance créée", "success")
             return redirect(url_for("main.dashboard"))
-        elif request.form.get("form") == "bulk-auto-schedule":
+
+
+
+
+    all_sessions = Session.query.all()
+    events = sessions_to_grouped_events(all_sessions)
+    has_any_scheduled_sessions = len(all_sessions) > 0
+    course_summaries = _build_course_summaries(courses)
+
+    return render_template(
+        "dashboard.html",
+        courses=courses,
+        teachers=teachers,
+        rooms=rooms,
+        class_groups=class_groups,
+        course_class_options=course_class_options,
+        course_class_options_json=json.dumps(course_class_options, ensure_ascii=False),
+        course_subgroup_hints=course_subgroup_hints,
+        course_types_json=json.dumps(course_types, ensure_ascii=False),
+        course_summaries=course_summaries,
+        events_json=json.dumps(events, ensure_ascii=False),
+        start_times=START_TIMES,
+        course_type_labels=COURSE_TYPE_LABELS,
+        global_search_index_json=json.dumps(global_search_index, ensure_ascii=False),
+        status_labels=GENERATION_STATUS_LABELS,
+        has_any_scheduled_sessions=has_any_scheduled_sessions,
+    )
+
+
+@bp.route("/generation", methods=["GET", "POST"])
+def generation_page():
+    courses = (
+        Course.query.options(selectinload(Course.generation_logs))
+        .order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
+        .all()
+    )
+
+    if request.method == "POST":
+        form_name = request.form.get("form")
+        if form_name == "bulk-auto-schedule":
             if _wants_json_response():
                 tracker = _enqueue_bulk_schedule()
                 response = {
@@ -969,10 +1045,11 @@ def dashboard():
                     "status_url": url_for(
                         "main.schedule_progress_status", job_id=tracker.job_id
                     ),
-                    "redirect_url": url_for("main.dashboard"),
+                    "redirect_url": url_for("main.generation_page"),
                     "label": "Génération globale",
                 }
                 return jsonify(response), 202
+
             total_created = 0
             error_messages: list[str] = []
             for course in courses:
@@ -991,11 +1068,11 @@ def dashboard():
                     continue
                 total_created += len(created)
 
+            db.session.commit()
+
             if total_created:
-                db.session.commit()
                 flash(f"{total_created} séance(s) générée(s).", "success")
             else:
-                db.session.commit()
                 flash(
                     "Aucune séance n'a pu être générée avec les contraintes actuelles.",
                     "info",
@@ -1004,30 +1081,38 @@ def dashboard():
             if error_messages:
                 flash("\n".join(error_messages), "warning")
 
-            return redirect(url_for("main.dashboard"))
-        elif request.form.get("form") == "clear-course-sessions":
+            return redirect(url_for("main.generation_page"))
+
+        if form_name == "clear-course-sessions":
             try:
                 course_id = int(request.form.get("course_id", "0"))
             except ValueError:
                 flash("Cours invalide", "danger")
-                return redirect(url_for("main.dashboard"))
+                return redirect(url_for("main.generation_page"))
 
             course = Course.query.get(course_id)
             if course is None:
                 flash("Cours introuvable", "danger")
-                return redirect(url_for("main.dashboard"))
+                return redirect(url_for("main.generation_page"))
 
-            removed, _ = _clear_course_schedule(course)
+            removed_sessions, removed_logs = _clear_course_schedule(course)
             db.session.commit()
-            if removed:
+
+            if removed_sessions or removed_logs:
+                details: list[str] = []
+                if removed_sessions:
+                    details.append(f"{removed_sessions} séance(s)")
+                if removed_logs:
+                    details.append(f"{removed_logs} journal(aux)")
                 flash(
-                    f"{removed} séance(s) supprimée(s) pour {course.name}.",
+                    f"{' et '.join(details)} supprimé(s) pour {course.name}.",
                     "success",
                 )
             else:
-                flash("Aucune séance n'était planifiée pour ce cours.", "info")
-            return redirect(url_for("main.dashboard"))
-        elif request.form.get("form") == "clear-all-sessions":
+                flash("Aucune séance planifiée ni journal enregistré.", "info")
+            return redirect(url_for("main.generation_page"))
+
+        if form_name == "clear-all-sessions":
             total_removed_sessions = 0
             total_removed_logs = 0
             for course in courses:
@@ -1047,9 +1132,8 @@ def dashboard():
                     message_parts.append(
                         f"{total_removed_logs} journal(aux) de génération"
                     )
-                detail = " et ".join(message_parts)
                 flash(
-                    f"{detail} supprimé(s) pour l'ensemble des cours.",
+                    f"{' et '.join(message_parts)} supprimé(s) pour l'ensemble des cours.",
                     "success",
                 )
             else:
@@ -1058,53 +1142,23 @@ def dashboard():
                     "info",
                 )
 
-            return redirect(url_for("main.dashboard"))
+            return redirect(url_for("main.generation_page"))
 
     all_sessions = Session.query.all()
-    events = sessions_to_grouped_events(all_sessions)
     has_any_scheduled_sessions = len(all_sessions) > 0
-    course_summaries: list[dict[str, object]] = []
-    for course in courses:
-        required_total = course.total_required_hours
-        scheduled_total = course.scheduled_hours
-        remaining = max(required_total - scheduled_total, 0)
-        latest_log = course.latest_generation_log
-        display_status = _effective_generation_status(
-            course,
-            latest_log,
-            remaining_hours=remaining,
-        )
-        course_summaries.append(
-            {
-                "course": course,
-                "type_label": COURSE_TYPE_LABELS.get(course.course_type, course.course_type),
-                "required": required_total,
-                "scheduled": scheduled_total,
-                "remaining": remaining,
-                "latest_status": latest_log.status if latest_log else "none",
-                "display_status": display_status,
-                "latest_summary": latest_log.summary if latest_log and latest_log.summary else None,
-                "latest_timestamp": latest_log.created_at if latest_log else None,
-            }
-        )
+    course_summaries = _build_course_summaries(courses)
+    total_remaining_hours = sum(item["remaining"] for item in course_summaries)
+    courses_with_remaining = sum(
+        1 for item in course_summaries if item["remaining"] > 0
+    )
 
     return render_template(
-        "dashboard.html",
-        courses=courses,
-        teachers=teachers,
-        rooms=rooms,
-        class_groups=class_groups,
-        course_class_options=course_class_options,
-        course_class_options_json=json.dumps(course_class_options, ensure_ascii=False),
-        course_subgroup_hints=course_subgroup_hints,
-        course_types_json=json.dumps(course_types, ensure_ascii=False),
+        "generation/index.html",
         course_summaries=course_summaries,
-        events_json=json.dumps(events, ensure_ascii=False),
-        start_times=START_TIMES,
-        course_type_labels=COURSE_TYPE_LABELS,
-        global_search_index_json=json.dumps(global_search_index, ensure_ascii=False),
         status_labels=GENERATION_STATUS_LABELS,
         has_any_scheduled_sessions=has_any_scheduled_sessions,
+        total_remaining_hours=total_remaining_hours,
+        courses_with_remaining=courses_with_remaining,
     )
 
 
@@ -1423,6 +1477,69 @@ def class_detail(class_id: int):
                 course.class_links.remove(link)
                 db.session.commit()
                 flash("Cours retiré de la classe", "success")
+        elif form_name == "add-student":
+            first_name = (request.form.get("first_name") or "").strip()
+            last_name = (request.form.get("last_name") or "").strip()
+            email = (request.form.get("email") or "").strip()
+            notes = request.form.get("notes") or None
+            if not first_name or not last_name:
+                flash("Indiquez le prénom et le nom de l'étudiant", "danger")
+            else:
+                student = Student(
+                    class_group=class_group,
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=email or None,
+                    notes=notes,
+                )
+                db.session.add(student)
+                try:
+                    db.session.commit()
+                    flash("Étudiant ajouté", "success")
+                except IntegrityError:
+                    db.session.rollback()
+                    flash("Cet étudiant est déjà enregistré dans la classe", "danger")
+        elif form_name == "update-student":
+            try:
+                student_id = int(request.form.get("student_id", "0"))
+            except ValueError:
+                flash("Étudiant introuvable", "danger")
+                return redirect(url_for("main.class_detail", class_id=class_id))
+            student = Student.query.get(student_id)
+            if student is None or student.class_group_id != class_group.id:
+                flash("Étudiant introuvable", "danger")
+            else:
+                new_first = (request.form.get("first_name") or "").strip()
+                new_last = (request.form.get("last_name") or "").strip()
+                new_email = (request.form.get("email") or "").strip()
+                new_notes = request.form.get("notes") or None
+                student.first_name = new_first or student.first_name
+                student.last_name = new_last or student.last_name
+                student.email = new_email or None
+                student.notes = new_notes
+                try:
+                    db.session.commit()
+                    flash("Étudiant mis à jour", "success")
+                except IntegrityError:
+                    db.session.rollback()
+                    db.session.refresh(student)
+                    flash(
+                        "Un étudiant avec ce nom existe déjà dans la classe",
+                        "danger",
+                    )
+        elif form_name == "delete-student":
+            try:
+                student_id = int(request.form.get("student_id", "0"))
+            except ValueError:
+                flash("Étudiant introuvable", "danger")
+                return redirect(url_for("main.class_detail", class_id=class_id))
+            student = Student.query.get(student_id)
+            if student is None or student.class_group_id != class_group.id:
+                flash("Étudiant introuvable", "danger")
+            else:
+                db.session.delete(student)
+                db.session.commit()
+                flash("Étudiant supprimé", "success")
         return redirect(url_for("main.class_detail", class_id=class_id))
 
     events = sessions_to_grouped_events(class_group.all_sessions)

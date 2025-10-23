@@ -98,6 +98,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
         _ensure_session_attendance_backfill()
+        _ensure_course_schedule_log_suggestions_column()
         updated_sessions = _realign_tp_session_teachers()
         if updated_sessions:
             app.logger.info(
@@ -178,6 +179,44 @@ def _ensure_session_class_group_column() -> None:
             current_app.logger.warning(
                 "Unable to tighten constraints on session.class_group_id; continuing with nullable column."
             )
+
+
+def _ensure_course_schedule_log_suggestions_column() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    table_name = "course_schedule_log"
+    if table_name not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+    if "suggestions" in existing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE course_schedule_log ADD COLUMN suggestions TEXT DEFAULT '[]'"
+                )
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard for legacy DBs
+        current_app.logger.warning(
+            "Unable to add suggestions column to course_schedule_log: %s", exc
+        )
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE course_schedule_log SET suggestions = '[]' WHERE suggestions IS NULL"
+                )
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard for legacy DBs
+        current_app.logger.warning(
+            "Unable to backfill suggestions column on course_schedule_log: %s", exc
+        )
+
 
 
 def _ensure_course_class_group_count_column() -> None:

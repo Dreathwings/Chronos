@@ -52,6 +52,7 @@
               <tr>
                 <th>Nom</th>
                 <th>Effectif</th>
+                <th>Étudiants</th>
                 <th>Cours associés</th>
               </tr>
             </thead>
@@ -64,6 +65,7 @@
                   </a>
                 </td>
                 <td>{{ class_group.size }}</td>
+                <td>{{ class_group.students|length }}</td>
                 <td>{{ class_group.courses|length }}</td>
               </tr>
               {% endfor %}

@@ -640,6 +640,7 @@ class CourseScheduleLog(db.Model, TimeStampedModel):
     messages: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     window_start: Mapped[Optional[date]] = mapped_column(Date)
     window_end: Mapped[Optional[date]] = mapped_column(Date)
+    suggestions: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
 
     course: Mapped[Course] = relationship("Course", back_populates="generation_logs")
 
@@ -686,6 +687,54 @@ class CourseScheduleLog(db.Model, TimeStampedModel):
 
     def level_label(self, level: str) -> str:
         return self.LEVEL_LABELS.get(level, level.title())
+
+    def parsed_suggestions(self) -> list[str]:
+        try:
+            payload = json.loads(self.suggestions or "[]")
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(payload, list):
+            return []
+        normalised: list[str] = []
+        for entry in payload:
+            if not isinstance(entry, str):
+                continue
+            text = entry.strip()
+            if not text:
+                continue
+            normalised.append(text)
+        return normalised
+
+
+class Student(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    class_group_id: Mapped[int] = mapped_column(
+        ForeignKey("class_group.id"), nullable=False, index=True
+    )
+    first_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(255))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    class_group: Mapped[ClassGroup] = relationship(
+        "ClassGroup", back_populates="students"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "class_group_id",
+            "first_name",
+            "last_name",
+            name="uq_student_class_name",
+        ),
+    )
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.first_name} {self.last_name}".strip()
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"Student<{self.id} {self.full_name}>"
 
 
 class CourseAllowedWeek(db.Model, TimeStampedModel):
@@ -1062,6 +1111,12 @@ class ClassGroup(db.Model, TimeStampedModel):
         "Session",
         secondary=session_attendance,
         back_populates="attendees",
+    )
+    students: Mapped[List["Student"]] = relationship(
+        "Student",
+        back_populates="class_group",
+        cascade="all, delete-orphan",
+        order_by="Student.last_name",
     )
 
     @staticmethod

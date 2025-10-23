@@ -551,7 +551,7 @@ class DashboardActionsTestCase(DatabaseTestCase):
         client = self.app.test_client()
         base_path = self.app.config.get("URL_PREFIX", "") or ""
         response = client.post(
-            f"{base_path}/",
+            f"{base_path}/generation",
             data={"form": "clear-all-sessions"},
             follow_redirects=False,
         )
@@ -1390,11 +1390,11 @@ class SchedulerFormattingTestCase(DatabaseTestCase):
 
         _warn_weekly_limit(reporter, {"Synthèse": weeks})
 
-        self.assertEqual(len(reporter.entries), 1)
-        message = reporter.entries[0]["message"]
-        self.assertIn("08/09/2025", message)
-        self.assertIn("Synthèse", message)
-        self.assertIn("(+3 autre(s))", message)
+        self.assertEqual(len(reporter.suggestions), 1)
+        suggestion = reporter.suggestions[0]
+        self.assertIn("Synthèse", suggestion)
+        self.assertIn("08/09/2025", suggestion)
+        self.assertIn("15/09/2025", suggestion)
 
 
 class SchedulerRelocationTestCase(DatabaseTestCase):
