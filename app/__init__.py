@@ -97,6 +97,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_type_column()
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
+        _ensure_student_profile_columns()
         _ensure_session_attendance_backfill()
         updated_sessions = _realign_tp_session_teachers()
         if updated_sessions:
@@ -603,6 +604,74 @@ def _ensure_course_course_name_column() -> None:
             current_app.logger.warning(
                 "Unable to add foreign key constraint to course.course_name_id; continuing without constraint."
             )
+
+
+def _ensure_student_profile_columns() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "student" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("student")}
+    statements: list[tuple[str, str]] = []
+
+    def queue(column_name: str, statement: str) -> None:
+        if column_name not in existing_columns:
+            statements.append((column_name, statement))
+
+    queue("group_label", "ALTER TABLE student ADD COLUMN group_label VARCHAR(50)")
+    queue("phase", "ALTER TABLE student ADD COLUMN phase VARCHAR(50)")
+    queue(
+        "pathway",
+        "ALTER TABLE student ADD COLUMN pathway VARCHAR(20) NOT NULL DEFAULT 'initial'",
+    )
+    queue(
+        "alternance_details",
+        "ALTER TABLE student ADD COLUMN alternance_details TEXT",
+    )
+    queue("ina_id", "ALTER TABLE student ADD COLUMN ina_id VARCHAR(50)")
+    queue("ub_id", "ALTER TABLE student ADD COLUMN ub_id VARCHAR(50)")
+
+    if not statements:
+        return
+
+    added_columns = {name for name, _ in statements}
+
+    try:
+        with engine.begin() as connection:
+            for _, statement in statements:
+                connection.execute(text(statement))
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard for legacy DBs
+        current_app.logger.warning("Unable to update student table columns: %s", exc)
+        return
+
+    if "pathway" in added_columns:
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE student SET pathway = :default "
+                        "WHERE pathway IS NULL OR pathway = ''"
+                    ),
+                    {"default": "initial"},
+                )
+        except SQLAlchemyError:
+            current_app.logger.warning(
+                "Unable to backfill student.pathway with default values; continuing with partial data."
+            )
+
+        if engine.dialect.name not in {"sqlite"}:
+            try:
+                with engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE student MODIFY pathway VARCHAR(20) NOT NULL DEFAULT 'initial'"
+                        )
+                    )
+            except SQLAlchemyError:
+                current_app.logger.warning(
+                    "Unable to tighten constraints on student.pathway; continuing with relaxed column."
+                )
 
 
 def _ensure_session_attendance_backfill() -> None:
