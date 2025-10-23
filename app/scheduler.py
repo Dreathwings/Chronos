@@ -2891,6 +2891,38 @@ def generate_schedule(
                 chronology_weeks: set[date] = set()
                 weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
 
+                def _preferred_offsets_for_day(day: date) -> list[int]:
+                    offsets: list[int] = []
+                    if (
+                        continuity_slot_index is not None
+                        and continuity_weekday is not None
+                        and day.weekday() == continuity_weekday
+                    ):
+                        offsets.append(continuity_slot_index)
+                    if desired_hours == 1:
+                        adjacency_offsets = _one_hour_adjacency_offsets(
+                            class_groups,
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=None,
+                        )
+                        for offset in adjacency_offsets:
+                            if offset not in offsets:
+                                offsets.append(offset)
+                    preferred_slot = _preferred_slot_index_for_groups(
+                        course,
+                        class_groups,
+                        day,
+                        pending_sessions=created_sessions,
+                        subgroup_label=None,
+                    )
+                    if preferred_slot is not None and preferred_slot not in offsets:
+                        offsets.append(preferred_slot)
+                    fallback_offset = int(per_day_hours[day])
+                    if fallback_offset not in offsets:
+                        offsets.append(fallback_offset)
+                    return offsets
+
                 def _attempt_day(day: date) -> bool:
                     if _sae_split_day_limit_reached(
                         course=course,
@@ -2924,35 +2956,7 @@ def generate_schedule(
                     ):
                         chronology_weeks.add(week_start)
                         return False
-                    preferred_offsets: list[int] = []
-                    if (
-                        continuity_slot_index is not None
-                        and continuity_weekday is not None
-                        and day.weekday() == continuity_weekday
-                    ):
-                        preferred_offsets.append(continuity_slot_index)
-                    if desired_hours == 1:
-                        adjacency_offsets = _one_hour_adjacency_offsets(
-                            class_groups,
-                            day,
-                            pending_sessions=created_sessions,
-                            subgroup_label=None,
-                        )
-                        for offset in adjacency_offsets:
-                            if offset not in preferred_offsets:
-                                preferred_offsets.append(offset)
-                    preferred_slot = _preferred_slot_index_for_groups(
-                        course,
-                        class_groups,
-                        day,
-                        pending_sessions=created_sessions,
-                        subgroup_label=None,
-                    )
-                    if preferred_slot is not None and preferred_slot not in preferred_offsets:
-                        preferred_offsets.append(preferred_slot)
-                    fallback_offset = int(per_day_hours[day])
-                    if fallback_offset not in preferred_offsets:
-                        preferred_offsets.append(fallback_offset)
+                    preferred_offsets = _preferred_offsets_for_day(day)
 
                     for base_offset in preferred_offsets:
                         block_sessions = _cm_schedule_block_for_day(
@@ -3068,7 +3072,7 @@ def generate_schedule(
                         if not plan_failed:
                             placed = True
 
-                    def _simulate_cm_relocation() -> bool:
+                    def _simulate_cm_relocation(target_day: date, target_offset: int) -> bool:
                         backup_created = list(created_sessions)
                         backup_day_hours = dict(per_day_hours)
                         backup_weekdays = Counter(weekday_frequencies)
@@ -3093,7 +3097,7 @@ def generate_schedule(
                             if _sae_split_day_limit_reached(
                                 course=course,
                                 per_day_hours=per_day_hours,
-                                day=day,
+                                day=target_day,
                                 slot_length_hours=slot_length_hours,
                             ):
                                 return False
@@ -3101,9 +3105,9 @@ def generate_schedule(
                                 course=course,
                                 class_groups=class_groups,
                                 primary_link=primary_link,
-                                day=day,
+                                day=target_day,
                                 desired_hours=desired_hours,
-                                base_offset=base_offset,
+                                base_offset=target_offset,
                                 pending_sessions=created_sessions,
                                 reporter=None,
                             )
@@ -3117,24 +3121,31 @@ def generate_schedule(
                             weekday_frequencies.update(backup_weekdays)
 
                     relocation_executed = False
-                    if _simulate_cm_relocation():
-                        relocated_hours = _relocate_sessions_for_groups(
-                            course=course,
-                            class_groups=class_groups,
-                            created_sessions=created_sessions,
-                            per_day_hours=per_day_hours,
-                            weekday_frequencies=weekday_frequencies,
-                            reporter=reporter,
-                            attempted_weeks=relocation_weeks,
-                            require_exact_attendees=True,
-                            context_label=", ".join(
-                                group.name for group in class_groups
-                            ),
-                        )
-                        if relocated_hours:
-                            hours_remaining += relocated_hours
-                            block_index = max(block_index - 1, 0)
-                            relocation_executed = True
+                    for target_day in ordered_days:
+                        preferred_offsets = _preferred_offsets_for_day(target_day)
+                        for base_offset in preferred_offsets:
+                            if not _simulate_cm_relocation(target_day, base_offset):
+                                continue
+                            relocated_hours = _relocate_sessions_for_groups(
+                                course=course,
+                                class_groups=class_groups,
+                                created_sessions=created_sessions,
+                                per_day_hours=per_day_hours,
+                                weekday_frequencies=weekday_frequencies,
+                                reporter=reporter,
+                                attempted_weeks=relocation_weeks,
+                                require_exact_attendees=True,
+                                context_label=", ".join(
+                                    group.name for group in class_groups
+                                ),
+                            )
+                            if relocated_hours:
+                                hours_remaining += relocated_hours
+                                block_index = max(block_index - 1, 0)
+                                relocation_executed = True
+                            break
+                        if relocation_executed:
+                            break
                     if relocation_executed:
                         block.earliest_week_index = week_index
                         pending_blocks.appendleft(block)
