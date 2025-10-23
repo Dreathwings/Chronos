@@ -81,6 +81,18 @@ def _effective_slot_length_hours(course: Course) -> int:
     return base_length
 
 
+def _sae_split_day_limit_reached(
+    *,
+    course: Course,
+    per_day_hours: dict[date, int],
+    day: date,
+    slot_length_hours: int,
+) -> bool:
+    if not course.allows_sae_split:
+        return False
+    return per_day_hours.get(day, 0) >= slot_length_hours
+
+
 @dataclass(frozen=True)
 class PlacementDecision:
     day: date
@@ -247,7 +259,17 @@ class GlobalSearchContext:
                 self.day_indices.get(day, 0),
             )
 
-        ordered = sorted(self.available_days, key=_sort_key)
+        candidates = [
+            day
+            for day in self.available_days
+            if not _sae_split_day_limit_reached(
+                course=self.course,
+                per_day_hours=state.per_day_hours,
+                day=day,
+                slot_length_hours=self.slot_length_hours,
+            )
+        ]
+        ordered = sorted(candidates, key=_sort_key)
         return ordered
 
     def _candidate_offsets(
@@ -327,6 +349,13 @@ class GlobalSearchContext:
         base_offset: int,
         desired_hours: int,
     ) -> SearchState | None:
+        if _sae_split_day_limit_reached(
+            course=self.course,
+            per_day_hours=state.per_day_hours,
+            day=day,
+            slot_length_hours=self.slot_length_hours,
+        ):
+            return None
         if not self.day_is_valid(
             day=day,
             desired_hours=desired_hours,
@@ -2814,12 +2843,28 @@ def generate_schedule(
                         day_indices[d],
                     )
 
-                ordered_days = sorted(available_days, key=_cm_day_sort_key)
+                ordered_days = [
+                    day
+                    for day in sorted(available_days, key=_cm_day_sort_key)
+                    if not _sae_split_day_limit_reached(
+                        course=course,
+                        per_day_hours=per_day_hours,
+                        day=day,
+                        slot_length_hours=slot_length_hours,
+                    )
+                ]
 
                 chronology_weeks: set[date] = set()
                 weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
 
                 def _attempt_day(day: date) -> bool:
+                    if _sae_split_day_limit_reached(
+                        course=course,
+                        per_day_hours=per_day_hours,
+                        day=day,
+                        slot_length_hours=slot_length_hours,
+                    ):
+                        return False
                     nonlocal hours_remaining, block_index
                     week_start, _ = _week_bounds(day)
                     conflict_detected = False
@@ -2946,6 +2991,14 @@ def generate_schedule(
                     if beam_plan:
                         plan_failed = False
                         for decision in beam_plan:
+                            if _sae_split_day_limit_reached(
+                                course=course,
+                                per_day_hours=per_day_hours,
+                                day=decision.day,
+                                slot_length_hours=slot_length_hours,
+                            ):
+                                plan_failed = True
+                                break
                             block_sessions = _cm_schedule_block_for_day(
                                 course=course,
                                 class_groups=class_groups,
@@ -3002,6 +3055,13 @@ def generate_schedule(
                                 ),
                             )
                             if not relocated:
+                                return False
+                            if _sae_split_day_limit_reached(
+                                course=course,
+                                per_day_hours=per_day_hours,
+                                day=day,
+                                slot_length_hours=slot_length_hours,
+                            ):
                                 return False
                             placement = _cm_schedule_block_for_day(
                                 course=course,
@@ -3207,7 +3267,16 @@ def generate_schedule(
                         day_indices[d],
                     )
 
-                ordered_days = sorted(available_days, key=_day_sort_key)
+                ordered_days = [
+                    day
+                    for day in sorted(available_days, key=_day_sort_key)
+                    if not _sae_split_day_limit_reached(
+                        course=course,
+                        per_day_hours=per_day_hours,
+                        day=day,
+                        slot_length_hours=slot_length_hours,
+                    )
+                ]
 
                 chronology_weeks: set[date] = set()
                 weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
@@ -3246,6 +3315,13 @@ def generate_schedule(
 
                 def _attempt_day(day: date) -> bool:
                     nonlocal hours_remaining, block_index
+                    if _sae_split_day_limit_reached(
+                        course=course,
+                        per_day_hours=per_day_hours,
+                        day=day,
+                        slot_length_hours=slot_length_hours,
+                    ):
+                        return False
                     week_start, _ = _week_bounds(day)
                     if has_weekly_course_conflict(
                         course,
@@ -3374,6 +3450,14 @@ def generate_schedule(
                     if beam_plan:
                         plan_failed = False
                         for decision in beam_plan:
+                            if _sae_split_day_limit_reached(
+                                course=course,
+                                per_day_hours=per_day_hours,
+                                day=decision.day,
+                                slot_length_hours=slot_length_hours,
+                            ):
+                                plan_failed = True
+                                break
                             block_sessions = _schedule_block_for_day(
                                 course=course,
                                 class_group=class_group,
@@ -3457,6 +3541,13 @@ def generate_schedule(
                                         continue
                                     candidate_days.append(candidate_day)
                                 for candidate_day in candidate_days:
+                                    if _sae_split_day_limit_reached(
+                                        course=course,
+                                        per_day_hours=per_day_hours,
+                                        day=candidate_day,
+                                        slot_length_hours=slot_length_hours,
+                                    ):
+                                        continue
                                     for base_offset in _candidate_base_offsets(candidate_day):
                                         placement = _schedule_block_for_day(
                                             course=course,
@@ -3512,17 +3603,24 @@ def generate_schedule(
                         if relocated_hours:
                             hours_remaining += relocated_hours
                             block_index = max(block_index - 1, 0)
-                            block_sessions = _schedule_block_for_day(
+                            block_sessions: list[Session] | None = None
+                            if not _sae_split_day_limit_reached(
                                 course=course,
-                                class_group=class_group,
-                                link=link,
-                                subgroup_label=subgroup_label,
+                                per_day_hours=per_day_hours,
                                 day=candidate_day,
-                                desired_hours=desired_hours,
-                                base_offset=base_offset,
-                                pending_sessions=created_sessions,
-                                reporter=reporter,
-                            )
+                                slot_length_hours=slot_length_hours,
+                            ):
+                                block_sessions = _schedule_block_for_day(
+                                    course=course,
+                                    class_group=class_group,
+                                    link=link,
+                                    subgroup_label=subgroup_label,
+                                    day=candidate_day,
+                                    desired_hours=desired_hours,
+                                    base_offset=base_offset,
+                                    pending_sessions=created_sessions,
+                                    reporter=reporter,
+                                )
                             if block_sessions:
                                 created_sessions.extend(block_sessions)
                                 block_hours = sum(
