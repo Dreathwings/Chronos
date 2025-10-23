@@ -97,6 +97,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_type_column()
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
+        _ensure_course_sae_split_sessions_column()
         _ensure_session_attendance_backfill()
         updated_sessions = _realign_tp_session_teachers()
         if updated_sessions:
@@ -218,6 +219,36 @@ def _ensure_course_class_group_count_column() -> None:
             current_app.logger.warning(
                 "Unable to tighten constraints on course_class.group_count; continuing with nullable column."
             )
+
+
+def _ensure_course_sae_split_sessions_column() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course")}
+    if "sae_split_sessions" in existing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE course ADD COLUMN sae_split_sessions BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - legacy schema guard
+        current_app.logger.warning(
+            "Unable to add sae_split_sessions column to course: %s", exc
+        )
+        return
+
+    try:
+        inspector._clear()  # type: ignore[attr-defined]
+    except AttributeError:  # pragma: no cover - inspector without cache clear
+        pass
+
 
 def _ensure_session_subgroup_column() -> None:
     engine = db.engine
