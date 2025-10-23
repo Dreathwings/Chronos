@@ -15,7 +15,14 @@
           <p class="text-muted mb-0">Lancez la planification globale et identifiez rapidement les cours à corriger.</p>
         </div>
         <div class="d-flex flex-wrap gap-2">
-          <form method="post">
+          <form
+            method="post"
+            data-chronos-progress
+            data-chronos-progress-async="true"
+            data-chronos-progress-context="bulk"
+            data-chronos-progress-hours="{{ global_remaining_hours }}"
+            data-chronos-progress-label="Génération globale"
+          >
             <input type="hidden" name="form" value="generate">
             <button type="submit" class="btn btn-primary">Générer les cours</button>
           </form>

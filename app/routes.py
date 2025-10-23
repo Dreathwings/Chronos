@@ -1933,9 +1933,8 @@ def courses_list():
 
 @bp.route("/generation", methods=["GET", "POST"])
 def generation_overview():
-    if request.method == "POST":
-        action = request.form.get("form")
-        courses = (
+    def _load_courses_for_generation() -> list[Course]:
+        return (
             Course.query.options(
                 selectinload(Course.class_links),
                 selectinload(Course.sessions),
@@ -1944,7 +1943,23 @@ def generation_overview():
             .order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
             .all()
         )
+
+    if request.method == "POST":
+        action = request.form.get("form")
         if action == "generate":
+            if _wants_json_response():
+                tracker = _enqueue_bulk_schedule()
+                response = {
+                    "job_id": tracker.job_id,
+                    "status_url": url_for(
+                        "main.schedule_progress_status", job_id=tracker.job_id
+                    ),
+                    "redirect_url": url_for("main.generation_overview"),
+                    "label": "Génération globale",
+                }
+                return jsonify(response), 202
+
+            courses = _load_courses_for_generation()
             total_created = 0
             failures = 0
             for course in courses:
@@ -1984,6 +1999,7 @@ def generation_overview():
                     "warning",
                 )
         elif action == "clear":
+            courses = _load_courses_for_generation()
             total_sessions = 0
             total_logs = 0
             for course in courses:
@@ -2038,11 +2054,13 @@ def generation_overview():
         return collected
 
     course_rows: list[dict[str, object]] = []
+    global_remaining_hours = 0
     for course in courses:
         latest_log = course.latest_generation_log
         required_hours = course.total_required_hours
         scheduled_hours = course.scheduled_hours
         remaining_hours = max(required_hours - scheduled_hours, 0)
+        global_remaining_hours += remaining_hours
         status = _effective_generation_status(
             course,
             latest_log,
@@ -2145,6 +2163,7 @@ def generation_overview():
         total_required_hours=total_required_hours,
         total_scheduled_hours=total_scheduled_hours,
         total_remaining_hours=total_remaining_hours,
+        global_remaining_hours=global_remaining_hours,
         status_labels=GENERATION_STATUS_LABELS,
         status_badges=STATUS_BADGES,
         course_type_labels=COURSE_TYPE_LABELS,
