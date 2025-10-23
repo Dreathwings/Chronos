@@ -35,6 +35,7 @@ from .models import (
     Equipment,
     Room,
     Session,
+    Student,
     Software,
     Teacher,
     TeacherAvailability,
@@ -95,6 +96,19 @@ COURSE_TYPE_ORDER_EXPRESSION = case(
 )
 
 GENERATION_STATUS_LABELS = {**CourseScheduleLog.STATUS_LABELS, "none": "Jamais généré"}
+
+STATUS_BADGES = {
+    "success": "bg-success",
+    "warning": "bg-warning text-dark",
+    "error": "bg-danger",
+    "none": "bg-secondary",
+}
+
+LEVEL_BADGES = {
+    "info": "bg-secondary",
+    "warning": "bg-warning text-dark",
+    "error": "bg-danger",
+}
 
 
 def _normalise_course_type(raw_value: str | None) -> str:
@@ -1370,13 +1384,26 @@ def classes_list():
                 flash("Nom de classe déjà utilisé", "danger")
         return redirect(url_for("main.classes_list"))
 
-    class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    class_groups = (
+        ClassGroup.query.options(
+            selectinload(ClassGroup.students),
+            selectinload(ClassGroup.course_links),
+        )
+        .order_by(ClassGroup.name)
+        .all()
+    )
     return render_template("classes/list.html", class_groups=class_groups)
 
 
 @bp.route("/classe/<int:class_id>", methods=["GET", "POST"])
 def class_detail(class_id: int):
-    class_group = ClassGroup.query.get_or_404(class_id)
+    class_group = (
+        ClassGroup.query.options(
+            selectinload(ClassGroup.students),
+            selectinload(ClassGroup.course_links).selectinload(CourseClassLink.course),
+        )
+        .get_or_404(class_id)
+    )
     courses = (
         Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc()).all()
     )
@@ -1423,6 +1450,43 @@ def class_detail(class_id: int):
                 course.class_links.remove(link)
                 db.session.commit()
                 flash("Cours retiré de la classe", "success")
+        elif form_name == "add-student":
+            full_name = (request.form.get("full_name") or "").strip()
+            email = (request.form.get("email") or "").strip() or None
+            notes = request.form.get("notes") or None
+            if not full_name:
+                flash("Renseignez le nom de l'étudiant.", "warning")
+            else:
+                student = Student(
+                    class_group=class_group,
+                    full_name=full_name,
+                    email=email,
+                    notes=notes,
+                )
+                db.session.add(student)
+                try:
+                    db.session.commit()
+                    flash("Étudiant ajouté à la classe", "success")
+                except IntegrityError:
+                    db.session.rollback()
+                    flash(
+                        "Un étudiant portant ce nom existe déjà pour cette classe.",
+                        "warning",
+                    )
+        elif form_name == "remove-student":
+            try:
+                student_id = int(request.form.get("student_id", "0"))
+            except ValueError:
+                student_id = 0
+            student = Student.query.filter_by(
+                id=student_id, class_group_id=class_group.id
+            ).first()
+            if not student:
+                flash("Étudiant introuvable", "danger")
+            else:
+                db.session.delete(student)
+                db.session.commit()
+                flash("Étudiant retiré de la classe", "success")
         return redirect(url_for("main.class_detail", class_id=class_id))
 
     events = sessions_to_grouped_events(class_group.all_sessions)
@@ -1607,6 +1671,164 @@ def courses_list():
         course_names=course_names,
         semester_choices=SEMESTER_CHOICES,
         default_semester=DEFAULT_SEMESTER,
+    )
+
+
+@bp.route("/generation", methods=["GET", "POST"])
+def generation_overview():
+    if request.method == "POST":
+        action = request.form.get("form")
+        courses = (
+            Course.query.options(
+                selectinload(Course.class_links),
+                selectinload(Course.sessions),
+                selectinload(Course.generation_logs),
+            )
+            .order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
+            .all()
+        )
+        if action == "generate":
+            total_created = 0
+            failures = 0
+            for course in courses:
+                allowed_ranges = course.allowed_week_ranges
+                window_start = allowed_ranges[0][0] if allowed_ranges else None
+                window_end = allowed_ranges[-1][1] if allowed_ranges else None
+                allowed_payload = (
+                    [(start, end) for start, end in allowed_ranges]
+                    if allowed_ranges
+                    else None
+                )
+                try:
+                    created_sessions = generate_schedule(
+                        course,
+                        window_start=window_start,
+                        window_end=window_end,
+                        allowed_weeks=allowed_payload,
+                    )
+                    db.session.commit()
+                    total_created += len(created_sessions)
+                except ValueError as exc:
+                    db.session.commit()
+                    failures += 1
+                    current_app.logger.warning(
+                        "Automatic generation failed for %s: %s", course.name, exc
+                    )
+            if total_created:
+                flash(f"{total_created} séance(s) générée(s).", "success")
+            else:
+                flash(
+                    "Aucune séance n'a pu être générée automatiquement.",
+                    "info",
+                )
+            if failures:
+                flash(
+                    f"{failures} cours n'ont pas pu être planifiés. Consultez les recommandations ci-dessous.",
+                    "warning",
+                )
+        elif action == "clear":
+            total_sessions = 0
+            total_logs = 0
+            for course in courses:
+                removed_sessions, removed_logs = _clear_course_schedule(course)
+                total_sessions += removed_sessions
+                total_logs += removed_logs
+            db.session.commit()
+            if total_sessions:
+                flash(
+                    f"{total_sessions} séance(s) supprimée(s) et {total_logs} journal(aux) réinitialisé(s).",
+                    "success",
+                )
+            else:
+                flash("Aucune séance n'était planifiée.", "info")
+        return redirect(url_for("main.generation_overview"))
+
+    courses = (
+        Course.query.options(
+            selectinload(Course.class_links).selectinload(CourseClassLink.class_group),
+            selectinload(Course.sessions),
+            selectinload(Course.generation_logs),
+        )
+        .order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
+        .all()
+    )
+
+    def _unique(values: Iterable[str | None]) -> list[str]:
+        collected: list[str] = []
+        for value in values:
+            if not value:
+                continue
+            cleaned = str(value).strip()
+            if cleaned and cleaned not in collected:
+                collected.append(cleaned)
+        return collected
+
+    course_rows: list[dict[str, object]] = []
+    total_required_hours = 0
+    total_scheduled_hours = 0
+    total_remaining_hours = 0
+    for course in courses:
+        latest_log = course.latest_generation_log
+        required_hours = course.total_required_hours
+        scheduled_hours = course.scheduled_hours
+        remaining_hours = max(required_hours - scheduled_hours, 0)
+        status = _effective_generation_status(
+            course,
+            latest_log,
+            remaining_hours=remaining_hours,
+        )
+        errors: list[str] = []
+        suggestions: list[str] = []
+        if latest_log:
+            for entry in latest_log.parsed_messages():
+                level = str(entry.get("level", "")).lower()
+                if level != "error":
+                    continue
+                errors.append(str(entry.get("message", "")).strip())
+                suggestions.extend(entry.get("suggestions", []) or [])
+
+        course_rows.append(
+            {
+                "course": course,
+                "status": status,
+                "latest_log": latest_log,
+                "errors": _unique(errors),
+                "suggestions": _unique(suggestions),
+                "sessions_count": len(course.sessions),
+                "scheduled_hours": scheduled_hours,
+                "required_hours": required_hours,
+                "remaining_hours": remaining_hours,
+                "class_labels": ", ".join(
+                    sorted(
+                        link.class_group.name
+                        for link in course.class_links
+                        if link.class_group is not None
+                    )
+                ),
+            }
+        )
+        total_required_hours += required_hours
+        total_scheduled_hours += scheduled_hours
+        total_remaining_hours += remaining_hours
+
+    total_courses = len(course_rows)
+    scheduled_courses = sum(1 for row in course_rows if row["sessions_count"])
+    error_courses = sum(1 for row in course_rows if row["status"] == "error")
+    warning_courses = sum(1 for row in course_rows if row["status"] == "warning")
+
+    return render_template(
+        "generation/index.html",
+        course_rows=course_rows,
+        total_courses=total_courses,
+        scheduled_courses=scheduled_courses,
+        error_courses=error_courses,
+        warning_courses=warning_courses,
+        total_required_hours=total_required_hours,
+        total_scheduled_hours=total_scheduled_hours,
+        total_remaining_hours=total_remaining_hours,
+        status_labels=GENERATION_STATUS_LABELS,
+        status_badges=STATUS_BADGES,
+        course_type_labels=COURSE_TYPE_LABELS,
     )
 
 
@@ -1935,18 +2157,6 @@ def course_detail(course_id: int):
         .first()
     )
 
-    status_badges = {
-        "success": "bg-success",
-        "warning": "bg-warning text-dark",
-        "error": "bg-danger",
-        "none": "bg-secondary",
-    }
-    level_badges = {
-        "info": "bg-secondary",
-        "warning": "bg-warning text-dark",
-        "error": "bg-danger",
-    }
-
     available_teachers = sorted(
         course.teachers,
         key=lambda teacher: (teacher.name or "").lower(),
@@ -2017,8 +2227,8 @@ def course_detail(course_id: int):
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
         status_labels=GENERATION_STATUS_LABELS,
-        status_badges=status_badges,
-        level_badges=level_badges,
+        status_badges=STATUS_BADGES,
+        level_badges=LEVEL_BADGES,
         course_week_options=course_week_options,
         selected_course_week_values=selected_course_week_values,
         selected_course_week_labels=selected_course_week_labels,

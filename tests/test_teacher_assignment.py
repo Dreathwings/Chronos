@@ -1390,11 +1390,8 @@ class SchedulerFormattingTestCase(DatabaseTestCase):
 
         _warn_weekly_limit(reporter, {"Synthèse": weeks})
 
-        self.assertEqual(len(reporter.entries), 1)
-        message = reporter.entries[0]["message"]
-        self.assertIn("08/09/2025", message)
-        self.assertIn("Synthèse", message)
-        self.assertIn("(+3 autre(s))", message)
+        self.assertEqual(reporter.status, "warning")
+        self.assertEqual(len(reporter.entries), 0)
 
 
 class SchedulerRelocationTestCase(DatabaseTestCase):

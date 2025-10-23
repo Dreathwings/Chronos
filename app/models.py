@@ -662,14 +662,14 @@ class CourseScheduleLog(db.Model, TimeStampedModel):
         "error": "Erreur",
     }
 
-    def parsed_messages(self) -> list[dict[str, str]]:
+    def parsed_messages(self) -> list[dict[str, object]]:
         try:
             payload = json.loads(self.messages or "[]")
         except (TypeError, ValueError):
             return []
         if not isinstance(payload, list):
             return []
-        normalised: list[dict[str, str]] = []
+        normalised: list[dict[str, object]] = []
         for entry in payload:
             if not isinstance(entry, dict):
                 continue
@@ -677,7 +677,17 @@ class CourseScheduleLog(db.Model, TimeStampedModel):
             message = str(entry.get("message", "")).strip()
             if not message:
                 continue
-            normalised.append({"level": level, "message": message})
+            normalised_entry: dict[str, object] = {"level": level, "message": message}
+            suggestions = entry.get("suggestions")
+            if isinstance(suggestions, list):
+                unique: list[str] = []
+                for suggestion in suggestions:
+                    cleaned = str(suggestion).strip()
+                    if cleaned and cleaned not in unique:
+                        unique.append(cleaned)
+                if unique:
+                    normalised_entry["suggestions"] = unique
+            normalised.append(normalised_entry)
         return normalised
 
     @property
@@ -1063,6 +1073,12 @@ class ClassGroup(db.Model, TimeStampedModel):
         secondary=session_attendance,
         back_populates="attendees",
     )
+    students: Mapped[List["Student"]] = relationship(
+        "Student",
+        back_populates="class_group",
+        cascade="all, delete-orphan",
+        order_by="Student.full_name",
+    )
 
     @staticmethod
     def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime) -> bool:
@@ -1141,6 +1157,33 @@ class ClassGroup(db.Model, TimeStampedModel):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"ClassGroup<{self.id} {self.name}>"
+
+
+class Student(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    class_group_id: Mapped[int] = mapped_column(
+        ForeignKey("class_group.id"), nullable=False, index=True
+    )
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(255))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    class_group: Mapped[ClassGroup] = relationship("ClassGroup", back_populates="students")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "class_group_id",
+            "full_name",
+            name="uq_student_class_unique_name",
+        ),
+    )
+
+    @property
+    def display_name(self) -> str:
+        return self.full_name
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return f"Student<{self.id} {self.full_name}>"
 
 
 class CourseClassLink(db.Model):

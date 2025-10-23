@@ -479,9 +479,18 @@
           {% if messages %}
           <ul class="list-unstyled small mb-0 mt-3">
             {% for entry in messages %}
-            <li class="d-flex align-items-start gap-2 mb-1">
-              <span class="badge {{ level_badges.get(entry.level, 'bg-secondary') }}">{{ latest_generation_log.level_label(entry.level) }}</span>
-              <span>{{ entry.message }}</span>
+            <li class="d-flex flex-column gap-1 mb-2">
+              <div class="d-flex align-items-start gap-2">
+                <span class="badge {{ level_badges.get(entry.level, 'bg-secondary') }}">{{ latest_generation_log.level_label(entry.level) }}</span>
+                <span>{{ entry.message }}</span>
+              </div>
+              {% if entry.suggestions %}
+              <ul class="mb-0 small ps-5 text-muted">
+                {% for suggestion in entry.suggestions %}
+                <li>{{ suggestion }}</li>
+                {% endfor %}
+              </ul>
+              {% endif %}
             </li>
             {% endfor %}
           </ul>

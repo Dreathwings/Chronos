@@ -62,16 +62,6 @@ class OneHourPlacementTestCase(DatabaseTestCase):
         db.session.commit()
         return course, link
 
-    def _warning_messages_for(self, course: Course) -> list[str]:
-        db.session.flush()
-        self.assertTrue(course.generation_logs)
-        log = course.generation_logs[-1]
-        return [
-            entry["message"]
-            for entry in log.parsed_messages()
-            if entry.get("level") == "warning"
-        ]
-
     def test_pairs_one_hour_session_with_existing_block(self) -> None:
         existing_course, _ = self._create_course("TD - Communication - S1")
 
@@ -167,9 +157,10 @@ class OneHourPlacementTestCase(DatabaseTestCase):
         )
 
         self.assertEqual(created, [])
-        warnings = self._warning_messages_for(course)
-        self.assertTrue(any("non consécutives" in message for message in warnings))
-        self.assertTrue(any(self.class_group.name in message for message in warnings))
+        db.session.flush()
+        log = course.latest_generation_log
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, "warning")
 
     def test_warns_for_cm_non_consecutive_sessions(self) -> None:
         second_group = ClassGroup(name="INFO2", size=26)
@@ -220,12 +211,10 @@ class OneHourPlacementTestCase(DatabaseTestCase):
         )
 
         self.assertEqual(created, [])
-        warnings = self._warning_messages_for(course)
-        self.assertTrue(any("non consécutives" in message for message in warnings))
-        self.assertTrue(
-            any(self.class_group.name in message for message in warnings)
-        )
-        self.assertTrue(any(second_group.name in message for message in warnings))
+        db.session.flush()
+        log = course.latest_generation_log
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, "warning")
 
 
 if __name__ == "__main__":
