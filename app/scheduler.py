@@ -2636,12 +2636,32 @@ def generate_schedule(
 
                 def _candidate_base_offsets(day: date) -> list[int]:
                     offsets: list[int] = []
+                    seen: set[int] = set()
+
+                    def _add_offset(raw_offset: int | None) -> None:
+                        if raw_offset is None:
+                            return
+                        normalised = raw_offset % len(START_TIMES)
+                        if normalised in seen:
+                            return
+                        offsets.append(normalised)
+                        seen.add(normalised)
+
                     if (
                         continuity_slot_index is not None
                         and continuity_weekday is not None
                         and day.weekday() == continuity_weekday
                     ):
-                        offsets.append(continuity_slot_index)
+                        _add_offset(continuity_slot_index)
+                    if desired_hours == 1:
+                        adjacency_offsets = _one_hour_adjacency_offsets(
+                            [class_group],
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=subgroup_label,
+                        )
+                        for offset in adjacency_offsets:
+                            _add_offset(offset)
                     preferred_slot = _preferred_slot_index_for_groups(
                         course,
                         [class_group],
@@ -2649,11 +2669,9 @@ def generate_schedule(
                         pending_sessions=created_sessions,
                         subgroup_label=subgroup_label,
                     )
-                    if preferred_slot is not None and preferred_slot not in offsets:
-                        offsets.append(preferred_slot)
+                    _add_offset(preferred_slot)
                     fallback_offset = int(per_day_hours[day])
-                    if fallback_offset not in offsets:
-                        offsets.append(fallback_offset)
+                    _add_offset(fallback_offset)
                     return offsets
 
                 def _attempt_day(day: date) -> bool:
