@@ -687,6 +687,16 @@ class CourseScheduleLog(db.Model, TimeStampedModel):
                         unique.append(cleaned)
                 if unique:
                     normalised_entry["suggestions"] = unique
+            context = entry.get("context")
+            if isinstance(context, dict):
+                normalised_context: dict[str, str] = {}
+                for key, value in context.items():
+                    key_label = str(key).strip()
+                    value_label = str(value).strip()
+                    if key_label and value_label:
+                        normalised_context[key_label] = value_label
+                if normalised_context:
+                    normalised_entry["context"] = normalised_context
             normalised.append(normalised_entry)
         return normalised
 

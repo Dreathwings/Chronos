@@ -79,6 +79,144 @@ def _course_type_priority(course_type: str | None) -> int | None:
     return COURSE_TYPE_CHRONOLOGY.get(course_type.upper())
 
 
+ERROR_CONTEXT_LABELS = {
+    "teachers": "Enseignant(s)",
+    "class_groups": "Classe(s)",
+    "slot": "Créneau",
+}
+
+
+def _stringify_context_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    if isinstance(value, date):
+        return value.strftime("%d/%m/%Y")
+    if isinstance(value, datetime):
+        return value.strftime("%d/%m/%Y %H:%M")
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray, str, dict)):
+        collected: list[str] = []
+        for item in value:
+            rendered = _stringify_context_value(item)
+            if rendered:
+                collected.append(rendered)
+        if not collected:
+            return None
+        return ", ".join(collected)
+    rendered = str(value).strip()
+    return rendered or None
+
+
+def _format_error_context(context: dict[str, object]) -> tuple[str | None, dict[str, str]]:
+    if not context:
+        return None, {}
+    normalised: dict[str, str] = {}
+    parts: list[str] = []
+    for key, value in context.items():
+        label = ERROR_CONTEXT_LABELS.get(key, key.replace("_", " ").title())
+        rendered = _stringify_context_value(value)
+        if not rendered:
+            continue
+        normalised[label] = rendered
+        parts.append(f"{label}: {rendered}")
+    if not parts:
+        return None, {}
+    return " — " + " | ".join(parts), normalised
+
+
+def _teacher_names_for_context(
+    course: Course,
+    *,
+    primary_link: CourseClassLink | None = None,
+    class_groups: Iterable[ClassGroup] | None = None,
+    subgroup_label: str | None = None,
+) -> list[str]:
+    seen: set[str] = set()
+    names: list[str] = []
+
+    def add_teacher(teacher: Teacher | None) -> None:
+        if teacher is None or not teacher.name:
+            return
+        label = teacher.name.strip()
+        if not label:
+            return
+        marker = label.lower()
+        if marker in seen:
+            return
+        seen.add(marker)
+        names.append(label)
+
+    if primary_link is not None:
+        for teacher in primary_link.preferred_teachers(subgroup_label):
+            add_teacher(teacher)
+
+    if class_groups is not None:
+        for group in class_groups:
+            link = course.class_link_for(group)
+            if link is None:
+                continue
+            for teacher in link.preferred_teachers(None):
+                add_teacher(teacher)
+
+    for teacher in course.teachers:
+        add_teacher(teacher)
+
+    return names
+
+
+def _format_slot_label(
+    available_days: Iterable[date] | None,
+    *,
+    window_start: date | None,
+    window_end: date | None,
+) -> str | None:
+    days_list: list[date] = []
+    if available_days is not None:
+        seen_days: set[date] = set()
+        for day in available_days:
+            if day not in seen_days:
+                seen_days.add(day)
+                days_list.append(day)
+        days_list.sort()
+    if days_list:
+        if len(days_list) == 1:
+            return days_list[0].strftime("%d/%m/%Y")
+        if len(days_list) <= 4:
+            return ", ".join(day.strftime("%d/%m/%Y") for day in days_list)
+        return f"{days_list[0].strftime('%d/%m/%Y')} → {days_list[-1].strftime('%d/%m/%Y')}"
+    if window_start and window_end:
+        if window_start == window_end:
+            return window_start.strftime("%d/%m/%Y")
+        return f"{window_start.strftime('%d/%m/%Y')} → {window_end.strftime('%d/%m/%Y')}"
+    if window_start:
+        return window_start.strftime("%d/%m/%Y")
+    if window_end:
+        return window_end.strftime("%d/%m/%Y")
+    return None
+
+
+def _build_error_context(
+    *,
+    teacher_names: Iterable[str] | None = None,
+    class_labels: Iterable[str] | None = None,
+    slot_label: str | None = None,
+) -> dict[str, object]:
+    context: dict[str, object] = {}
+    if teacher_names:
+        teachers = [name.strip() for name in teacher_names if name and name.strip()]
+        if teachers:
+            context["teachers"] = teachers
+    if class_labels:
+        labels = [label.strip() for label in class_labels if label and label.strip()]
+        if labels:
+            context["class_groups"] = labels
+    if slot_label:
+        context["slot"] = slot_label
+    return context
+
+
 def _closed_days_between(start: date, end: date) -> set[date]:
     if start > end:
         return set()
@@ -177,16 +315,34 @@ class ScheduleReporter:
         self.window_end = end
         self.info(f"Fenêtre de planification : {start} → {end}")
 
-    def info(self, message: str, *, suggestions: Iterable[str] | None = None) -> None:
-        self._add_entry("info", message, suggestions=suggestions)
+    def info(
+        self,
+        message: str,
+        *,
+        suggestions: Iterable[str] | None = None,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        self._add_entry("info", message, suggestions=suggestions, context=context)
 
-    def warning(self, message: str, *, suggestions: Iterable[str] | None = None) -> None:
-        self._add_entry("warning", message, suggestions=suggestions)
+    def warning(
+        self,
+        message: str,
+        *,
+        suggestions: Iterable[str] | None = None,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        self._add_entry("warning", message, suggestions=suggestions, context=context)
         if self.status != "error":
             self.status = "warning"
 
-    def error(self, message: str, *, suggestions: Iterable[str] | None = None) -> None:
-        self._add_entry("error", message, suggestions=suggestions)
+    def error(
+        self,
+        message: str,
+        *,
+        suggestions: Iterable[str] | None = None,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        self._add_entry("error", message, suggestions=suggestions, context=context)
         self.status = "error"
 
     def session_created(self, session: Session) -> None:
@@ -232,11 +388,22 @@ class ScheduleReporter:
         return log
 
     def _add_entry(
-        self, level: str, message: str, *, suggestions: Iterable[str] | None = None
+        self,
+        level: str,
+        message: str,
+        *,
+        suggestions: Iterable[str] | None = None,
+        context: dict[str, object] | None = None,
     ) -> None:
         text = message.strip()
         if not text:
             return
+        context_suffix: str | None = None
+        context_payload: dict[str, str] = {}
+        if level == "error" and context:
+            context_suffix, context_payload = _format_error_context(context)
+            if context_suffix:
+                text = f"{text}{context_suffix}"
         if level == "error":
             entry: dict[str, object] = {"level": level, "message": text}
             if suggestions:
@@ -247,6 +414,8 @@ class ScheduleReporter:
                         unique_suggestions.append(cleaned)
                 if unique_suggestions:
                     entry["suggestions"] = unique_suggestions
+            if context_payload:
+                entry["context"] = context_payload
             self.entries.append(entry)
         logger = getattr(current_app, "logger", None)
         if logger is not None:
@@ -2542,7 +2711,32 @@ def generate_schedule(
                     "Impossible de planifier "
                     f"{hours_remaining} heure(s) supplémentaire(s) (cours magistral)"
                 )
-                reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
+                slot_label = _format_slot_label(
+                    available_days,
+                    window_start=reporter.window_start,
+                    window_end=reporter.window_end,
+                )
+                class_labels = [
+                    format_class_label(
+                        group,
+                        link=link_lookup.get(group.id) if link_lookup else None,
+                    )
+                    for group in class_groups
+                ]
+                teacher_names = _teacher_names_for_context(
+                    course,
+                    class_groups=class_groups,
+                )
+                context = _build_error_context(
+                    teacher_names=teacher_names,
+                    class_labels=class_labels,
+                    slot_label=slot_label,
+                )
+                reporter.error(
+                    message,
+                    suggestions=suggest_schedule_recovery(message, course),
+                    context=context,
+                )
                 placement_failures.append(message)
         if not placement_failures:
             for group in class_groups:
@@ -2565,6 +2759,24 @@ def generate_schedule(
                 "Impossible de générer automatiquement toutes les séances : "
                 + " ; ".join(unique_failures)
             )
+            summary_context = _build_error_context(
+                teacher_names=_teacher_names_for_context(
+                    course,
+                    class_groups=class_groups,
+                ),
+                class_labels=[
+                    format_class_label(
+                        group,
+                        link=link_lookup.get(group.id) if link_lookup else None,
+                    )
+                    for group in class_groups
+                ],
+                slot_label=_format_slot_label(
+                    None,
+                    window_start=reporter.window_start,
+                    window_end=reporter.window_end,
+                ),
+            )
             reporter.error(
                 summary,
                 suggestions=
@@ -2573,6 +2785,7 @@ def generate_schedule(
                         for failure in unique_failures
                         for suggestion in suggest_schedule_recovery(failure, course)
                     ],
+                context=summary_context,
             )
             reporter.summary = summary
             reporter.finalise(len(created_sessions))
@@ -2613,7 +2826,31 @@ def generate_schedule(
                 message = (
                     f"Aucune journée disponible pour {class_group.name} sur la période"
                 )
-                reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
+                slot_label = _format_slot_label(
+                    available_days,
+                    window_start=reporter.window_start,
+                    window_end=reporter.window_end,
+                )
+                class_label = format_class_label(
+                    class_group,
+                    link=link,
+                    subgroup_label=subgroup_label,
+                )
+                teacher_names = _teacher_names_for_context(
+                    course,
+                    primary_link=link,
+                    subgroup_label=subgroup_label,
+                )
+                context = _build_error_context(
+                    teacher_names=teacher_names,
+                    class_labels=[class_label],
+                    slot_label=slot_label,
+                )
+                reporter.error(
+                    message,
+                    suggestions=suggest_schedule_recovery(message, course),
+                    context=context,
+                )
                 placement_failures.append(message)
                 continue
 
@@ -2983,7 +3220,31 @@ def generate_schedule(
                 message = (
                     f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
                 )
-                reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
+                slot_label = _format_slot_label(
+                    available_days,
+                    window_start=reporter.window_start,
+                    window_end=reporter.window_end,
+                )
+                class_label = format_class_label(
+                    class_group,
+                    link=link,
+                    subgroup_label=subgroup_label,
+                )
+                teacher_names = _teacher_names_for_context(
+                    course,
+                    primary_link=link,
+                    subgroup_label=subgroup_label,
+                )
+                context = _build_error_context(
+                    teacher_names=teacher_names,
+                    class_labels=[class_label],
+                    slot_label=slot_label,
+                )
+                reporter.error(
+                    message,
+                    suggestions=suggest_schedule_recovery(message, course),
+                    context=context,
+                )
                 placement_failures.append(message)
     if not placement_failures:
         for link in links:
@@ -3009,6 +3270,21 @@ def generate_schedule(
             "Impossible de générer automatiquement toutes les séances : "
             + " ; ".join(unique_failures)
         )
+        summary_context = _build_error_context(
+            teacher_names=_teacher_names_for_context(
+                course,
+                class_groups=[link.class_group for link in links],
+            ),
+            class_labels=[
+                format_class_label(link.class_group, link=link)
+                for link in links
+            ],
+            slot_label=_format_slot_label(
+                None,
+                window_start=reporter.window_start,
+                window_end=reporter.window_end,
+            ),
+        )
         reporter.error(
             summary,
             suggestions=[
@@ -3016,6 +3292,7 @@ def generate_schedule(
                 for failure in unique_failures
                 for suggestion in suggest_schedule_recovery(failure, course)
             ],
+            context=summary_context,
         )
         reporter.summary = summary
         reporter.finalise(len(created_sessions))
