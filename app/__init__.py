@@ -619,6 +619,10 @@ def _ensure_student_profile_columns() -> None:
         if column_name not in existing_columns:
             statements.append((column_name, statement))
 
+    queue(
+        "full_name",
+        "ALTER TABLE student ADD COLUMN full_name VARCHAR(200)",
+    )
     queue("group_label", "ALTER TABLE student ADD COLUMN group_label VARCHAR(50)")
     queue("phase", "ALTER TABLE student ADD COLUMN phase VARCHAR(50)")
     queue(
@@ -631,6 +635,7 @@ def _ensure_student_profile_columns() -> None:
     )
     queue("ina_id", "ALTER TABLE student ADD COLUMN ina_id VARCHAR(50)")
     queue("ub_id", "ALTER TABLE student ADD COLUMN ub_id VARCHAR(50)")
+    queue("notes", "ALTER TABLE student ADD COLUMN notes TEXT")
 
     if not statements:
         return
@@ -644,6 +649,51 @@ def _ensure_student_profile_columns() -> None:
     except SQLAlchemyError as exc:  # pragma: no cover - defensive guard for legacy DBs
         current_app.logger.warning("Unable to update student table columns: %s", exc)
         return
+
+    if "full_name" in added_columns:
+        try:
+            with engine.begin() as connection:
+                if "name" in existing_columns:
+                    connection.execute(
+                        text(
+                            "UPDATE student SET full_name = name "
+                            "WHERE (full_name IS NULL OR full_name = '') "
+                            "AND name IS NOT NULL AND name != ''"
+                        )
+                    )
+                if {"first_name", "last_name"}.issubset(existing_columns):
+                    rows = connection.execute(
+                        text("SELECT id, first_name, last_name FROM student")
+                    ).mappings()
+                    for row in rows:
+                        first = (row.get("first_name") or "").strip()
+                        last = (row.get("last_name") or "").strip()
+                        combined = " ".join(part for part in (first, last) if part).strip()
+                        if not combined:
+                            continue
+                        connection.execute(
+                            text(
+                                "UPDATE student SET full_name = :full_name WHERE id = :id"
+                            ),
+                            {"full_name": combined, "id": row["id"]},
+                        )
+                missing = connection.execute(
+                    text(
+                        "SELECT id FROM student WHERE full_name IS NULL OR full_name = ''"
+                    )
+                ).mappings()
+                for row in missing:
+                    placeholder = f"Étudiant {row['id']}"
+                    connection.execute(
+                        text(
+                            "UPDATE student SET full_name = :full_name WHERE id = :id"
+                        ),
+                        {"full_name": placeholder, "id": row["id"]},
+                    )
+        except SQLAlchemyError:
+            current_app.logger.warning(
+                "Unable to backfill student.full_name; continuing with placeholder-safe column."
+            )
 
     if "pathway" in added_columns:
         try:
