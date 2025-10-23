@@ -287,6 +287,7 @@ class PlacementDiagnostics:
         self.room_reasons: set[str] = set()
         self.class_reasons: set[str] = set()
         self.other_reasons: set[str] = set()
+        self.last_summary: str | None = None
 
     def add_teacher(self, message: str | None) -> None:
         if message:
@@ -304,15 +305,41 @@ class PlacementDiagnostics:
         if message:
             self.other_reasons.add(message)
 
+    def summary(self, *, context_label: str, day: date) -> str:
+        day_label = day.strftime("%d/%m/%Y")
+        sections: list[str] = []
+        if self.class_reasons:
+            sections.append(
+                "Contraintes classes : " + " ; ".join(sorted(self.class_reasons))
+            )
+        if self.teacher_reasons:
+            sections.append(
+                "Enseignants indisponibles : "
+                + " ; ".join(sorted(self.teacher_reasons))
+            )
+        if self.room_reasons:
+            sections.append(
+                "Salles incompatibles : " + " ; ".join(sorted(self.room_reasons))
+            )
+        if self.other_reasons:
+            sections.append("Autres contraintes : " + " ; ".join(sorted(self.other_reasons)))
+        if not sections:
+            return (
+                f"{context_label} — {day_label} : aucune option compatible trouvée sur ce créneau."
+            )
+        return f"{context_label} — {day_label} : " + " | ".join(sections)
+
     def emit(
         self,
         reporter: ScheduleReporter | None,
         *,
         context_label: str,
         day: date,
-    ) -> None:
+    ) -> str:
+        summary = self.summary(context_label=context_label, day=day)
+        self.last_summary = summary
         if reporter is None:
-            return
+            return summary
         day_label = day.strftime("%d/%m/%Y")
         for message in sorted(self.class_reasons):
             reporter.warning(f"{context_label} — {day_label} : {message}")
@@ -322,17 +349,21 @@ class PlacementDiagnostics:
             reporter.warning(f"{context_label} — {day_label} : {message}")
         for message in sorted(self.other_reasons):
             reporter.warning(f"{context_label} — {day_label} : {message}")
-        if not any(
+        has_details = any(
             (
                 self.class_reasons,
                 self.teacher_reasons,
                 self.room_reasons,
                 self.other_reasons,
             )
-        ):
+        )
+        if not has_details:
             reporter.warning(
                 f"{context_label} — {day_label} : aucune option compatible trouvée sur ce créneau."
             )
+        else:
+            reporter.warning(summary)
+        return summary
 
 
 def daterange(start: date, end: date) -> Iterable[date]:
@@ -432,15 +463,25 @@ def _describe_teacher_unavailability(
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
         fallback_pool = link.assigned_teachers()
-    elif course.teachers:
-        fallback_pool = list(course.teachers)
+    else:
+        fallback_pool = []
+
+    course_teachers = [teacher for teacher in getattr(course, "teachers", []) if teacher]
+    if link is not None:
+        fallback_pool.extend(
+            teacher for teacher in course_teachers if teacher not in fallback_pool
+        )
+    elif course_teachers:
+        fallback_pool = list(course_teachers)
     else:
         fallback_pool = Teacher.query.all()
 
     candidates = preferred + [teacher for teacher in fallback_pool if teacher not in preferred]
     if not candidates:
         if link is not None:
-            return "Aucun enseignant n'est associé à cette classe dans la section « Link teacher »."
+            return (
+                "Aucun enseignant n'est associé à cette classe ni au cours correspondant."
+            )
         return "Aucun enseignant n'est associé au cours."
 
     segments_to_check = segments or [(start, end)]
@@ -1004,17 +1045,19 @@ def find_available_teacher(
     pending_sessions: Iterable[Session] = (),
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
-    allowed_ids: set[int] | None = None
     if link is not None:
         for assigned in link.preferred_teachers(subgroup_label):
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
 
+    course_teachers = [teacher for teacher in getattr(course, "teachers", []) if teacher]
     if link is not None:
         fallback_pool = link.assigned_teachers()
-        allowed_ids = {teacher.id for teacher in fallback_pool if teacher.id is not None}
-    elif course.teachers:
-        fallback_pool = list(course.teachers)
+        fallback_pool.extend(
+            teacher for teacher in course_teachers if teacher not in fallback_pool
+        )
+    elif course_teachers:
+        fallback_pool = list(course_teachers)
     else:
         fallback_pool = Teacher.query.all()
 
@@ -1024,9 +1067,6 @@ def find_available_teacher(
             if teacher is None:
                 continue
             teacher_id = teacher.id
-            if allowed_ids is not None:
-                if teacher_id is None or teacher_id not in allowed_ids:
-                    continue
             if teacher_id is not None and teacher_id in seen:
                 continue
             target.append(teacher)
@@ -1473,7 +1513,7 @@ def _schedule_block_for_day(
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
     reporter: ScheduleReporter | None = None,
-) -> list[Session] | None:
+) -> tuple[list[Session] | None, PlacementDiagnostics]:
     diagnostics = PlacementDiagnostics()
     context = class_group.name
     if subgroup_label:
@@ -1490,14 +1530,14 @@ def _schedule_block_for_day(
         diagnostics=diagnostics,
     )
     if placement:
-        return placement
+        return placement, diagnostics
     if desired_hours <= 1:
         diagnostics.emit(
             reporter,
             context_label=context,
             day=day,
         )
-        return None
+        return None, diagnostics
     placement = _try_split_block(
         course=course,
         class_group=class_group,
@@ -1510,13 +1550,13 @@ def _schedule_block_for_day(
         diagnostics=diagnostics,
     )
     if placement:
-        return placement
+        return placement, diagnostics
     diagnostics.emit(
         reporter,
         context_label=context,
         day=day,
     )
-    return None
+    return None, diagnostics
 
 
 def _try_full_block(
@@ -1802,7 +1842,7 @@ def _cm_schedule_block_for_day(
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
     reporter: ScheduleReporter | None = None,
-) -> list[Session] | None:
+) -> tuple[list[Session] | None, PlacementDiagnostics]:
     diagnostics = PlacementDiagnostics()
     context = ", ".join(group.name for group in class_groups) or course.name
     placement = _cm_try_full_block(
@@ -1816,14 +1856,14 @@ def _cm_schedule_block_for_day(
         diagnostics=diagnostics,
     )
     if placement:
-        return placement
+        return placement, diagnostics
     if desired_hours <= 1:
         diagnostics.emit(
             reporter,
             context_label=context,
             day=day,
         )
-        return None
+        return None, diagnostics
     placement = _cm_try_split_block(
         course=course,
         class_groups=class_groups,
@@ -1835,13 +1875,13 @@ def _cm_schedule_block_for_day(
         diagnostics=diagnostics,
     )
     if placement:
-        return placement
+        return placement, diagnostics
     diagnostics.emit(
         reporter,
         context_label=context,
         day=day,
     )
-    return None
+    return None, diagnostics
 
 
 def _cm_try_full_block(
@@ -2397,8 +2437,10 @@ def generate_schedule(
                 chronology_weeks: set[date] = set()
                 weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
 
+                last_failure_summary: str | None = None
+
                 def _attempt_day(day: date) -> bool:
-                    nonlocal hours_remaining, block_index
+                    nonlocal hours_remaining, block_index, last_failure_summary
                     week_start, _ = _week_bounds(day)
                     conflict_detected = False
                     for group in class_groups:
@@ -2454,7 +2496,7 @@ def generate_schedule(
                         preferred_offsets.append(fallback_offset)
 
                     for base_offset in preferred_offsets:
-                        block_sessions = _cm_schedule_block_for_day(
+                        block_sessions, attempt_diag = _cm_schedule_block_for_day(
                             course=course,
                             class_groups=class_groups,
                             primary_link=primary_link,
@@ -2465,7 +2507,10 @@ def generate_schedule(
                             reporter=reporter,
                         )
                         if not block_sessions:
+                            if attempt_diag.last_summary:
+                                last_failure_summary = attempt_diag.last_summary
                             continue
+                        last_failure_summary = None
                         created_sessions.extend(block_sessions)
                         block_hours = sum(session.duration_hours for session in block_sessions)
                         if block_hours > 0:
@@ -2499,6 +2544,7 @@ def generate_schedule(
 
                     if not placed:
                         def _simulate_cm_relocation() -> bool:
+                            nonlocal last_failure_summary
                             backup_created = list(created_sessions)
                             backup_day_hours = dict(per_day_hours)
                             backup_weekdays = Counter(weekday_frequencies)
@@ -2520,7 +2566,7 @@ def generate_schedule(
                                 )
                                 if not relocated:
                                     return False
-                                placement = _cm_schedule_block_for_day(
+                                placement, simulated_diag = _cm_schedule_block_for_day(
                                     course=course,
                                     class_groups=class_groups,
                                     primary_link=primary_link,
@@ -2530,7 +2576,11 @@ def generate_schedule(
                                     pending_sessions=created_sessions,
                                     reporter=None,
                                 )
-                                return bool(placement)
+                                if placement:
+                                    return True
+                                if simulated_diag.last_summary:
+                                    last_failure_summary = simulated_diag.last_summary
+                                return False
                             finally:
                                 nested.rollback()
                                 created_sessions[:] = backup_created
@@ -2568,8 +2618,15 @@ def generate_schedule(
                     "Impossible de planifier "
                     f"{hours_remaining} heure(s) supplémentaire(s) (cours magistral)"
                 )
-                reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
-                placement_failures.append(message)
+                detail = last_failure_summary or (
+                    "Consultez les avertissements pour les contraintes rencontrées."
+                )
+                detailed_message = f"{message} — {detail}"
+                reporter.error(
+                    detailed_message,
+                    suggestions=suggest_schedule_recovery(message, course),
+                )
+                placement_failures.append(detailed_message)
         if not placement_failures:
             for group in class_groups:
                 _report_one_hour_alignment(
@@ -2763,8 +2820,10 @@ def generate_schedule(
                         offsets.append(fallback_offset)
                     return offsets
 
+                last_failure_summary: str | None = None
+
                 def _attempt_day(day: date) -> bool:
-                    nonlocal hours_remaining, block_index
+                    nonlocal hours_remaining, block_index, last_failure_summary
                     week_start, _ = _week_bounds(day)
                     if has_weekly_course_conflict(
                         course,
@@ -2820,7 +2879,7 @@ def generate_schedule(
                         preferred_offsets.append(fallback_offset)
 
                     for base_offset in _candidate_base_offsets(day):
-                        block_sessions = _schedule_block_for_day(
+                        block_sessions, attempt_diag = _schedule_block_for_day(
                             course=course,
                             class_group=class_group,
                             link=link,
@@ -2832,7 +2891,10 @@ def generate_schedule(
                             reporter=reporter,
                         )
                         if not block_sessions:
+                            if attempt_diag.last_summary:
+                                last_failure_summary = attempt_diag.last_summary
                             continue
+                        last_failure_summary = None
                         created_sessions.extend(block_sessions)
                         block_hours = sum(
                             session.duration_hours for session in block_sessions
@@ -2878,6 +2940,7 @@ def generate_schedule(
                         backup_weekdays = Counter(weekday_frequencies)
 
                         def _attempt(require_exact: bool) -> bool:
+                            nonlocal last_failure_summary
                             nested = db.session.begin_nested()
                             try:
                                 simulated_attempted = set(relocation_weeks)
@@ -2914,7 +2977,7 @@ def generate_schedule(
                                     candidate_days.append(candidate_day)
                                 for candidate_day in candidate_days:
                                     for base_offset in _candidate_base_offsets(candidate_day):
-                                        placement = _schedule_block_for_day(
+                                        placement, simulated_diag = _schedule_block_for_day(
                                             course=course,
                                             class_group=class_group,
                                             link=link,
@@ -2932,6 +2995,8 @@ def generate_schedule(
                                                 base_offset,
                                             )
                                             return True
+                                        if simulated_diag.last_summary:
+                                            last_failure_summary = simulated_diag.last_summary
                                 return False
                             finally:
                                 nested.rollback()
@@ -2967,7 +3032,7 @@ def generate_schedule(
                         if relocated_hours:
                             hours_remaining += relocated_hours
                             block_index = max(block_index - 1, 0)
-                            block_sessions = _schedule_block_for_day(
+                            block_sessions, attempt_diag = _schedule_block_for_day(
                                 course=course,
                                 class_group=class_group,
                                 link=link,
@@ -2979,6 +3044,7 @@ def generate_schedule(
                                 reporter=reporter,
                             )
                             if block_sessions:
+                                last_failure_summary = None
                                 created_sessions.extend(block_sessions)
                                 block_hours = sum(
                                     session.duration_hours for session in block_sessions
@@ -3009,8 +3075,15 @@ def generate_schedule(
                 message = (
                     f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
                 )
-                reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
-                placement_failures.append(message)
+                detail = last_failure_summary or (
+                    "Consultez les avertissements pour les contraintes rencontrées."
+                )
+                detailed_message = f"{message} — {detail}"
+                reporter.error(
+                    detailed_message,
+                    suggestions=suggest_schedule_recovery(message, course),
+                )
+                placement_failures.append(detailed_message)
     if not placement_failures:
         for link in links:
             class_group = link.class_group
