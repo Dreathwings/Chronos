@@ -262,6 +262,7 @@ class Course(db.Model, TimeStampedModel):
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
     computers_required: Mapped[int] = mapped_column(Integer, default=0)
+    sae_split_sessions: Mapped[bool] = mapped_column(db.Boolean, default=False)
 
     configured_name: Mapped[Optional["CourseName"]] = relationship(
         "CourseName", back_populates="courses"
@@ -351,6 +352,10 @@ class Course(db.Model, TimeStampedModel):
     @property
     def semester_window(self) -> tuple[date, date] | None:
         return semester_date_window(self.semester)
+
+    @property
+    def allows_sae_split(self) -> bool:
+        return self.is_sae and bool(self.sae_split_sessions)
 
     @property
     def semester_start(self) -> date | None:

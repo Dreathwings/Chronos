@@ -1565,6 +1565,11 @@ def courses_list():
                 requires_computers=bool(request.form.get("requires_computers")),
                 computers_required=computers_required,
             )
+            course.sae_split_sessions = (
+                bool(request.form.get("sae_split_sessions"))
+                if course_type == "SAE"
+                else False
+            )
             selected_equipments = [
                 equipment
                 for equipment in (
@@ -1686,8 +1691,11 @@ def course_detail(course_id: int):
                 or course.name
             )
             course.description = request.form.get("description")
-            course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
-            course.course_type = _normalise_course_type(request.form.get("course_type"))
+            course.session_length_hours = int(
+                request.form.get("session_length_hours", course.session_length_hours)
+            )
+            course_type = _normalise_course_type(request.form.get("course_type"))
+            course.course_type = course_type
             course.semester = _normalise_semester(request.form.get("semester"))
             course.configured_name = selected_course_name
             course.name = Course.compose_name(
@@ -1695,6 +1703,12 @@ def course_detail(course_id: int):
                 base_label,
                 course.semester,
             )
+            if course_type == "SAE":
+                course.sae_split_sessions = bool(
+                    request.form.get("sae_split_sessions")
+                )
+            else:
+                course.sae_split_sessions = False
             course.requires_computers = bool(request.form.get("requires_computers"))
             course.computers_required = _parse_non_negative_int(
                 request.form.get("computers_required"), course.computers_required

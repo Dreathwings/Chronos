@@ -81,6 +81,22 @@
               <input type="number" class="form-control" name="session_length_hours" value="{{ course.session_length_hours }}" min="1">
             </div>
           </div>
+          <div class="form-check">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              name="sae_split_sessions"
+              id="sae_split_sessions"
+              value="1"
+              {% if course.sae_split_sessions %}checked{% endif %}
+            >
+            <label class="form-check-label" for="sae_split_sessions">
+              Autoriser la répartition des deux séances de 2&nbsp;h sur la semaine
+            </label>
+            <div class="form-text">
+              Option prise en compte uniquement pour les cours de type SAE. Par défaut, les deux séances sont planifiées à la suite le même jour.
+            </div>
+          </div>
           <div class="text-muted small">
             {% if course.semester_start and course.semester_end %}
             Période du semestre : {{ course.semester_start.strftime('%d/%m/%Y') }} → {{ course.semester_end.strftime('%d/%m/%Y') }}

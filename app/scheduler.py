@@ -74,6 +74,13 @@ COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
 }
 
 
+def _effective_slot_length_hours(course: Course) -> int:
+    base_length = max(int(course.session_length_hours), 1)
+    if course.course_type == "SAE" and getattr(course, "sae_split_sessions", False):
+        return min(2, base_length)
+    return base_length
+
+
 @dataclass(frozen=True)
 class PlacementDecision:
     day: date
@@ -2666,9 +2673,13 @@ def generate_schedule(
         f"Durée cible des séances : {course.session_length_hours} h — "
         f"{effective_occurrences} occurrence(s) par groupe"
     )
+    if course.allows_sae_split:
+        reporter.info(
+            "Option SAE activée : les deux séances de 2 h peuvent être réparties sur la semaine."
+        )
 
     created_sessions = []
-    slot_length_hours = max(int(course.session_length_hours), 1)
+    slot_length_hours = _effective_slot_length_hours(course)
 
     links = sorted(course.class_links, key=lambda link: link.class_group.name.lower())
     if links:
@@ -2728,7 +2739,7 @@ def generate_schedule(
                 class_groups,
                 pending_sessions=created_sessions,
             )
-            slot_length_hours = max(int(course.session_length_hours), 1)
+            slot_length_hours = _effective_slot_length_hours(course)
             block_index = 0
             relocation_weeks: set[date] = set()
             primary_link = links[0] if links else None

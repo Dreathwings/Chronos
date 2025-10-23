@@ -82,6 +82,7 @@ CREATE TABLE `course` (
   `course_name_id` int(11) DEFAULT NULL,
   `requires_computers` tinyint(1) NOT NULL,
   `computers_required` int(11) NOT NULL,
+  `sae_split_sessions` tinyint(1) NOT NULL DEFAULT 0,
   `created_at` datetime NOT NULL,
   `updated_at` datetime NOT NULL
 ) ;
@@ -90,11 +91,11 @@ CREATE TABLE `course` (
 -- Déchargement des données de la table `course`
 --
 
-INSERT INTO `course` (`id`, `name`, `description`, `session_length_hours`, `sessions_required`, `start_date`, `end_date`, `priority`, `course_type`, `semester`, `course_name_id`, `requires_computers`, `computers_required`, `created_at`, `updated_at`) VALUES
-(1, 'CM Elec', '', 2, 2, '2025-09-15', '2025-11-15', 1, 'CM', 'S1', NULL, 0, 0, '2025-10-15 09:11:48', '2025-10-15 09:13:43'),
-(3, 'TD Elec', '', 2, 8, '2025-09-15', '2025-11-15', 1, 'TD', 'S1', NULL, 1, 0, '2025-10-15 09:13:09', '2025-10-15 09:13:23'),
-(4, 'TP Elec', '', 2, 8, '2025-09-15', '2025-11-15', 1, 'TP', 'S1', NULL, 1, 0, '2025-10-15 09:16:09', '2025-10-15 09:16:16'),
-(5, 'ppp', '', 2, 2, '2025-09-01', '2025-09-14', 1, 'TP', 'S1', NULL, 0, 0, '2025-10-15 09:44:56', '2025-10-15 09:53:46');
+INSERT INTO `course` (`id`, `name`, `description`, `session_length_hours`, `sessions_required`, `start_date`, `end_date`, `priority`, `course_type`, `semester`, `course_name_id`, `requires_computers`, `computers_required`, `sae_split_sessions`, `created_at`, `updated_at`) VALUES
+(1, 'CM Elec', '', 2, 2, '2025-09-15', '2025-11-15', 1, 'CM', 'S1', NULL, 0, 0, 0, '2025-10-15 09:11:48', '2025-10-15 09:13:43'),
+(3, 'TD Elec', '', 2, 8, '2025-09-15', '2025-11-15', 1, 'TD', 'S1', NULL, 1, 0, 0, '2025-10-15 09:13:09', '2025-10-15 09:13:23'),
+(4, 'TP Elec', '', 2, 8, '2025-09-15', '2025-11-15', 1, 'TP', 'S1', NULL, 1, 0, 0, '2025-10-15 09:16:09', '2025-10-15 09:16:16'),
+(5, 'ppp', '', 2, 2, '2025-09-01', '2025-09-14', 1, 'TP', 'S1', NULL, 0, 0, 0, '2025-10-15 09:44:56', '2025-10-15 09:53:46');
 
 -- --------------------------------------------------------
 
