@@ -47,6 +47,15 @@
   margin-top: 0.25rem;
 }
 
+.class-detail-layout .students-table td,
+.class-detail-layout .students-table th {
+  vertical-align: middle;
+}
+
+.class-detail-layout .students-table td a {
+  word-break: break-word;
+}
+
 @media (max-width: 1199.98px) {
   .class-detail-layout .col-xl-8 {
     order: -1;

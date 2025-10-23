@@ -1,0 +1,208 @@
+{% extends 'base.html' %}
+{% block title %}Génération — Chronos{% endblock %}
+
+{% block stylesheets %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/generation.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="generation-view">
+  <div class="card shadow-sm generation-header">
+    <div class="card-body">
+      <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+        <div>
+          <h1 class="h4 mb-1">Génération automatique</h1>
+          <p class="text-muted mb-0">Lancez la planification globale et identifiez rapidement les cours à corriger.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <form
+            method="post"
+            data-chronos-progress
+            data-chronos-progress-async="true"
+            data-chronos-progress-context="bulk"
+            data-chronos-progress-hours="{{ global_remaining_hours }}"
+            data-chronos-progress-label="Génération globale"
+          >
+            <input type="hidden" name="form" value="generate">
+            <button type="submit" class="btn btn-primary">Générer les cours</button>
+          </form>
+          <form method="post" onsubmit="return confirm('Supprimer toutes les séances générées ?');">
+            <input type="hidden" name="form" value="clear">
+            <button type="submit" class="btn btn-outline-danger">Supprimer toutes les séances</button>
+          </form>
+        </div>
+      </div>
+      <div class="row row-cols-2 row-cols-md-3 row-cols-xl-6 g-3 mt-3">
+        <div class="col">
+          <div class="generation-stat">
+            <div class="generation-stat-value">{{ total_courses }}</div>
+            <div class="generation-stat-label">Cours</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="generation-stat">
+            <div class="generation-stat-value">{{ scheduled_courses }}</div>
+            <div class="generation-stat-label">Cours planifiés</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="generation-stat">
+            <div class="generation-stat-value text-danger">{{ error_courses }}</div>
+            <div class="generation-stat-label">Cours en erreur</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="generation-stat">
+            <div class="generation-stat-value text-warning">{{ warning_courses }}</div>
+            <div class="generation-stat-label">Cours en alerte</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="generation-stat">
+            <div class="generation-stat-value">{{ total_scheduled_hours }}</div>
+            <div class="generation-stat-label">Heures planifiées</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="generation-stat">
+            <div class="generation-stat-value">{{ total_remaining_hours }}</div>
+            <div class="generation-stat-label">Heures restantes</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mt-4">
+    <div class="card-body">
+      <form class="row gy-3 gx-3 align-items-end generation-filters mb-4" method="get">
+        <div class="col-lg-4 col-md-6">
+          <label class="form-label">Recherche</label>
+          <input type="search" class="form-control" name="q" value="{{ search_query }}" placeholder="Nom ou classe">
+        </div>
+        <div class="col-lg-4 col-md-6">
+          <label class="form-label d-block">Statuts</label>
+          <div class="d-flex flex-wrap gap-3">
+            {% for value, label in status_filter_options %}
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="checkbox" name="status" id="status-{{ value }}" value="{{ value }}" {% if value in selected_statuses %}checked{% endif %}>
+              <label class="form-check-label" for="status-{{ value }}">{{ label }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="col-lg-2 col-md-6">
+          <label class="form-label">Type de cours</label>
+          <select class="form-select" name="course_type">
+            <option value="">Tous</option>
+            {% for value, label in course_type_labels.items() %}
+            <option value="{{ value }}" {% if selected_course_type == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-2 col-md-6">
+          <label class="form-label">Classe</label>
+          <select class="form-select" name="class_id">
+            <option value="">Toutes</option>
+            {% for class_group in class_groups %}
+            <option value="{{ class_group.id }}" {% if selected_class_id == class_group.id %}selected{% endif %}>{{ class_group.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12 d-flex justify-content-end gap-2">
+          <button type="submit" class="btn btn-primary">Appliquer</button>
+          {% if has_active_filters %}
+          <a href="{{ url_for('main.generation_overview') }}" class="btn btn-outline-secondary">Réinitialiser</a>
+          {% endif %}
+        </div>
+      </form>
+
+      {% if course_rows %}
+      <div class="table-responsive generation-table">
+        <table class="table align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Cours</th>
+              <th class="text-center">Séances</th>
+              <th>Heures planifiées</th>
+              <th>Statut</th>
+              <th>Dernière génération</th>
+              <th>Erreurs détectées</th>
+              <th>Pistes de résolution</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in course_rows %}
+            <tr class="{% if row.status == 'error' %}table-danger{% elif row.status == 'warning' %}table-warning{% endif %}">
+              <td>
+                <div class="fw-semibold">
+                  <a href="{{ url_for('main.course_detail', course_id=row.course.id) }}">{{ row.course.name }}</a>
+                </div>
+                <div class="text-muted small">
+                  {{ course_type_labels.get(row.course.course_type, row.course.course_type) }}
+                  {% if row.class_labels %} • {{ row.class_labels }}{% endif %}
+                </div>
+              </td>
+              <td class="text-center">
+                <div class="fw-semibold">{{ row.sessions_count }}</div>
+                <div class="text-muted small">{{ row.remaining_hours }} h restantes</div>
+              </td>
+              <td>
+                <div class="fw-semibold">{{ row.scheduled_hours }} / {{ row.required_hours }} h</div>
+                <div class="progress generation-progress mt-2">
+                  {% set progress = 0 %}
+                  {% if row.required_hours > 0 %}
+                    {% set progress = (row.scheduled_hours / row.required_hours * 100) | round(0, 'floor') %}
+                  {% endif %}
+                  <div class="progress-bar" role="progressbar" style="width: {{ progress }}%" aria-valuenow="{{ progress }}" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+              </td>
+              <td>
+                <span class="badge {{ status_badges.get(row.status, 'bg-secondary') }}">
+                  {{ status_labels.get(row.status, row.status|title) }}
+                </span>
+              </td>
+              <td>
+                {% if row.latest_log %}
+                <div class="fw-semibold">{{ row.latest_log.summary or 'Résultat enregistré' }}</div>
+                <div class="text-muted small">
+                  {{ row.latest_log.created_at.strftime('%d/%m/%Y %H:%M') }}
+                </div>
+                {% else %}
+                <span class="text-muted small">Jamais généré</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.errors %}
+                <ul class="mb-0 ps-3 small">
+                  {% for error in row.errors %}
+                  <li>{{ error }}</li>
+                  {% endfor %}
+                </ul>
+                {% else %}
+                <span class="text-muted small">Aucune erreur enregistrée.</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.suggestions %}
+                <ul class="mb-0 ps-3 small text-muted">
+                  {% for suggestion in row.suggestions %}
+                  <li>{{ suggestion }}</li>
+                  {% endfor %}
+                </ul>
+                {% else %}
+                <span class="text-muted small">Rien à signaler.</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">Aucun cours ne correspond à ces filtres.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

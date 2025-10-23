@@ -1,0 +1,74 @@
+.generation-view .card {
+  border: none;
+  border-radius: 1rem;
+  box-shadow: 0 0.25rem 1.5rem rgba(15, 23, 42, 0.08);
+}
+
+.generation-header .generation-stat {
+  background-color: #f8f9fa;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  text-align: center;
+  height: 100%;
+}
+
+.generation-stat-value {
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+
+.generation-stat-label {
+  font-size: 0.85rem;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.generation-table table {
+  min-width: 1024px;
+}
+
+.generation-table td,
+.generation-table th {
+  vertical-align: top;
+}
+
+.generation-table .progress {
+  height: 0.5rem;
+  background-color: #e9ecef;
+}
+
+.generation-table .progress-bar {
+  background: linear-gradient(90deg, #0d6efd, #6610f2);
+}
+
+.generation-filters .form-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6c757d;
+}
+
+.generation-filters .form-check-label {
+  font-weight: 500;
+  text-transform: none;
+}
+
+.generation-table ul {
+  list-style: disc;
+}
+
+.generation-table ul li + li {
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 991.98px) {
+  .generation-header .generation-stat {
+    padding: 0.75rem 1rem;
+  }
+
+  .generation-table table {
+    min-width: 768px;
+  }
+}

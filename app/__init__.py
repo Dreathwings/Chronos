@@ -97,6 +97,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_type_column()
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
+        _ensure_student_profile_columns()
         _ensure_session_attendance_backfill()
         updated_sessions = _realign_tp_session_teachers()
         if updated_sessions:
@@ -603,6 +604,124 @@ def _ensure_course_course_name_column() -> None:
             current_app.logger.warning(
                 "Unable to add foreign key constraint to course.course_name_id; continuing without constraint."
             )
+
+
+def _ensure_student_profile_columns() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "student" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("student")}
+    statements: list[tuple[str, str]] = []
+
+    def queue(column_name: str, statement: str) -> None:
+        if column_name not in existing_columns:
+            statements.append((column_name, statement))
+
+    queue(
+        "full_name",
+        "ALTER TABLE student ADD COLUMN full_name VARCHAR(200)",
+    )
+    queue("group_label", "ALTER TABLE student ADD COLUMN group_label VARCHAR(50)")
+    queue("phase", "ALTER TABLE student ADD COLUMN phase VARCHAR(50)")
+    queue(
+        "pathway",
+        "ALTER TABLE student ADD COLUMN pathway VARCHAR(20) NOT NULL DEFAULT 'initial'",
+    )
+    queue(
+        "alternance_details",
+        "ALTER TABLE student ADD COLUMN alternance_details TEXT",
+    )
+    queue("ina_id", "ALTER TABLE student ADD COLUMN ina_id VARCHAR(50)")
+    queue("ub_id", "ALTER TABLE student ADD COLUMN ub_id VARCHAR(50)")
+    queue("notes", "ALTER TABLE student ADD COLUMN notes TEXT")
+
+    if not statements:
+        return
+
+    added_columns = {name for name, _ in statements}
+
+    try:
+        with engine.begin() as connection:
+            for _, statement in statements:
+                connection.execute(text(statement))
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard for legacy DBs
+        current_app.logger.warning("Unable to update student table columns: %s", exc)
+        return
+
+    if "full_name" in added_columns:
+        try:
+            with engine.begin() as connection:
+                if "name" in existing_columns:
+                    connection.execute(
+                        text(
+                            "UPDATE student SET full_name = name "
+                            "WHERE (full_name IS NULL OR full_name = '') "
+                            "AND name IS NOT NULL AND name != ''"
+                        )
+                    )
+                if {"first_name", "last_name"}.issubset(existing_columns):
+                    rows = connection.execute(
+                        text("SELECT id, first_name, last_name FROM student")
+                    ).mappings()
+                    for row in rows:
+                        first = (row.get("first_name") or "").strip()
+                        last = (row.get("last_name") or "").strip()
+                        combined = " ".join(part for part in (first, last) if part).strip()
+                        if not combined:
+                            continue
+                        connection.execute(
+                            text(
+                                "UPDATE student SET full_name = :full_name WHERE id = :id"
+                            ),
+                            {"full_name": combined, "id": row["id"]},
+                        )
+                missing = connection.execute(
+                    text(
+                        "SELECT id FROM student WHERE full_name IS NULL OR full_name = ''"
+                    )
+                ).mappings()
+                for row in missing:
+                    placeholder = f"Étudiant {row['id']}"
+                    connection.execute(
+                        text(
+                            "UPDATE student SET full_name = :full_name WHERE id = :id"
+                        ),
+                        {"full_name": placeholder, "id": row["id"]},
+                    )
+        except SQLAlchemyError:
+            current_app.logger.warning(
+                "Unable to backfill student.full_name; continuing with placeholder-safe column."
+            )
+
+    if "pathway" in added_columns:
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE student SET pathway = :default "
+                        "WHERE pathway IS NULL OR pathway = ''"
+                    ),
+                    {"default": "initial"},
+                )
+        except SQLAlchemyError:
+            current_app.logger.warning(
+                "Unable to backfill student.pathway with default values; continuing with partial data."
+            )
+
+        if engine.dialect.name not in {"sqlite"}:
+            try:
+                with engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE student MODIFY pathway VARCHAR(20) NOT NULL DEFAULT 'initial'"
+                        )
+                    )
+            except SQLAlchemyError:
+                current_app.logger.warning(
+                    "Unable to tighten constraints on student.pathway; continuing with relaxed column."
+                )
 
 
 def _ensure_session_attendance_backfill() -> None:

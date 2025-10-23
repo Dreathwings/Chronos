@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+{% block title %}Nouvel étudiant — Chronos{% endblock %}
+
+{% block stylesheets %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/students.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="row g-4 student-detail-view">
+  <div class="col-xl-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Créer un étudiant</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Nom complet</label>
+              <input type="text" name="full_name" value="{{ form_data.full_name }}" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Adresse e-mail</label>
+              <input type="email" name="email" value="{{ form_data.email }}" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Classe</label>
+              <select class="form-select" name="class_group_id">
+                <option value="">Sans classe</option>
+                {% for class_group in class_groups %}
+                <option value="{{ class_group.id }}" {% if form_data.class_group_id|int == class_group.id %}selected{% endif %}>{{ class_group.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Groupe</label>
+              <select class="form-select" name="group_label">
+                <option value="">Non défini</option>
+                {% for group in group_options %}
+                <option value="{{ group }}" {% if form_data.group_label.upper() == group %}selected{% endif %}>{{ group }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Phase</label>
+              <input type="text" name="phase" value="{{ form_data.phase }}" class="form-control" list="studentPhaseOptions">
+              <datalist id="studentPhaseOptions">
+                {% for phase in phase_options %}
+                <option value="{{ phase }}"></option>
+                {% endfor %}
+              </datalist>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label d-block">Parcours</label>
+              <div class="btn-group" role="group">
+                {% for value, label in pathway_choices.items() %}
+                <input type="radio" class="btn-check" name="pathway" id="create-pathway-{{ value }}" value="{{ value }}" {% if form_data.pathway == value %}checked{% endif %}>
+                <label class="btn btn-outline-primary" for="create-pathway-{{ value }}">{{ label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Informations alternance</label>
+            <textarea name="alternance_details" class="form-control" rows="3" data-alternance-details>{{ form_data.alternance_details }}</textarea>
+            <div class="form-text">Visible uniquement pour les étudiants en alternance.</div>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">ID INA</label>
+              <input type="text" name="ina_id" value="{{ form_data.ina_id }}" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">ID UB</label>
+              <input type="text" name="ub_id" value="{{ form_data.ub_id }}" class="form-control">
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Informations personnelles</label>
+            <textarea name="notes" class="form-control" rows="4">{{ form_data.notes }}</textarea>
+          </div>
+          <div class="d-flex justify-content-end gap-2">
+            <a href="{{ url_for('main.students_list') }}" class="btn btn-outline-secondary">Annuler</a>
+            <button type="submit" class="btn btn-primary">Créer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const pathwayInputs = document.querySelectorAll('input[name="pathway"]');
+    const alternanceField = document.querySelector('[data-alternance-details]');
+    function toggleAlternanceField() {
+      if (!alternanceField) {
+        return;
+      }
+      const selected = Array.from(pathwayInputs).find((input) => input.checked);
+      const isAlternance = selected && selected.value === 'alternance';
+      alternanceField.closest('div').style.display = isAlternance ? '' : 'none';
+    }
+    pathwayInputs.forEach((input) => {
+      input.addEventListener('change', toggleAlternanceField);
+    });
+    toggleAlternanceField();
+  });
+</script>
+{% endblock %}

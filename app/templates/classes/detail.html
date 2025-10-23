@@ -34,6 +34,77 @@
       </div>
     </div>
     <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+        <span>Étudiants</span>
+        <span class="badge bg-light text-dark">{{ class_group.students|length }}</span>
+      </div>
+      <div class="card-body">
+        <form method="post" class="row g-3 align-items-end">
+          <input type="hidden" name="form" value="add-student">
+          <div class="col-12">
+            <label class="form-label">Nom complet</label>
+            <input type="text" name="full_name" class="form-control" placeholder="Prénom Nom" required>
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label">Adresse e-mail <span class="text-muted">(optionnel)</span></label>
+            <input type="email" name="email" class="form-control" placeholder="etudiant@example.com">
+          </div>
+          <div class="col-sm-6">
+            <label class="form-label">Notes <span class="text-muted">(optionnel)</span></label>
+            <input type="text" name="notes" class="form-control" placeholder="Information complémentaire">
+          </div>
+          <div class="col-12 d-flex justify-content-end">
+            <button type="submit" class="btn btn-outline-primary">Ajouter</button>
+          </div>
+        </form>
+        {% if class_group.students %}
+        <div class="table-responsive mt-4">
+          <table class="table table-sm align-middle students-table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>E-mail</th>
+                <th>Notes</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for student in class_group.students %}
+              <tr>
+                <td class="fw-semibold">{{ student.display_name }}</td>
+                <td>
+                  {% if student.email %}
+                  <a href="mailto:{{ student.email }}">{{ student.email }}</a>
+                  {% else %}
+                  <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if student.notes %}
+                    {{ student.notes }}
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary me-2" href="{{ url_for('main.student_detail', student_id=student.id) }}">Profil</a>
+                  <form method="post" class="d-inline">
+                    <input type="hidden" name="form" value="remove-student">
+                    <input type="hidden" name="student_id" value="{{ student.id }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Retirer</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0 mt-3">Aucun étudiant enregistré pour cette classe.</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
       <div class="card-header bg-secondary text-white">Associer un cours</div>
       <div class="card-body">
         <form method="post" class="vstack gap-3">

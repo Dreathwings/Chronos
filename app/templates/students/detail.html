@@ -1,0 +1,142 @@
+{% extends 'base.html' %}
+{% block title %}{{ student.display_name }} — Étudiant{% endblock %}
+
+{% block stylesheets %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/students.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="row g-4 student-detail-view">
+  <div class="col-xl-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">Profil de l'étudiant</div>
+      <div class="card-body">
+        <form method="post" class="vstack gap-3">
+          <input type="hidden" name="form" value="update">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Nom complet</label>
+              <input type="text" name="full_name" value="{{ student.full_name }}" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Adresse e-mail</label>
+              <input type="email" name="email" value="{{ student.email or '' }}" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Classe</label>
+              <select class="form-select" name="class_group_id">
+                {% for class_group in class_groups %}
+                <option value="{{ class_group.id }}" {% if student.class_group_id == class_group.id %}selected{% endif %}>{{ class_group.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Groupe</label>
+              <select class="form-select" name="group_label">
+                <option value="">Non défini</option>
+                {% for group in group_options %}
+                <option value="{{ group }}" {% if (student.group_label or '').upper() == group %}selected{% endif %}>{{ group }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Phase</label>
+              <input type="text" name="phase" value="{{ student.phase or '' }}" class="form-control" list="studentPhaseOptions">
+              <datalist id="studentPhaseOptions">
+                {% for phase in phase_options %}
+                <option value="{{ phase }}"></option>
+                {% endfor %}
+              </datalist>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label d-block">Parcours</label>
+              <div class="btn-group" role="group">
+                {% for value, label in pathway_choices.items() %}
+                <input type="radio" class="btn-check" name="pathway" id="pathway-{{ value }}" value="{{ value }}" {% if student.pathway == value %}checked{% endif %}>
+                <label class="btn btn-outline-primary" for="pathway-{{ value }}">{{ label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Informations alternance</label>
+            <textarea name="alternance_details" class="form-control" rows="3" data-alternance-details>{{ student.alternance_details or '' }}</textarea>
+            <div class="form-text">Visible uniquement pour les étudiants en alternance.</div>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">ID INA</label>
+              <input type="text" name="ina_id" value="{{ student.ina_id or '' }}" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">ID UB</label>
+              <input type="text" name="ub_id" value="{{ student.ub_id or '' }}" class="form-control">
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Informations personnelles</label>
+            <textarea name="notes" class="form-control" rows="4">{{ student.notes or '' }}</textarea>
+          </div>
+          <div class="d-flex justify-content-end">
+            <button type="submit" class="btn btn-primary">Enregistrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">Récapitulatif</div>
+      <div class="card-body">
+        <dl class="row mb-0 student-summary">
+          <dt class="col-5">Classe</dt>
+          <dd class="col-7">{{ student.class_group.name if student.class_group else '—' }}</dd>
+          <dt class="col-5">Groupe</dt>
+          <dd class="col-7">{{ student.group_label or '—' }}</dd>
+          <dt class="col-5">Phase</dt>
+          <dd class="col-7">{{ student.phase or '—' }}</dd>
+          <dt class="col-5">Parcours</dt>
+          <dd class="col-7">{{ student.pathway_label or '—' }}</dd>
+          <dt class="col-5">ID INA</dt>
+          <dd class="col-7">{{ student.ina_id or '—' }}</dd>
+          <dt class="col-5">ID UB</dt>
+          <dd class="col-7">{{ student.ub_id or '—' }}</dd>
+        </dl>
+        {% if student.alternance_details %}
+        <div class="mt-3">
+          <h6 class="text-uppercase text-muted small mb-1">Alternance</h6>
+          <p class="mb-0">{{ student.alternance_details }}</p>
+        </div>
+        {% endif %}
+        {% if student.notes %}
+        <div class="mt-3">
+          <h6 class="text-uppercase text-muted small mb-1">Informations personnelles</h6>
+          <p class="mb-0">{{ student.notes }}</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const pathwayInputs = document.querySelectorAll('input[name="pathway"]');
+    const alternanceField = document.querySelector('[data-alternance-details]');
+    function toggleAlternanceField() {
+      if (!alternanceField) {
+        return;
+      }
+      const selected = Array.from(pathwayInputs).find((input) => input.checked);
+      const isAlternance = selected && selected.value === 'alternance';
+      alternanceField.closest('div').style.display = isAlternance ? '' : 'none';
+    }
+    pathwayInputs.forEach((input) => {
+      input.addEventListener('change', toggleAlternanceField);
+    });
+    toggleAlternanceField();
+  });
+</script>
+{% endblock %}

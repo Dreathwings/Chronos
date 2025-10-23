@@ -16,7 +16,7 @@ from flask import (
     request,
     url_for,
 )
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -35,6 +35,7 @@ from .models import (
     Equipment,
     Room,
     Session,
+    Student,
     Software,
     Teacher,
     TeacherAvailability,
@@ -95,6 +96,26 @@ COURSE_TYPE_ORDER_EXPRESSION = case(
 )
 
 GENERATION_STATUS_LABELS = {**CourseScheduleLog.STATUS_LABELS, "none": "Jamais généré"}
+
+STATUS_BADGES = {
+    "success": "bg-success",
+    "warning": "bg-warning text-dark",
+    "error": "bg-danger",
+    "none": "bg-secondary",
+}
+
+LEVEL_BADGES = {
+    "info": "bg-secondary",
+    "warning": "bg-warning text-dark",
+    "error": "bg-danger",
+}
+
+STUDENT_PATHWAY_CHOICES = {
+    "initial": "Initial",
+    "alternance": "Alternance",
+}
+
+STUDENT_GROUP_CHOICES: tuple[str, ...] = ("A", "B")
 
 
 def _normalise_course_type(raw_value: str | None) -> str:
@@ -1350,6 +1371,256 @@ def teacher_detail(teacher_id: int):
     )
 
 
+@bp.route("/etudiants")
+def students_list():
+    search_query = (request.args.get("q") or "").strip()
+    class_id_raw = request.args.get("class_id")
+    group_filter = (request.args.get("group") or "").strip().upper() or None
+    phase_filter = request.args.get("phase") or None
+    pathway_filter = request.args.get("pathway") or None
+
+    try:
+        selected_class_id = int(class_id_raw) if class_id_raw else None
+    except (TypeError, ValueError):
+        selected_class_id = None
+
+    group_options = list(STUDENT_GROUP_CHOICES)
+    if group_filter not in STUDENT_GROUP_CHOICES:
+        group_filter = None
+
+    phase_options = [
+        value
+        for (value,) in db.session.query(Student.phase)
+        .filter(Student.phase.isnot(None), Student.phase != "")
+        .distinct()
+        .order_by(Student.phase.asc())
+        .all()
+    ]
+    if phase_filter not in phase_options:
+        phase_filter = None
+
+    if pathway_filter not in STUDENT_PATHWAY_CHOICES:
+        pathway_filter = None
+
+    query = Student.query.options(selectinload(Student.class_group))
+    if selected_class_id:
+        query = query.filter(Student.class_group_id == selected_class_id)
+    if group_filter:
+        query = query.filter(Student.group_label == group_filter)
+    if phase_filter:
+        query = query.filter(Student.phase == phase_filter)
+    if pathway_filter:
+        query = query.filter(Student.pathway == pathway_filter)
+    if search_query:
+        like_pattern = f"%{search_query}%"
+        query = query.filter(
+            or_(
+                Student.full_name.ilike(like_pattern),
+                Student.email.ilike(like_pattern),
+                Student.ina_id.ilike(like_pattern),
+                Student.ub_id.ilike(like_pattern),
+            )
+        )
+
+    students = query.order_by(func.lower(Student.full_name)).all()
+    class_groups = ClassGroup.query.order_by(ClassGroup.name.asc()).all()
+    has_active_filters = bool(
+        search_query
+        or selected_class_id
+        or group_filter
+        or phase_filter
+        or pathway_filter
+    )
+
+    return render_template(
+        "students/list.html",
+        students=students,
+        class_groups=class_groups,
+        search_query=search_query,
+        selected_class_id=selected_class_id,
+        selected_group=group_filter,
+        selected_phase=phase_filter,
+        selected_pathway=pathway_filter,
+        group_options=group_options,
+        phase_options=phase_options,
+        pathway_choices=STUDENT_PATHWAY_CHOICES,
+        has_active_filters=has_active_filters,
+    )
+
+
+@bp.route("/etudiants/nouveau", methods=["GET", "POST"])
+def student_create():
+    class_groups = ClassGroup.query.order_by(ClassGroup.name.asc()).all()
+    phase_options = [
+        value
+        for (value,) in db.session.query(Student.phase)
+        .filter(Student.phase.isnot(None), Student.phase != "")
+        .distinct()
+        .order_by(Student.phase.asc())
+        .all()
+    ]
+
+    form_data = {
+        "full_name": "",
+        "email": "",
+        "class_group_id": "",
+        "group_label": "",
+        "phase": "",
+        "pathway": "initial",
+        "alternance_details": "",
+        "ina_id": "",
+        "ub_id": "",
+        "notes": "",
+    }
+
+    if request.method == "POST":
+        for key in form_data:
+            form_data[key] = (request.form.get(key) or "")
+        full_name = form_data["full_name"].strip()
+        if not full_name:
+            flash("Renseignez le nom de l'étudiant.", "warning")
+        else:
+            class_group: ClassGroup | None = None
+            class_group_id_raw = form_data.get("class_group_id") or ""
+            if class_group_id_raw:
+                try:
+                    class_group_id = int(class_group_id_raw)
+                except ValueError:
+                    flash("Classe invalide sélectionnée.", "danger")
+                    return render_template(
+                        "students/create.html",
+                        class_groups=class_groups,
+                        group_options=STUDENT_GROUP_CHOICES,
+                        phase_options=phase_options,
+                        pathway_choices=STUDENT_PATHWAY_CHOICES,
+                        form_data=form_data,
+                    )
+                class_group = db.session.get(ClassGroup, class_group_id)
+                if class_group is None:
+                    flash("Classe introuvable.", "danger")
+                    return render_template(
+                        "students/create.html",
+                        class_groups=class_groups,
+                        group_options=STUDENT_GROUP_CHOICES,
+                        phase_options=phase_options,
+                        pathway_choices=STUDENT_PATHWAY_CHOICES,
+                        form_data=form_data,
+                    )
+
+            group_label = form_data["group_label"].strip().upper() or None
+            if group_label not in STUDENT_GROUP_CHOICES:
+                group_label = None
+
+            pathway = form_data["pathway"] or "initial"
+            if pathway not in STUDENT_PATHWAY_CHOICES:
+                pathway = "initial"
+
+            alternance_details = form_data["alternance_details"].strip() or None
+            if pathway != "alternance":
+                alternance_details = None
+
+            student = Student(
+                full_name=full_name,
+                email=form_data["email"].strip() or None,
+                class_group=class_group,
+                group_label=group_label,
+                phase=form_data["phase"].strip() or None,
+                pathway=pathway,
+                alternance_details=alternance_details,
+                ina_id=form_data["ina_id"].strip() or None,
+                ub_id=form_data["ub_id"].strip() or None,
+                notes=form_data["notes"].strip() or None,
+            )
+            db.session.add(student)
+            db.session.commit()
+            flash("Étudiant créé", "success")
+            return redirect(url_for("main.student_detail", student_id=student.id))
+
+    return render_template(
+        "students/create.html",
+        class_groups=class_groups,
+        group_options=STUDENT_GROUP_CHOICES,
+        phase_options=phase_options,
+        pathway_choices=STUDENT_PATHWAY_CHOICES,
+        form_data=form_data,
+    )
+
+
+@bp.route("/etudiants/<int:student_id>", methods=["GET", "POST"])
+def student_detail(student_id: int):
+    student = (
+        Student.query.options(selectinload(Student.class_group))
+        .get_or_404(student_id)
+    )
+
+    class_groups = ClassGroup.query.order_by(ClassGroup.name.asc()).all()
+    phase_options = [
+        value
+        for (value,) in db.session.query(Student.phase)
+        .filter(Student.phase.isnot(None), Student.phase != "")
+        .distinct()
+        .order_by(Student.phase.asc())
+        .all()
+    ]
+    group_options = list(STUDENT_GROUP_CHOICES)
+
+    if request.method == "POST":
+        if request.form.get("form") == "update":
+            full_name = (request.form.get("full_name") or "").strip()
+            if full_name:
+                student.full_name = full_name
+            student.email = (request.form.get("email") or "").strip() or None
+            group_label = (request.form.get("group_label") or "").strip().upper() or None
+            if group_label not in STUDENT_GROUP_CHOICES:
+                group_label = None
+            student.group_label = group_label
+            student.phase = (request.form.get("phase") or "").strip() or None
+            pathway = request.form.get("pathway") or student.pathway
+            if pathway not in STUDENT_PATHWAY_CHOICES:
+                pathway = student.pathway
+            student.pathway = pathway
+            alternance_details = (
+                (request.form.get("alternance_details") or "").strip() or None
+            )
+            if student.pathway != "alternance":
+                alternance_details = None
+            student.alternance_details = alternance_details
+            student.ina_id = (request.form.get("ina_id") or "").strip() or None
+            student.ub_id = (request.form.get("ub_id") or "").strip() or None
+            student.notes = (request.form.get("notes") or "").strip() or None
+
+            class_group_raw = request.form.get("class_group_id")
+            if class_group_raw:
+                try:
+                    class_group_id = int(class_group_raw)
+                except (TypeError, ValueError):
+                    class_group_id = None
+                if class_group_id:
+                    new_class_group = ClassGroup.query.get(class_group_id)
+                    if new_class_group is not None:
+                        student.class_group = new_class_group
+            try:
+                db.session.commit()
+                flash("Fiche étudiant mise à jour", "success")
+            except IntegrityError:
+                db.session.rollback()
+                db.session.refresh(student)
+                flash(
+                    "Un étudiant portant ce nom existe déjà pour cette classe.",
+                    "danger",
+                )
+        return redirect(url_for("main.student_detail", student_id=student.id))
+
+    return render_template(
+        "students/detail.html",
+        student=student,
+        class_groups=class_groups,
+        pathway_choices=STUDENT_PATHWAY_CHOICES,
+        phase_options=phase_options,
+        group_options=group_options,
+    )
+
+
 @bp.route("/classe", methods=["GET", "POST"])
 def classes_list():
     if request.method == "POST":
@@ -1370,13 +1641,26 @@ def classes_list():
                 flash("Nom de classe déjà utilisé", "danger")
         return redirect(url_for("main.classes_list"))
 
-    class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
+    class_groups = (
+        ClassGroup.query.options(
+            selectinload(ClassGroup.students),
+            selectinload(ClassGroup.course_links),
+        )
+        .order_by(ClassGroup.name)
+        .all()
+    )
     return render_template("classes/list.html", class_groups=class_groups)
 
 
 @bp.route("/classe/<int:class_id>", methods=["GET", "POST"])
 def class_detail(class_id: int):
-    class_group = ClassGroup.query.get_or_404(class_id)
+    class_group = (
+        ClassGroup.query.options(
+            selectinload(ClassGroup.students),
+            selectinload(ClassGroup.course_links).selectinload(CourseClassLink.course),
+        )
+        .get_or_404(class_id)
+    )
     courses = (
         Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc()).all()
     )
@@ -1423,6 +1707,43 @@ def class_detail(class_id: int):
                 course.class_links.remove(link)
                 db.session.commit()
                 flash("Cours retiré de la classe", "success")
+        elif form_name == "add-student":
+            full_name = (request.form.get("full_name") or "").strip()
+            email = (request.form.get("email") or "").strip() or None
+            notes = request.form.get("notes") or None
+            if not full_name:
+                flash("Renseignez le nom de l'étudiant.", "warning")
+            else:
+                student = Student(
+                    class_group=class_group,
+                    full_name=full_name,
+                    email=email,
+                    notes=notes,
+                )
+                db.session.add(student)
+                try:
+                    db.session.commit()
+                    flash("Étudiant ajouté à la classe", "success")
+                except IntegrityError:
+                    db.session.rollback()
+                    flash(
+                        "Un étudiant portant ce nom existe déjà pour cette classe.",
+                        "warning",
+                    )
+        elif form_name == "remove-student":
+            try:
+                student_id = int(request.form.get("student_id", "0"))
+            except ValueError:
+                student_id = 0
+            student = Student.query.filter_by(
+                id=student_id, class_group_id=class_group.id
+            ).first()
+            if not student:
+                flash("Étudiant introuvable", "danger")
+            else:
+                db.session.delete(student)
+                db.session.commit()
+                flash("Étudiant retiré de la classe", "success")
         return redirect(url_for("main.class_detail", class_id=class_id))
 
     events = sessions_to_grouped_events(class_group.all_sessions)
@@ -1607,6 +1928,252 @@ def courses_list():
         course_names=course_names,
         semester_choices=SEMESTER_CHOICES,
         default_semester=DEFAULT_SEMESTER,
+    )
+
+
+@bp.route("/generation", methods=["GET", "POST"])
+def generation_overview():
+    def _load_courses_for_generation() -> list[Course]:
+        return (
+            Course.query.options(
+                selectinload(Course.class_links),
+                selectinload(Course.sessions),
+                selectinload(Course.generation_logs),
+            )
+            .order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
+            .all()
+        )
+
+    if request.method == "POST":
+        action = request.form.get("form")
+        if action == "generate":
+            if _wants_json_response():
+                tracker = _enqueue_bulk_schedule()
+                response = {
+                    "job_id": tracker.job_id,
+                    "status_url": url_for(
+                        "main.schedule_progress_status", job_id=tracker.job_id
+                    ),
+                    "redirect_url": url_for("main.generation_overview"),
+                    "label": "Génération globale",
+                }
+                return jsonify(response), 202
+
+            courses = _load_courses_for_generation()
+            total_created = 0
+            failures = 0
+            for course in courses:
+                allowed_ranges = course.allowed_week_ranges
+                window_start = allowed_ranges[0][0] if allowed_ranges else None
+                window_end = allowed_ranges[-1][1] if allowed_ranges else None
+                allowed_payload = (
+                    [(start, end) for start, end in allowed_ranges]
+                    if allowed_ranges
+                    else None
+                )
+                try:
+                    created_sessions = generate_schedule(
+                        course,
+                        window_start=window_start,
+                        window_end=window_end,
+                        allowed_weeks=allowed_payload,
+                    )
+                    db.session.commit()
+                    total_created += len(created_sessions)
+                except ValueError as exc:
+                    db.session.commit()
+                    failures += 1
+                    current_app.logger.warning(
+                        "Automatic generation failed for %s: %s", course.name, exc
+                    )
+            if total_created:
+                flash(f"{total_created} séance(s) générée(s).", "success")
+            else:
+                flash(
+                    "Aucune séance n'a pu être générée automatiquement.",
+                    "info",
+                )
+            if failures:
+                flash(
+                    f"{failures} cours n'ont pas pu être planifiés. Consultez les recommandations ci-dessous.",
+                    "warning",
+                )
+        elif action == "clear":
+            courses = _load_courses_for_generation()
+            total_sessions = 0
+            total_logs = 0
+            for course in courses:
+                removed_sessions, removed_logs = _clear_course_schedule(course)
+                total_sessions += removed_sessions
+                total_logs += removed_logs
+            db.session.commit()
+            if total_sessions:
+                flash(
+                    f"{total_sessions} séance(s) supprimée(s) et {total_logs} journal(aux) réinitialisé(s).",
+                    "success",
+                )
+            else:
+                flash("Aucune séance n'était planifiée.", "info")
+        return redirect(url_for("main.generation_overview"))
+
+    search_query = (request.args.get("q") or "").strip()
+    selected_statuses = [
+        status
+        for status in request.args.getlist("status")
+        if status in STATUS_BADGES
+    ]
+    selected_course_type = request.args.get("course_type")
+    if selected_course_type not in COURSE_TYPE_LABELS:
+        selected_course_type = None
+    class_id_raw = request.args.get("class_id")
+    try:
+        selected_class_id = int(class_id_raw) if class_id_raw else None
+    except (TypeError, ValueError):
+        selected_class_id = None
+
+    class_groups = ClassGroup.query.order_by(ClassGroup.name.asc()).all()
+
+    courses = (
+        Course.query.options(
+            selectinload(Course.class_links).selectinload(CourseClassLink.class_group),
+            selectinload(Course.sessions),
+            selectinload(Course.generation_logs),
+        )
+        .order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
+        .all()
+    )
+
+    def _unique(values: Iterable[str | None]) -> list[str]:
+        collected: list[str] = []
+        for value in values:
+            if not value:
+                continue
+            cleaned = str(value).strip()
+            if cleaned and cleaned not in collected:
+                collected.append(cleaned)
+        return collected
+
+    course_rows: list[dict[str, object]] = []
+    global_remaining_hours = 0
+    for course in courses:
+        latest_log = course.latest_generation_log
+        required_hours = course.total_required_hours
+        scheduled_hours = course.scheduled_hours
+        remaining_hours = max(required_hours - scheduled_hours, 0)
+        global_remaining_hours += remaining_hours
+        status = _effective_generation_status(
+            course,
+            latest_log,
+            remaining_hours=remaining_hours,
+        )
+        errors: list[str] = []
+        suggestions: list[str] = []
+        if latest_log:
+            for entry in latest_log.parsed_messages():
+                level = str(entry.get("level", "")).lower()
+                if level != "error":
+                    continue
+                errors.append(str(entry.get("message", "")).strip())
+                suggestions.extend(entry.get("suggestions", []) or [])
+
+        class_group_ids = [
+            link.class_group_id
+            for link in course.class_links
+            if link.class_group_id is not None
+        ]
+        course_rows.append(
+            {
+                "course": course,
+                "status": status,
+                "latest_log": latest_log,
+                "errors": _unique(errors),
+                "suggestions": _unique(suggestions),
+                "sessions_count": len(course.sessions),
+                "scheduled_hours": scheduled_hours,
+                "required_hours": required_hours,
+                "remaining_hours": remaining_hours,
+                "class_labels": ", ".join(
+                    sorted(
+                        link.class_group.name
+                        for link in course.class_links
+                        if link.class_group is not None
+                    )
+                ),
+                "class_group_ids": class_group_ids,
+            }
+        )
+
+    search_term = search_query.lower()
+    filtered_rows: list[dict[str, object]] = []
+    for row in course_rows:
+        course = row["course"]
+        if search_term:
+            haystack = " ".join(
+                filter(
+                    None,
+                    [
+                        course.name.lower(),
+                        course.course_type.lower(),
+                        row.get("class_labels", "").lower(),
+                    ],
+                )
+            )
+            if search_term not in haystack:
+                continue
+        if selected_statuses and row["status"] not in selected_statuses:
+            continue
+        if selected_course_type and course.course_type != selected_course_type:
+            continue
+        if selected_class_id and selected_class_id not in row.get("class_group_ids", []):
+            continue
+        filtered_rows.append(row)
+
+    total_required_hours = sum(
+        row["required_hours"] for row in filtered_rows
+    )
+    total_scheduled_hours = sum(
+        row["scheduled_hours"] for row in filtered_rows
+    )
+    total_remaining_hours = sum(
+        row["remaining_hours"] for row in filtered_rows
+    )
+
+    total_courses = len(filtered_rows)
+    scheduled_courses = sum(1 for row in filtered_rows if row["sessions_count"])
+    error_courses = sum(1 for row in filtered_rows if row["status"] == "error")
+    warning_courses = sum(1 for row in filtered_rows if row["status"] == "warning")
+    has_active_filters = bool(
+        search_query or selected_statuses or selected_course_type or selected_class_id
+    )
+
+    status_filter_options = [
+        ("error", GENERATION_STATUS_LABELS["error"]),
+        ("warning", GENERATION_STATUS_LABELS["warning"]),
+        ("success", GENERATION_STATUS_LABELS["success"]),
+        ("none", GENERATION_STATUS_LABELS["none"]),
+    ]
+
+    return render_template(
+        "generation/index.html",
+        course_rows=filtered_rows,
+        total_courses=total_courses,
+        scheduled_courses=scheduled_courses,
+        error_courses=error_courses,
+        warning_courses=warning_courses,
+        total_required_hours=total_required_hours,
+        total_scheduled_hours=total_scheduled_hours,
+        total_remaining_hours=total_remaining_hours,
+        global_remaining_hours=global_remaining_hours,
+        status_labels=GENERATION_STATUS_LABELS,
+        status_badges=STATUS_BADGES,
+        course_type_labels=COURSE_TYPE_LABELS,
+        class_groups=class_groups,
+        search_query=search_query,
+        selected_statuses=selected_statuses,
+        selected_course_type=selected_course_type,
+        selected_class_id=selected_class_id,
+        has_active_filters=has_active_filters,
+        status_filter_options=status_filter_options,
     )
 
 
@@ -1935,18 +2502,6 @@ def course_detail(course_id: int):
         .first()
     )
 
-    status_badges = {
-        "success": "bg-success",
-        "warning": "bg-warning text-dark",
-        "error": "bg-danger",
-        "none": "bg-secondary",
-    }
-    level_badges = {
-        "info": "bg-secondary",
-        "warning": "bg-warning text-dark",
-        "error": "bg-danger",
-    }
-
     available_teachers = sorted(
         course.teachers,
         key=lambda teacher: (teacher.name or "").lower(),
@@ -2017,8 +2572,8 @@ def course_detail(course_id: int):
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
         status_labels=GENERATION_STATUS_LABELS,
-        status_badges=status_badges,
-        level_badges=level_badges,
+        status_badges=STATUS_BADGES,
+        level_badges=LEVEL_BADGES,
         course_week_options=course_week_options,
         selected_course_week_values=selected_course_week_values,
         selected_course_week_labels=selected_course_week_labels,

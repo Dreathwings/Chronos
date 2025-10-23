@@ -9,6 +9,7 @@ from .models import (
     Equipment,
     Room,
     Session,
+    Student,
     Software,
     Teacher,
     TeacherAvailability,
@@ -68,6 +69,21 @@ def seed_data() -> None:
     python_group_b = CourseName(name="Python Avancé — Groupe B")
 
     class_a = ClassGroup(name="Classe A", size=20)
+    class_a.students.extend(
+        [
+            Student(
+                full_name="Emma Dupont",
+                email="emma.dupont@example.com",
+                pathway="alternance",
+                phase="PHASE 1",
+                group_label="A",
+                alternance_details="Entreprise ABC — 3 jours en entreprise",
+                ina_id="INA123456",
+                ub_id="UB654321",
+            ),
+            Student(full_name="Lucas Bernard", phase="PHASE 1", group_label="A"),
+        ]
+    )
     python.class_links.append(CourseClassLink(class_group=class_a))
 
     db.session.add_all([
