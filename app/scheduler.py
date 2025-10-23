@@ -1001,6 +1001,7 @@ def find_available_teacher(
     subgroup_label: str | None = None,
     segments: Optional[list[tuple[datetime, datetime]]] = None,
     target_class_ids: Set[int] | None = None,
+    pending_sessions: Iterable[Session] = (),
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
     allowed_ids: set[int] | None = None
@@ -1032,9 +1033,29 @@ def find_available_teacher(
             if teacher_id is not None:
                 seen.add(teacher_id)
 
+    usage_counts: dict[int, int] = {}
+    target_label = _normalise_label(subgroup_label)
+    for session in list(course.sessions) + list(pending_sessions):
+        teacher = session.teacher
+        if teacher is None or teacher.id is None:
+            continue
+        if target_class_ids:
+            if _session_attendee_ids(session) != target_class_ids:
+                continue
+            if _normalise_label(session.subgroup_label) != target_label:
+                continue
+        else:
+            course_id = getattr(session, "course_id", None)
+            if course_id is not None and course_id != course.id:
+                continue
+            if course_id is None:
+                linked = getattr(session, "course", None)
+                if linked is not None and linked is not course:
+                    continue
+        usage_counts[teacher.id] = usage_counts.get(teacher.id, 0) + 1
+
     candidates: list[Teacher] = []
     if target_class_ids:
-        target_label = _normalise_label(subgroup_label)
         existing_teachers: list[Teacher] = []
         seen_existing: set[int] = set()
         for session in sorted(
@@ -1057,14 +1078,15 @@ def find_available_teacher(
         _append_unique(candidates, existing_teachers)
 
     _append_unique(candidates, preferred)
-    if not candidates:
-        _append_unique(
-            candidates,
-            sorted(
-                [teacher for teacher in fallback_pool if teacher not in preferred],
-                key=lambda t: t.name.lower(),
-            ),
+
+    fallback_candidates = [teacher for teacher in fallback_pool if teacher is not None]
+    fallback_candidates.sort(
+        key=lambda t: (
+            usage_counts.get(getattr(t, "id", None), 0),
+            t.name.lower(),
         )
+    )
+    _append_unique(candidates, fallback_candidates)
 
     for teacher in candidates:
         segments_to_check = segments or [(start, end)]
@@ -1535,6 +1557,7 @@ def _try_full_block(
             link=link,
             subgroup_label=subgroup_label,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1669,6 +1692,7 @@ def _try_split_block(
             subgroup_label=subgroup_label,
             segments=segment_datetimes,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1864,6 +1888,7 @@ def _cm_try_full_block(
             link=primary_link,
             subgroup_label=None,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1987,6 +2012,7 @@ def _cm_try_split_block(
             subgroup_label=None,
             segments=segment_datetimes,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
         )
         if not teacher:
             if diagnostics is not None:
