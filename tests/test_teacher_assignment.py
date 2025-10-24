@@ -30,6 +30,7 @@ from app.scheduler import (
     generate_schedule,
     has_weekly_course_conflict,
     _relocate_sessions_for_groups,
+    _filter_days_with_teacher_overlap,
     _warn_weekly_limit,
 )
 
@@ -125,6 +126,60 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
 
         self.assertIsNotNone(chosen)
         self.assertEqual(chosen.id, teacher_b.id)
+
+    def test_available_days_require_shared_teacher_and_class_slots(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher_primary = Teacher(name="Alice")
+        teacher_other = Teacher(name="Bruno")
+        room = Room(name="B201", capacity=24)
+        db.session.add_all([teacher_primary, teacher_other, room])
+        db.session.commit()
+
+        link.teacher_a = teacher_primary
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_primary,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_primary,
+                weekday=1,
+                start_time=time(10, 15),
+                end_time=time(12, 15),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        conflict = Session(
+            course=course,
+            teacher=teacher_other,
+            room=room,
+            class_group=class_group,
+            start_time=datetime(2024, 1, 8, 8, 0, 0),
+            end_time=datetime(2024, 1, 8, 10, 0, 0),
+        )
+        conflict.attendees = [class_group]
+        db.session.add(conflict)
+        db.session.commit()
+
+        candidate_days = [date(2024, 1, 8), date(2024, 1, 9)]
+        slot_length_hours = max(int(course.session_length_hours), 1)
+        filtered = _filter_days_with_teacher_overlap(
+            course=course,
+            days=candidate_days,
+            class_groups=[class_group],
+            link=link,
+            subgroup_label=None,
+            target_class_ids={class_group.id},
+            slot_length_hours=slot_length_hours,
+        )
+
+        self.assertEqual(filtered, [date(2024, 1, 9)])
 
     def test_cleanup_command_realigns_existing_sessions(self) -> None:
         course, link, class_group = self._create_tp_course()

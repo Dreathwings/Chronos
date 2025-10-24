@@ -1366,6 +1366,112 @@ def _shared_hours_between_teacher_and_class(
     return total
 
 
+def _has_contiguous_slots(indices: Iterable[int], required_length: int) -> bool:
+    if required_length <= 1:
+        return bool(indices)
+    ordered = sorted(set(indices))
+    if len(ordered) < required_length:
+        return False
+    for i, start_idx in enumerate(ordered):
+        end_idx = start_idx
+        count = 1
+        for next_idx in ordered[i + 1 :]:
+            if next_idx != end_idx + 1:
+                break
+            end_idx = next_idx
+            count += 1
+            if count >= required_length:
+                start_time = SCHEDULE_SLOTS[start_idx][0]
+                end_time = SCHEDULE_SLOTS[end_idx][1]
+                if fits_in_windows(start_time, end_time):
+                    return True
+        if count >= required_length:
+            start_time = SCHEDULE_SLOTS[start_idx][0]
+            end_time = SCHEDULE_SLOTS[end_idx][1]
+            if fits_in_windows(start_time, end_time):
+                return True
+    return False
+
+
+def _teacher_supports_day(
+    teacher: Teacher,
+    day: date,
+    class_groups: Iterable[ClassGroup],
+    *,
+    subgroup_label: str | None,
+    required_slots: int,
+) -> bool:
+    groups = list(class_groups)
+    if not groups:
+        return False
+    if day.weekday() >= 5:
+        return False
+    if not teacher.is_available_on(day):
+        return False
+
+    def _groups_available(start_dt: datetime, end_dt: datetime) -> bool:
+        if len(groups) == 1:
+            return groups[0].is_available_during(
+                start_dt,
+                end_dt,
+                subgroup_label=subgroup_label,
+            )
+        return all(group.is_available_during(start_dt, end_dt) for group in groups)
+
+    matching_indices: list[int] = []
+    for idx, (slot_start, slot_end) in enumerate(SCHEDULE_SLOTS):
+        start_dt = datetime.combine(day, slot_start)
+        end_dt = datetime.combine(day, slot_end)
+        if not _groups_available(start_dt, end_dt):
+            continue
+        if not teacher.is_available_during(start_dt, end_dt):
+            continue
+        if any(
+            overlaps(existing.start_time, existing.end_time, start_dt, end_dt)
+            for existing in teacher.sessions
+        ):
+            continue
+        matching_indices.append(idx)
+    return _has_contiguous_slots(matching_indices, required_slots)
+
+
+def _filter_days_with_teacher_overlap(
+    *,
+    course: Course,
+    days: Iterable[date],
+    class_groups: Iterable[ClassGroup],
+    link: CourseClassLink | None,
+    subgroup_label: str | None,
+    target_class_ids: Set[int] | None,
+    slot_length_hours: int,
+) -> list[date]:
+    groups = list(class_groups)
+    if not groups:
+        return list(days)
+    teacher_candidates = _teacher_candidates_for_slot(
+        course,
+        link=link,
+        subgroup_label=subgroup_label,
+        target_class_ids=target_class_ids,
+    )
+    if not teacher_candidates:
+        return list(days)
+    filtered: list[date] = []
+    for day in days:
+        if any(
+            _teacher_supports_day(
+                teacher,
+                day,
+                groups,
+                subgroup_label=subgroup_label if len(groups) == 1 else None,
+                required_slots=slot_length_hours,
+            )
+            for teacher in teacher_candidates
+        ):
+            filtered.append(day)
+    return filtered
+
+
 def _shared_availability_hours_for_target(
     course: Course,
     *,
@@ -2543,7 +2649,7 @@ def generate_schedule(
             reporter.summary = message
             reporter.finalise(0)
             raise ValueError(message)
-        target_ids = {group.id for group in class_groups}
+        target_ids = {group.id for group in class_groups if group.id is not None}
         existing_day_hours = _cm_existing_hours_by_day(course, target_ids)
         total_required = effective_occurrences * course.session_length_hours
         already_scheduled = sum(existing_day_hours.values())
@@ -2564,6 +2670,7 @@ def generate_schedule(
             progress.complete("Toutes les heures requises sont déjà planifiées.")
             reporter.finalise(len(created_sessions))
             return created_sessions
+        primary_link = links[0] if links else None
         available_days = [
             day
             for day in sorted(daterange(schedule_start, schedule_end))
@@ -2571,6 +2678,15 @@ def generate_schedule(
             and all(group.is_available_on(day) for group in class_groups)
             and (allowed_days is None or day in allowed_days)
         ]
+        available_days = _filter_days_with_teacher_overlap(
+            course=course,
+            days=available_days,
+            class_groups=class_groups,
+            link=primary_link,
+            subgroup_label=None,
+            target_class_ids=target_ids or None,
+            slot_length_hours=slot_length_hours,
+        )
         if not available_days:
             message = (
                 "Aucune journée commune disponible pour les classes sélectionnées"
@@ -2588,7 +2704,6 @@ def generate_schedule(
             slot_length_hours = max(int(course.session_length_hours), 1)
             block_index = 0
             relocation_weeks: set[date] = set()
-            primary_link = links[0] if links else None
             link_lookup = {
                 link.class_group_id: link for link in links if link.class_group_id is not None
             }
@@ -2985,6 +3100,19 @@ def generate_schedule(
             and class_group.is_available_on(day)
             and (allowed_days is None or day in allowed_days)
         ]
+        class_id = class_group.id
+        if class_id is None and link and link.class_group_id is not None:
+            class_id = link.class_group_id
+        target_class_ids = {class_id} if class_id is not None else None
+        available_days = _filter_days_with_teacher_overlap(
+            course=course,
+            days=available_days,
+            class_groups=[class_group],
+            link=link,
+            subgroup_label=subgroup_label,
+            target_class_ids=target_class_ids,
+            slot_length_hours=slot_length_hours,
+        )
         if not available_days:
             message = (
                 f"Aucune journée disponible pour {class_group.name} sur la période"
