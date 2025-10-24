@@ -26,9 +26,12 @@ from sqlalchemy import text
 from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
+    course_generation_order_key,
+    find_available_teacher,
     generate_schedule,
     has_weekly_course_conflict,
     _relocate_sessions_for_groups,
+    _filter_days_with_teacher_overlap,
     _warn_weekly_limit,
 )
 
@@ -84,6 +87,100 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         link.teacher_b = None
         db.session.commit()
         self.assertEqual([t.id for t in link.preferred_teachers("B")], [teacher_a.id])
+
+    def test_find_available_teacher_tries_alternative_assigned_teacher(self) -> None:
+        course, link, _ = self._create_tp_course()
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        db.session.add_all([teacher_a, teacher_b])
+        db.session.commit()
+
+        link.teacher_a = teacher_a
+        link.teacher_b = teacher_b
+        db.session.commit()
+
+        availability_a = TeacherAvailability(
+            teacher=teacher_a,
+            weekday=1,
+            start_time=time(8, 0),
+            end_time=time(12, 0),
+        )
+        availability_b = TeacherAvailability(
+            teacher=teacher_b,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(12, 0),
+        )
+        db.session.add_all([availability_a, availability_b])
+        db.session.commit()
+
+        start = datetime(2024, 1, 8, 8, 0, 0)
+        end = datetime(2024, 1, 8, 10, 0, 0)
+
+        chosen = find_available_teacher(
+            course,
+            start,
+            end,
+            link=link,
+            subgroup_label=None,
+        )
+
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen.id, teacher_b.id)
+
+    def test_available_days_require_shared_teacher_and_class_slots(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher_primary = Teacher(name="Alice")
+        teacher_other = Teacher(name="Bruno")
+        room = Room(name="B201", capacity=24)
+        db.session.add_all([teacher_primary, teacher_other, room])
+        db.session.commit()
+
+        link.teacher_a = teacher_primary
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_primary,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_primary,
+                weekday=1,
+                start_time=time(10, 15),
+                end_time=time(12, 15),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        conflict = Session(
+            course=course,
+            teacher=teacher_other,
+            room=room,
+            class_group=class_group,
+            start_time=datetime(2024, 1, 8, 8, 0, 0),
+            end_time=datetime(2024, 1, 8, 10, 0, 0),
+        )
+        conflict.attendees = [class_group]
+        db.session.add(conflict)
+        db.session.commit()
+
+        candidate_days = [date(2024, 1, 8), date(2024, 1, 9)]
+        slot_length_hours = max(int(course.session_length_hours), 1)
+        filtered = _filter_days_with_teacher_overlap(
+            course=course,
+            days=candidate_days,
+            class_groups=[class_group],
+            link=link,
+            subgroup_label=None,
+            target_class_ids={class_group.id},
+            slot_length_hours=slot_length_hours,
+        )
+
+        self.assertEqual(filtered, [date(2024, 1, 9)])
 
     def test_cleanup_command_realigns_existing_sessions(self) -> None:
         course, link, class_group = self._create_tp_course()
@@ -1488,7 +1585,158 @@ class SchedulerRelocationTestCase(DatabaseTestCase):
         self.assertEqual(weekday_frequencies.get(first_start.weekday(), 0), 0)
 
 
-class ScheduleGenerationFailureTestCase(DatabaseTestCase):
+class ScheduleGenerationTestCase(DatabaseTestCase):
+    def test_schedule_prioritises_targets_with_less_shared_availability(self) -> None:
+        base_name = CourseName(name="Algorithmie")
+        course = Course(
+            name=Course.compose_name("TP", base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO2", size=24)
+        link = CourseClassLink(class_group=class_group, group_count=2)
+        room = Room(name="C101", capacity=24)
+        limited = Teacher(name="Alice")
+        flexible = Teacher(name="Bruno")
+        db.session.add_all([base_name, course, class_group, link, room, limited, flexible])
+        course.class_links.append(link)
+        db.session.commit()
+
+        link.teacher_a = flexible
+        link.teacher_b = limited
+        db.session.commit()
+
+        limited_slot = TeacherAvailability(
+            teacher=limited,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(10, 0),
+        )
+        flexible_slot = TeacherAvailability(
+            teacher=flexible,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(12, 15),
+        )
+        db.session.add_all([limited_slot, flexible_slot])
+        db.session.commit()
+
+        created = generate_schedule(
+            course,
+            window_start=date(2025, 9, 1),
+            window_end=date(2025, 9, 5),
+        )
+
+        self.assertEqual(len(created), 2)
+        subgroup_sessions = {session.subgroup_label: session for session in created}
+        self.assertIn("A", subgroup_sessions)
+        self.assertIn("B", subgroup_sessions)
+
+        limited_session = subgroup_sessions["B"]
+        flexible_session = subgroup_sessions["A"]
+
+        self.assertEqual(limited_session.teacher_id, limited.id)
+        self.assertEqual(limited_session.start_time, datetime(2025, 9, 1, 8, 0))
+        self.assertEqual(limited_session.room_id, room.id)
+
+        self.assertEqual(flexible_session.teacher_id, flexible.id)
+        self.assertGreater(flexible_session.start_time, limited_session.start_time)
+        self.assertEqual(flexible_session.room_id, room.id)
+
+    def test_course_generation_order_key_respects_type_and_shared_hours(self) -> None:
+        base_name = CourseName(name="Architecture")
+        class_group = ClassGroup(name="INFO3", size=24)
+        teacher_cm = Teacher(name="Professeur CM")
+        teacher_td_limited = Teacher(name="Professeur TD Limité")
+        teacher_td_flexible = Teacher(name="Professeur TD Flexible")
+        room = Room(name="D101", capacity=30)
+        db.session.add_all(
+            [
+                base_name,
+                class_group,
+                teacher_cm,
+                teacher_td_limited,
+                teacher_td_flexible,
+                room,
+            ]
+        )
+        db.session.commit()
+
+        course_cm = Course(
+            name=Course.compose_name("CM", base_name.name, "S1"),
+            course_type="CM",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        course_td_limited = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        course_td_flexible = Course(
+            name=Course.compose_name("TD", f"{base_name.name} 2", "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+
+        link_cm = CourseClassLink(class_group=class_group)
+        link_td_limited = CourseClassLink(class_group=class_group)
+        link_td_flexible = CourseClassLink(class_group=class_group)
+        course_cm.class_links.append(link_cm)
+        course_td_limited.class_links.append(link_td_limited)
+        course_td_flexible.class_links.append(link_td_flexible)
+
+        db.session.add_all([course_cm, course_td_limited, course_td_flexible])
+        db.session.commit()
+
+        link_cm.teacher_a = teacher_cm
+        link_td_limited.teacher_a = teacher_td_limited
+        link_td_flexible.teacher_a = teacher_td_flexible
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_cm,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_td_limited,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(10, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_td_flexible,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        ordered = sorted(
+            [course_td_flexible, course_cm, course_td_limited],
+            key=course_generation_order_key,
+        )
+
+        self.assertEqual([course.course_type for course in ordered], ["CM", "TD", "TD"])
+        self.assertEqual(ordered[1].id, course_td_limited.id)
+        self.assertEqual(ordered[2].id, course_td_flexible.id)
+
     def test_generate_schedule_raises_when_no_room_available(self) -> None:
         course, link, _ = self._create_tp_course()
 
