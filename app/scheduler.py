@@ -43,6 +43,15 @@ SCHEDULE_SLOTS: List[tuple[time, time]] = [
 MAX_SLOT_GAP = timedelta(minutes=15)
 
 
+SLOT_DURATION_HOURS: dict[tuple[time, time], float] = {
+    slot: (
+        datetime.combine(date.min, slot[1]) - datetime.combine(date.min, slot[0])
+    ).total_seconds()
+    / 3600
+    for slot in SCHEDULE_SLOTS
+}
+
+
 def _build_extended_breaks() -> set[tuple[time, time]]:
     extended: set[tuple[time, time]] = set()
     for idx in range(len(WORKING_WINDOWS) - 1):
@@ -1173,16 +1182,13 @@ def _describe_class_unavailability(
     return f"{class_group.name} est indisponible de {start_label} à {end_label}."
 
 
-def find_available_teacher(
+def _teacher_candidates_for_slot(
     course: Course,
-    start: datetime,
-    end: datetime,
     *,
     link: CourseClassLink | None = None,
     subgroup_label: str | None = None,
-    segments: Optional[list[tuple[datetime, datetime]]] = None,
     target_class_ids: Set[int] | None = None,
-) -> Optional[Teacher]:
+) -> list[Teacher]:
     preferred: list[Teacher] = []
     allowed_ids: set[int] | None = None
     if link is not None:
@@ -1238,14 +1244,31 @@ def find_available_teacher(
         _append_unique(candidates, existing_teachers)
 
     _append_unique(candidates, preferred)
-    if not candidates:
-        _append_unique(
-            candidates,
-            sorted(
-                [teacher for teacher in fallback_pool if teacher not in preferred],
-                key=lambda t: t.name.lower(),
-            ),
-        )
+
+    fallback_candidates = sorted(
+        [teacher for teacher in fallback_pool if teacher not in preferred],
+        key=lambda t: t.name.lower(),
+    )
+    _append_unique(candidates, fallback_candidates)
+    return candidates
+
+
+def find_available_teacher(
+    course: Course,
+    start: datetime,
+    end: datetime,
+    *,
+    link: CourseClassLink | None = None,
+    subgroup_label: str | None = None,
+    segments: Optional[list[tuple[datetime, datetime]]] = None,
+    target_class_ids: Set[int] | None = None,
+) -> Optional[Teacher]:
+    candidates = _teacher_candidates_for_slot(
+        course,
+        link=link,
+        subgroup_label=subgroup_label,
+        target_class_ids=target_class_ids,
+    )
 
     for teacher in candidates:
         segments_to_check = segments or [(start, end)]
@@ -1306,6 +1329,96 @@ def _existing_hours_by_day(
         session_day = session.start_time.date()
         per_day[session_day] = per_day.get(session_day, 0) + session.duration_hours
     return per_day
+
+
+def _shared_hours_between_teacher_and_class(
+    teacher: Teacher,
+    class_group: ClassGroup,
+    schedule_start: date,
+    schedule_end: date,
+    *,
+    allowed_days: Set[date] | None = None,
+    subgroup_label: str | None = None,
+) -> float:
+    total = 0.0
+    for day in daterange(schedule_start, schedule_end):
+        if day.weekday() >= 5:
+            continue
+        if allowed_days is not None and day not in allowed_days:
+            continue
+        if not class_group.is_available_on(day):
+            continue
+        if not teacher.is_available_on(day):
+            continue
+        for slot_start, slot_end in SCHEDULE_SLOTS:
+            slot_hours = SLOT_DURATION_HOURS[(slot_start, slot_end)]
+            start_dt = datetime.combine(day, slot_start)
+            end_dt = datetime.combine(day, slot_end)
+            if not class_group.is_available_during(
+                start_dt,
+                end_dt,
+                subgroup_label=subgroup_label,
+            ):
+                continue
+            if not teacher.is_available_during(start_dt, end_dt):
+                continue
+            total += slot_hours
+    return total
+
+
+def _shared_availability_hours_for_target(
+    course: Course,
+    *,
+    link: CourseClassLink,
+    class_group: ClassGroup,
+    subgroup_label: str | None,
+    schedule_start: date,
+    schedule_end: date,
+    allowed_days: Set[date] | None,
+) -> float:
+    target_class_ids: Set[int] | None = None
+    class_id = class_group.id or link.class_group_id
+    if class_id is not None:
+        target_class_ids = {class_id}
+    preferred_candidates = [
+        teacher
+        for teacher in link.preferred_teachers(subgroup_label)
+        if teacher is not None
+    ]
+    seen_ids: set[int] = set()
+    ordered_preferred: list[Teacher] = []
+    for teacher in preferred_candidates:
+        teacher_id = teacher.id
+        if teacher_id is not None and teacher_id in seen_ids:
+            continue
+        ordered_preferred.append(teacher)
+        if teacher_id is not None:
+            seen_ids.add(teacher_id)
+
+    if ordered_preferred:
+        candidates = ordered_preferred
+    else:
+        candidates = _teacher_candidates_for_slot(
+            course,
+            link=link,
+            subgroup_label=subgroup_label,
+            target_class_ids=target_class_ids,
+        )
+
+    if not candidates:
+        return 0.0
+    shared = 0.0
+    for teacher in candidates:
+        overlap = _shared_hours_between_teacher_and_class(
+            teacher,
+            class_group,
+            schedule_start,
+            schedule_end,
+            allowed_days=allowed_days,
+            subgroup_label=subgroup_label,
+        )
+        shared = max(shared, overlap)
+    return shared
 
 
 def _weekday_frequency_for_groups(
@@ -2479,7 +2592,7 @@ def generate_schedule(
             link_lookup = {
                 link.class_group_id: link for link in links if link.class_group_id is not None
             }
-            while hours_remaining > 0:
+        while hours_remaining > 0:
                 blocks_total = max(
                     (hours_remaining + slot_length_hours - 1) // slot_length_hours,
                     1,
@@ -2718,7 +2831,7 @@ def generate_schedule(
                             )
                         break
 
-            if hours_remaining > 0:
+        if hours_remaining > 0:
                 message = (
                     "Impossible de planifier "
                     f"{hours_remaining} heure(s) supplémentaire(s) (cours magistral)"
@@ -2821,67 +2934,102 @@ def generate_schedule(
             total_hours_needed += max(amount, 0)
     progress.initialise(total_hours_needed)
 
+    scheduling_targets: list[dict[str, object]] = []
     for link in links:
         class_group = link.class_group
+        if class_group is None:
+            continue
         for subgroup_label in link.group_labels():
-            hours_needed = hours_needed_map.get((class_group.id, subgroup_label or None), 0)
+            class_id = class_group.id or link.class_group_id
+            key = (class_id, subgroup_label or None)
+            hours_needed = hours_needed_map.get(key, 0)
             if hours_needed == 0:
                 continue
-            available_days = [
-                day
-                for day in sorted(daterange(schedule_start, schedule_end))
-                if day.weekday() < 5
-                and class_group.is_available_on(day)
-                and (allowed_days is None or day in allowed_days)
-            ]
-            if not available_days:
-                message = (
-                    f"Aucune journée disponible pour {class_group.name} sur la période"
-                )
-                slot_label = _format_slot_label(
-                    available_days,
-                    window_start=reporter.window_start,
-                    window_end=reporter.window_end,
-                )
-                class_label = format_class_label(
-                    class_group,
-                    link=link,
-                    subgroup_label=subgroup_label,
-                )
-                teacher_names = _teacher_names_for_context(
-                    course,
-                    primary_link=link,
-                    subgroup_label=subgroup_label,
-                )
-                context = _build_error_context(
-                    teacher_names=teacher_names,
-                    class_labels=[class_label],
-                    slot_label=slot_label,
-                )
-                reporter.error(
-                    message,
-                    suggestions=suggest_schedule_recovery(message, course),
-                    context=context,
-                )
-                placement_failures.append(message)
-                continue
-
-            existing_day_hours = _existing_hours_by_day(course, class_group, subgroup_label)
-            day_indices = {day: index for index, day in enumerate(available_days)}
-            per_day_hours = {
-                day: existing_day_hours.get(day, 0) for day in available_days
-            }
-            weekday_frequencies = _weekday_frequency_for_groups(
+            shared_hours = _shared_availability_hours_for_target(
                 course,
-                [class_group],
-                pending_sessions=created_sessions,
+                link=link,
+                class_group=class_group,
+                subgroup_label=subgroup_label,
+                schedule_start=schedule_start,
+                schedule_end=schedule_end,
+                allowed_days=allowed_days,
+            )
+            scheduling_targets.append(
+                {
+                    "link": link,
+                    "class_group": class_group,
+                    "subgroup_label": subgroup_label,
+                    "hours_needed": hours_needed,
+                    "shared_hours": shared_hours,
+                }
+            )
+
+    scheduling_targets.sort(
+        key=lambda item: (
+            item["shared_hours"],
+            -item["hours_needed"],
+            (item["class_group"].name or "").lower(),
+            (item["subgroup_label"] or ""),
+        )
+    )
+
+    for target in scheduling_targets:
+        link = target["link"]
+        class_group = target["class_group"]
+        subgroup_label = target["subgroup_label"]
+        hours_needed = target["hours_needed"]
+        available_days = [
+            day
+            for day in sorted(daterange(schedule_start, schedule_end))
+            if day.weekday() < 5
+            and class_group.is_available_on(day)
+            and (allowed_days is None or day in allowed_days)
+        ]
+        if not available_days:
+            message = (
+                f"Aucune journée disponible pour {class_group.name} sur la période"
+            )
+            slot_label = _format_slot_label(
+                available_days,
+                window_start=reporter.window_start,
+                window_end=reporter.window_end,
+            )
+            class_label = format_class_label(
+                class_group,
+                link=link,
                 subgroup_label=subgroup_label,
             )
-            block_index = 0
-            hours_remaining = hours_needed
-            relocation_weeks: set[date] = set()
+            teacher_names = _teacher_names_for_context(
+                course,
+                primary_link=link,
+                subgroup_label=subgroup_label,
+            )
+            context = _build_error_context(
+                teacher_names=teacher_names,
+                class_labels=[class_label],
+                slot_label=slot_label,
+            )
+            reporter.error(
+                message,
+                suggestions=suggest_schedule_recovery(message, course),
+                context=context,
+            )
+            placement_failures.append(message)
+            continue
+        existing_day_hours = _existing_hours_by_day(course, class_group, subgroup_label)
+        day_indices = {day: index for index, day in enumerate(available_days)}
+        per_day_hours = {day: existing_day_hours.get(day, 0) for day in available_days}
+        weekday_frequencies = _weekday_frequency_for_groups(
+            course,
+            [class_group],
+            pending_sessions=created_sessions,
+            subgroup_label=subgroup_label,
+        )
+        block_index = 0
+        hours_remaining = hours_needed
+        relocation_weeks: set[date] = set()
 
-            while hours_remaining > 0:
+        while hours_remaining > 0:
                 blocks_total = max(
                     (hours_remaining + slot_length_hours - 1) // slot_length_hours,
                     1,
@@ -3228,7 +3376,7 @@ def generate_schedule(
                         )
                     break
 
-            if hours_remaining > 0:
+        if hours_remaining > 0:
                 message = (
                     f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
                 )

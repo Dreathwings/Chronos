@@ -26,6 +26,7 @@ from sqlalchemy import text
 from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
+    find_available_teacher,
     generate_schedule,
     has_weekly_course_conflict,
     _relocate_sessions_for_groups,
@@ -84,6 +85,46 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         link.teacher_b = None
         db.session.commit()
         self.assertEqual([t.id for t in link.preferred_teachers("B")], [teacher_a.id])
+
+    def test_find_available_teacher_tries_alternative_assigned_teacher(self) -> None:
+        course, link, _ = self._create_tp_course()
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        db.session.add_all([teacher_a, teacher_b])
+        db.session.commit()
+
+        link.teacher_a = teacher_a
+        link.teacher_b = teacher_b
+        db.session.commit()
+
+        availability_a = TeacherAvailability(
+            teacher=teacher_a,
+            weekday=1,
+            start_time=time(8, 0),
+            end_time=time(12, 0),
+        )
+        availability_b = TeacherAvailability(
+            teacher=teacher_b,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(12, 0),
+        )
+        db.session.add_all([availability_a, availability_b])
+        db.session.commit()
+
+        start = datetime(2024, 1, 8, 8, 0, 0)
+        end = datetime(2024, 1, 8, 10, 0, 0)
+
+        chosen = find_available_teacher(
+            course,
+            start,
+            end,
+            link=link,
+            subgroup_label=None,
+        )
+
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen.id, teacher_b.id)
 
     def test_cleanup_command_realigns_existing_sessions(self) -> None:
         course, link, class_group = self._create_tp_course()
@@ -1488,7 +1529,67 @@ class SchedulerRelocationTestCase(DatabaseTestCase):
         self.assertEqual(weekday_frequencies.get(first_start.weekday(), 0), 0)
 
 
-class ScheduleGenerationFailureTestCase(DatabaseTestCase):
+class ScheduleGenerationTestCase(DatabaseTestCase):
+    def test_schedule_prioritises_targets_with_less_shared_availability(self) -> None:
+        base_name = CourseName(name="Algorithmie")
+        course = Course(
+            name=Course.compose_name("TP", base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO2", size=24)
+        link = CourseClassLink(class_group=class_group, group_count=2)
+        room = Room(name="C101", capacity=24)
+        limited = Teacher(name="Alice")
+        flexible = Teacher(name="Bruno")
+        db.session.add_all([base_name, course, class_group, link, room, limited, flexible])
+        course.class_links.append(link)
+        db.session.commit()
+
+        link.teacher_a = flexible
+        link.teacher_b = limited
+        db.session.commit()
+
+        limited_slot = TeacherAvailability(
+            teacher=limited,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(10, 0),
+        )
+        flexible_slot = TeacherAvailability(
+            teacher=flexible,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(12, 15),
+        )
+        db.session.add_all([limited_slot, flexible_slot])
+        db.session.commit()
+
+        created = generate_schedule(
+            course,
+            window_start=date(2025, 9, 1),
+            window_end=date(2025, 9, 5),
+        )
+
+        self.assertEqual(len(created), 2)
+        subgroup_sessions = {session.subgroup_label: session for session in created}
+        self.assertIn("A", subgroup_sessions)
+        self.assertIn("B", subgroup_sessions)
+
+        limited_session = subgroup_sessions["B"]
+        flexible_session = subgroup_sessions["A"]
+
+        self.assertEqual(limited_session.teacher_id, limited.id)
+        self.assertEqual(limited_session.start_time, datetime(2025, 9, 1, 8, 0))
+        self.assertEqual(limited_session.room_id, room.id)
+
+        self.assertEqual(flexible_session.teacher_id, flexible.id)
+        self.assertGreater(flexible_session.start_time, limited_session.start_time)
+        self.assertEqual(flexible_session.room_id, room.id)
+
     def test_generate_schedule_raises_when_no_room_available(self) -> None:
         course, link, _ = self._create_tp_course()
 
