@@ -47,6 +47,7 @@ from .progress import progress_registry, ScheduleProgressTracker
 from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
+    course_generation_order_key,
     fits_in_windows,
     format_class_label,
     generate_schedule,
@@ -782,7 +783,12 @@ def _validate_session_constraints(
 @bp.route("/", methods=["GET", "POST"])
 def dashboard():
     courses = (
-        Course.query.options(selectinload(Course.generation_logs))
+        Course.query.options(
+            selectinload(Course.generation_logs),
+            selectinload(Course.class_links),
+            selectinload(Course.allowed_weeks),
+            selectinload(Course.teachers),
+        )
         .order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
         .all()
     )
@@ -996,7 +1002,8 @@ def dashboard():
                 return jsonify(response), 202
             total_created = 0
             error_messages: list[str] = []
-            for course in courses:
+            ordered_courses = sorted(courses, key=course_generation_order_key)
+            for course in ordered_courses:
                 allowed_ranges = course.allowed_week_ranges
                 window_start = allowed_ranges[0][0] if allowed_ranges else None
                 window_end = allowed_ranges[-1][1] if allowed_ranges else None
@@ -1934,15 +1941,18 @@ def courses_list():
 @bp.route("/generation", methods=["GET", "POST"])
 def generation_overview():
     def _load_courses_for_generation() -> list[Course]:
-        return (
+        courses = (
             Course.query.options(
                 selectinload(Course.class_links),
                 selectinload(Course.sessions),
+                selectinload(Course.allowed_weeks),
+                selectinload(Course.teachers),
                 selectinload(Course.generation_logs),
             )
             .order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc())
             .all()
         )
+        return sorted(courses, key=course_generation_order_key)
 
     if request.method == "POST":
         action = request.form.get("form")
@@ -2742,9 +2752,12 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 .options(
                     selectinload(Course.class_links),
                     selectinload(Course.sessions),
+                    selectinload(Course.allowed_weeks),
+                    selectinload(Course.teachers),
                 )
                 .all()
             )
+            courses = sorted(courses, key=course_generation_order_key)
             total_hours = sum(
                 max(course.total_required_hours - course.scheduled_hours, 0)
                 for course in courses

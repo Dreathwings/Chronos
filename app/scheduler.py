@@ -15,6 +15,7 @@ from .models import (
     CourseClassLink,
     CourseScheduleLog,
     ClosingPeriod,
+    COURSE_TYPE_PLACEMENT_ORDER,
     Room,
     Session,
     Teacher,
@@ -86,6 +87,16 @@ def _course_type_priority(course_type: str | None) -> int | None:
     if priority is not None:
         return priority
     return COURSE_TYPE_CHRONOLOGY.get(course_type.upper())
+
+
+def _course_type_order_index(course_type: str | None) -> int:
+    if not course_type:
+        return len(COURSE_TYPE_PLACEMENT_ORDER)
+    normalized = course_type.strip().upper()
+    for index, label in enumerate(COURSE_TYPE_PLACEMENT_ORDER):
+        if normalized == label.upper():
+            return index
+    return len(COURSE_TYPE_PLACEMENT_ORDER)
 
 
 ERROR_CONTEXT_LABELS = {
@@ -1366,6 +1377,39 @@ def _shared_hours_between_teacher_and_class(
     return total
 
 
+def _shared_hours_between_teacher_and_groups(
+    teacher: Teacher,
+    class_groups: Iterable[ClassGroup],
+    schedule_start: date,
+    schedule_end: date,
+    *,
+    allowed_days: Set[date] | None = None,
+) -> float:
+    groups = [group for group in class_groups if group is not None]
+    if not groups:
+        return 0.0
+    total = 0.0
+    for day in daterange(schedule_start, schedule_end):
+        if day.weekday() >= 5:
+            continue
+        if allowed_days is not None and day not in allowed_days:
+            continue
+        if not teacher.is_available_on(day):
+            continue
+        if not all(group.is_available_on(day) for group in groups):
+            continue
+        for slot_start, slot_end in SCHEDULE_SLOTS:
+            slot_hours = SLOT_DURATION_HOURS[(slot_start, slot_end)]
+            start_dt = datetime.combine(day, slot_start)
+            end_dt = datetime.combine(day, slot_end)
+            if not teacher.is_available_during(start_dt, end_dt):
+                continue
+            if not all(group.is_available_during(start_dt, end_dt) for group in groups):
+                continue
+            total += slot_hours
+    return total
+
+
 def _has_contiguous_slots(indices: Iterable[int], required_length: int) -> bool:
     if required_length <= 1:
         return bool(indices)
@@ -1525,6 +1569,97 @@ def _shared_availability_hours_for_target(
         )
         shared = max(shared, overlap)
     return shared
+
+
+def course_shared_availability_priority(
+    course: Course,
+    *,
+    window_start: date | None = None,
+    window_end: date | None = None,
+    allowed_weeks: Iterable[tuple[date, date]] | None = None,
+) -> float:
+    try:
+        schedule_start, schedule_end, allowed_days, _ = _prepare_schedule_context(
+            course,
+            window_start=window_start,
+            window_end=window_end,
+            allowed_weeks=allowed_weeks,
+            reporter=None,
+        )
+    except ValueError:
+        return float("inf")
+
+    if course.is_cm:
+        class_groups = [link.class_group for link in course.class_links if link.class_group]
+        if not class_groups:
+            return float("inf")
+        primary_link = next((link for link in course.class_links if link.class_group), None)
+        target_ids = {
+            group.id or link.class_group_id
+            for link in course.class_links
+            for group in ([link.class_group] if link.class_group else [])
+            if (group.id or link.class_group_id) is not None
+        }
+        teacher_candidates = []
+        if primary_link is not None:
+            teacher_candidates = _teacher_candidates_for_slot(
+                course,
+                link=primary_link,
+                subgroup_label=None,
+                target_class_ids=target_ids or None,
+            )
+        if not teacher_candidates:
+            teacher_candidates = list(course.teachers)
+        min_shared: float | None = None
+        for teacher in teacher_candidates:
+            overlap = _shared_hours_between_teacher_and_groups(
+                teacher,
+                class_groups,
+                schedule_start,
+                schedule_end,
+                allowed_days=allowed_days,
+            )
+            if min_shared is None or overlap < min_shared:
+                min_shared = overlap
+        return float("inf") if min_shared is None else min_shared
+
+    min_shared: float | None = None
+    for link in course.class_links:
+        class_group = link.class_group
+        if class_group is None:
+            continue
+        for subgroup_label in link.group_labels():
+            shared = _shared_availability_hours_for_target(
+                course,
+                link=link,
+                class_group=class_group,
+                subgroup_label=subgroup_label,
+                schedule_start=schedule_start,
+                schedule_end=schedule_end,
+                allowed_days=allowed_days,
+            )
+            if min_shared is None or shared < min_shared:
+                min_shared = shared
+    return float("inf") if min_shared is None else min_shared
+
+
+def course_generation_order_key(course: Course) -> tuple[int, float, str, int]:
+    allowed_ranges = course.allowed_week_ranges
+    window_start = allowed_ranges[0][0] if allowed_ranges else None
+    window_end = allowed_ranges[-1][1] if allowed_ranges else None
+    allowed_payload = (
+        [(start, end) for start, end in allowed_ranges] if allowed_ranges else None
+    )
+    shared_priority = course_shared_availability_priority(
+        course,
+        window_start=window_start,
+        window_end=window_end,
+        allowed_weeks=allowed_payload,
+    )
+    type_priority = _course_type_order_index(course.course_type)
+    name_key = (course.name or "").lower()
+    id_key = course.id or 0
+    return (type_priority, shared_priority, name_key, id_key)
 
 
 def _weekday_frequency_for_groups(
@@ -2498,27 +2633,24 @@ def _resolve_schedule_window(
     return start, end
 
 
-def generate_schedule(
+def _prepare_schedule_context(
     course: Course,
     *,
-    window_start: date | None = None,
-    window_end: date | None = None,
-    allowed_weeks: Iterable[tuple[date, date]] | None = None,
-    progress: ScheduleProgress | None = None,
-) -> list[Session]:
-    progress = progress or NullScheduleProgress()
-    reporter = ScheduleReporter(course)
-    created_sessions: list[Session] = []
-    placement_failures: list[str] = []
-
+    window_start: date | None,
+    window_end: date | None,
+    allowed_weeks: Iterable[tuple[date, date]] | None,
+    reporter: ScheduleReporter | None,
+) -> tuple[date, date, set[date] | None, list[tuple[date, date]]]:
     try:
         schedule_start, schedule_end = _resolve_schedule_window(
             course, window_start, window_end
         )
     except ValueError as exc:
-        reporter.error(str(exc), suggestions=suggest_schedule_recovery(str(exc), course))
-        reporter.summary = str(exc)
-        reporter.finalise(len(created_sessions))
+        if reporter is not None:
+            message = str(exc)
+            reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
+            reporter.summary = message
+            reporter.finalise(0)
         raise
 
     normalised_weeks: list[tuple[date, date]] = []
@@ -2541,24 +2673,21 @@ def generate_schedule(
             truncated_weeks.append((span_start, span_end))
         normalised_weeks = truncated_weeks
         if not normalised_weeks:
-            message = (
-                "Les semaines sélectionnées ne recoupent pas la fenêtre du cours."
-            )
-            reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
-            reporter.summary = message
-            reporter.finalise(0)
+            message = "Les semaines sélectionnées ne recoupent pas la fenêtre du cours."
+            if reporter is not None:
+                reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
+                reporter.summary = message
+                reporter.finalise(0)
             raise ValueError(message)
         schedule_start = normalised_weeks[0][0]
         schedule_end = normalised_weeks[-1][1]
-        reporter.set_window(schedule_start, schedule_end)
-    else:
+
+    if reporter is not None:
         reporter.set_window(schedule_start, schedule_end)
 
     closed_days = _closed_days_between(schedule_start, schedule_end)
-    if closed_days:
-        reporter.info(
-            f"{len(closed_days)} jour(s) exclus pour fermeture (vacances)"
-        )
+    if reporter is not None and closed_days:
+        reporter.info(f"{len(closed_days)} jour(s) exclus pour fermeture (vacances)")
 
     allowed_days: set[date] | None = None
     if normalised_weeks:
@@ -2574,20 +2703,19 @@ def generate_schedule(
                 removed_weeks.append(span_start)
                 continue
             allowed_days.update(span_days)
-        if removed_weeks:
+        if reporter is not None and removed_weeks:
             removed_labels = ", ".join(
                 week_start.strftime("%d/%m/%Y") for week_start in removed_weeks
             )
-            reporter.info(
-                "Semaines exclues pour congés : " + removed_labels
-            )
+            reporter.info("Semaines exclues pour congés : " + removed_labels)
         if not allowed_days:
             message = (
                 "Les semaines sélectionnées correspondent uniquement à des périodes de fermeture."
             )
-            reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
-            reporter.summary = message
-            reporter.finalise(0)
+            if reporter is not None:
+                reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
+                reporter.summary = message
+                reporter.finalise(0)
             raise ValueError(message)
     elif closed_days:
         allowed_days = {
@@ -2599,10 +2727,40 @@ def generate_schedule(
             message = (
                 "La fenêtre de planification est entièrement couverte par des périodes de fermeture."
             )
-            reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
-            reporter.summary = message
-            reporter.finalise(0)
+            if reporter is not None:
+                reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
+                reporter.summary = message
+                reporter.finalise(0)
             raise ValueError(message)
+
+    return schedule_start, schedule_end, allowed_days, normalised_weeks
+
+
+def generate_schedule(
+    course: Course,
+    *,
+    window_start: date | None = None,
+    window_end: date | None = None,
+    allowed_weeks: Iterable[tuple[date, date]] | None = None,
+    progress: ScheduleProgress | None = None,
+) -> list[Session]:
+    progress = progress or NullScheduleProgress()
+    reporter = ScheduleReporter(course)
+    created_sessions: list[Session] = []
+    placement_failures: list[str] = []
+
+    try:
+        schedule_start, schedule_end, allowed_days, normalised_weeks = (
+            _prepare_schedule_context(
+                course,
+                window_start=window_start,
+                window_end=window_end,
+                allowed_weeks=allowed_weeks,
+                reporter=reporter,
+            )
+        )
+    except ValueError:
+        raise
 
     if normalised_weeks:
         candidate_days = (

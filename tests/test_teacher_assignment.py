@@ -26,6 +26,7 @@ from sqlalchemy import text
 from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
+    course_generation_order_key,
     find_available_teacher,
     generate_schedule,
     has_weekly_course_conflict,
@@ -1644,6 +1645,97 @@ class ScheduleGenerationTestCase(DatabaseTestCase):
         self.assertEqual(flexible_session.teacher_id, flexible.id)
         self.assertGreater(flexible_session.start_time, limited_session.start_time)
         self.assertEqual(flexible_session.room_id, room.id)
+
+    def test_course_generation_order_key_respects_type_and_shared_hours(self) -> None:
+        base_name = CourseName(name="Architecture")
+        class_group = ClassGroup(name="INFO3", size=24)
+        teacher_cm = Teacher(name="Professeur CM")
+        teacher_td_limited = Teacher(name="Professeur TD Limité")
+        teacher_td_flexible = Teacher(name="Professeur TD Flexible")
+        room = Room(name="D101", capacity=30)
+        db.session.add_all(
+            [
+                base_name,
+                class_group,
+                teacher_cm,
+                teacher_td_limited,
+                teacher_td_flexible,
+                room,
+            ]
+        )
+        db.session.commit()
+
+        course_cm = Course(
+            name=Course.compose_name("CM", base_name.name, "S1"),
+            course_type="CM",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        course_td_limited = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        course_td_flexible = Course(
+            name=Course.compose_name("TD", f"{base_name.name} 2", "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+
+        link_cm = CourseClassLink(class_group=class_group)
+        link_td_limited = CourseClassLink(class_group=class_group)
+        link_td_flexible = CourseClassLink(class_group=class_group)
+        course_cm.class_links.append(link_cm)
+        course_td_limited.class_links.append(link_td_limited)
+        course_td_flexible.class_links.append(link_td_flexible)
+
+        db.session.add_all([course_cm, course_td_limited, course_td_flexible])
+        db.session.commit()
+
+        link_cm.teacher_a = teacher_cm
+        link_td_limited.teacher_a = teacher_td_limited
+        link_td_flexible.teacher_a = teacher_td_flexible
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_cm,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_td_limited,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(10, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_td_flexible,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        ordered = sorted(
+            [course_td_flexible, course_cm, course_td_limited],
+            key=course_generation_order_key,
+        )
+
+        self.assertEqual([course.course_type for course in ordered], ["CM", "TD", "TD"])
+        self.assertEqual(ordered[1].id, course_td_limited.id)
+        self.assertEqual(ordered[2].id, course_td_flexible.id)
 
     def test_generate_schedule_raises_when_no_room_available(self) -> None:
         course, link, _ = self._create_tp_course()
