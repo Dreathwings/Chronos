@@ -1238,14 +1238,12 @@ def find_available_teacher(
         _append_unique(candidates, existing_teachers)
 
     _append_unique(candidates, preferred)
-    if not candidates:
-        _append_unique(
-            candidates,
-            sorted(
-                [teacher for teacher in fallback_pool if teacher not in preferred],
-                key=lambda t: t.name.lower(),
-            ),
-        )
+
+    fallback_candidates = sorted(
+        [teacher for teacher in fallback_pool if teacher not in preferred],
+        key=lambda t: t.name.lower(),
+    )
+    _append_unique(candidates, fallback_candidates)
 
     for teacher in candidates:
         segments_to_check = segments or [(start, end)]
