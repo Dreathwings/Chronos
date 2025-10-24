@@ -26,6 +26,7 @@ from sqlalchemy import text
 from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
+    find_available_teacher,
     generate_schedule,
     has_weekly_course_conflict,
     _relocate_sessions_for_groups,
@@ -84,6 +85,46 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         link.teacher_b = None
         db.session.commit()
         self.assertEqual([t.id for t in link.preferred_teachers("B")], [teacher_a.id])
+
+    def test_find_available_teacher_tries_alternative_assigned_teacher(self) -> None:
+        course, link, _ = self._create_tp_course()
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        db.session.add_all([teacher_a, teacher_b])
+        db.session.commit()
+
+        link.teacher_a = teacher_a
+        link.teacher_b = teacher_b
+        db.session.commit()
+
+        availability_a = TeacherAvailability(
+            teacher=teacher_a,
+            weekday=1,
+            start_time=time(8, 0),
+            end_time=time(12, 0),
+        )
+        availability_b = TeacherAvailability(
+            teacher=teacher_b,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(12, 0),
+        )
+        db.session.add_all([availability_a, availability_b])
+        db.session.commit()
+
+        start = datetime(2024, 1, 8, 8, 0, 0)
+        end = datetime(2024, 1, 8, 10, 0, 0)
+
+        chosen = find_available_teacher(
+            course,
+            start,
+            end,
+            link=link,
+            subgroup_label=None,
+        )
+
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen.id, teacher_b.id)
 
     def test_cleanup_command_realigns_existing_sessions(self) -> None:
         course, link, class_group = self._create_tp_course()
