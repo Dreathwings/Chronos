@@ -1247,20 +1247,45 @@ def find_available_teacher(
             ),
         )
 
-    for teacher in candidates:
-        segments_to_check = segments or [(start, end)]
+    def _is_teacher_available(candidate: Teacher) -> bool:
+        candidate_segments = segments or [(start, end)]
         if not all(
-            teacher.is_available_during(segment_start, segment_end)
-            for segment_start, segment_end in segments_to_check
+            candidate.is_available_during(segment_start, segment_end)
+            for segment_start, segment_end in candidate_segments
         ):
-            continue
+            return False
         if any(
             overlaps(s.start_time, s.end_time, segment_start, segment_end)
-            for s in teacher.sessions
-            for segment_start, segment_end in segments_to_check
+            for s in candidate.sessions
+            for segment_start, segment_end in candidate_segments
         ):
-            continue
-        return teacher
+            return False
+        return True
+
+    for teacher in candidates:
+        if _is_teacher_available(teacher):
+            return teacher
+
+    if link is not None and course.teachers:
+        backup_allowed_ids = allowed_ids
+        try:
+            allowed_ids = None
+            additional_candidates: list[Teacher] = []
+            extra_pool = [
+                teacher
+                for teacher in course.teachers
+                if teacher is not None and teacher not in fallback_pool
+            ]
+            if extra_pool:
+                _append_unique(
+                    additional_candidates,
+                    sorted(extra_pool, key=lambda t: t.name.lower()),
+                )
+            for teacher in additional_candidates:
+                if _is_teacher_available(teacher):
+                    return teacher
+        finally:
+            allowed_ids = backup_allowed_ids
     return None
 
 
