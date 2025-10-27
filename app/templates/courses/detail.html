@@ -185,9 +185,6 @@
               {% endfor %}
             </div>
           </div>
-          {% if course.class_links %}
-          <div class="form-text">Les enseignants sont définis depuis la section dédiée ci-dessous.</div>
-          {% endif %}
           <div>
             <label class="form-label">Équipements requis</label>
             {% for equipment in equipments %}
@@ -211,153 +208,65 @@
           </div>
         </div>
       </div>
-      {% if course.class_links %}
+
       <div class="accordion-item shadow-sm">
-        <h2 class="accordion-header" id="headingTeachersByClass">
+        <h2 class="accordion-header" id="headingTeacherHours">
           <button
             class="accordion-button collapsed bg-secondary text-white"
             type="button"
             data-bs-toggle="collapse"
-            data-bs-target="#collapseTeachersByClass"
+            data-bs-target="#collapseTeacherHours"
             aria-expanded="false"
-            aria-controls="collapseTeachersByClass"
+            aria-controls="collapseTeacherHours"
           >
-            Enseignants par classe
+            Répartition des heures par enseignant
           </button>
         </h2>
         <div
-          id="collapseTeachersByClass"
+          id="collapseTeacherHours"
           class="accordion-collapse collapse"
-          aria-labelledby="headingTeachersByClass"
+          aria-labelledby="headingTeacherHours"
           data-bs-parent="#courseDetailsAccordion"
         >
           <div class="accordion-body">
-        {% if available_teachers %}
-        <form method="post" class="vstack gap-3">
-          <input type="hidden" name="form" value="update-class-teachers">
-          {% if course.course_type == 'CM' %}
-          {% set class_names = course.class_links | map(attribute='class_group.name') | list %}
-          {% set ns = namespace(shared_teacher=None) %}
-          {% for link in course.class_links %}
-          {% if ns.shared_teacher is none and (link.teacher_a or link.teacher_b) %}
-          {% set ns.shared_teacher = link.teacher_a or link.teacher_b %}
-          {% endif %}
-          {% endfor %}
-          <div class="border rounded p-2">
-            <div class="fw-semibold">Cours magistral</div>
-            <div class="text-muted small mb-2">
-              Enseignant appliqué à l'ensemble des classes : {{ class_names | join(', ') }}.
-            </div>
-            <select class="form-select form-select-sm" name="course_teacher_all">
-              <option value="" {% if not ns.shared_teacher %}selected{% endif %}>— Aucun enseignant —</option>
-              {% for teacher in available_teachers %}
-              <option value="{{ teacher.id }}" {% if ns.shared_teacher and teacher.id == ns.shared_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
+            {% if sorted_course_teachers %}
+            <form method="post" class="vstack gap-3">
+              <input type="hidden" name="form" value="update-teacher-hours">
+              <div class="text-muted small">
+                Indiquez la charge horaire à générer pour chaque enseignant sélectionné.
+              </div>
+              {% if total_teacher_hours %}
+              <div class="text-muted small">Total déclaré : <strong>{{ total_teacher_hours }} h</strong></div>
+              {% endif %}
+              {% for teacher in sorted_course_teachers %}
+              {% set allocation = teacher_hours_map.get(teacher.id) %}
+              <div class="border rounded p-2">
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                  <div class="fw-semibold">{{ teacher.name }}</div>
+                  <div class="d-flex align-items-center gap-2">
+                    <label class="form-label small mb-0" for="teacher-hours-{{ teacher.id }}">Heures à générer</label>
+                    <input
+                      type="number"
+                      class="form-control form-control-sm"
+                      name="teacher_hours_{{ teacher.id }}"
+                      id="teacher-hours-{{ teacher.id }}"
+                      min="0"
+                      step="1"
+                      value="{{ allocation.hours if allocation else 0 }}"
+                    >
+                  </div>
+                </div>
+                <div class="text-muted small mt-2">Saisissez 0 pour exclure cet enseignant de la génération.</div>
+              </div>
               {% endfor %}
-            </select>
-          </div>
-          {% elif course.course_type == 'SAE' %}
-          {% for link in course.class_links %}
-          <div class="border rounded p-2">
-            <div class="fw-semibold">{{ link.class_group.name }}</div>
-            <div class="text-muted small mb-2">Deux enseignants doivent encadrer cette classe.</div>
-            <div class="row g-2">
-              <div class="col-md-6">
-                <label class="form-label small mb-1">Enseignant 1</label>
-                <select class="form-select form-select-sm" name="class_link_teacher_a_{{ link.class_group_id }}">
-                  <option value="" {% if not link.teacher_a %}selected{% endif %}>— Aucun enseignant —</option>
-                  {% for teacher in available_teachers %}
-                  <option value="{{ teacher.id }}" {% if link.teacher_a and teacher.id == link.teacher_a.id %}selected{% endif %}>{{ teacher.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label small mb-1">Enseignant 2</label>
-                <select class="form-select form-select-sm" name="class_link_teacher_b_{{ link.class_group_id }}">
-                  <option value="" {% if not link.teacher_b %}selected{% endif %}>— Aucun enseignant —</option>
-                  {% for teacher in available_teachers %}
-                  <option value="{{ teacher.id }}" {% if link.teacher_b and teacher.id == link.teacher_b.id %}selected{% endif %}>{{ teacher.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-            </div>
-          </div>
-          {% endfor %}
-          {% else %}
-          {% for link in course.class_links %}
-          {% set assigned_teacher = link.teacher_a or link.teacher_b %}
-          <div class="border rounded p-2">
-            <div class="fw-semibold">{{ link.class_group.name }}</div>
-            <div class="text-muted small mb-2">
-              {% if course.course_type == 'TP' %}
-              Travaux pratiques — demi-groupes
-              {% if teacher_duos_average_hours is not none and loop.first %}
-              <div class="mt-1">
-                <span class="text-muted small">
-                  Moyenne des disponibilités communes proposées :
-                  {{ ('%.1f' % teacher_duos_average_hours).rstrip('0').rstrip('.') }} h
-                </span>
-              </div>
-              {% endif %}
-              {% set recommended_duo = teacher_duos_by_class.get(link.class_group_id) %}
-              {% if recommended_duo %}
-              <div class="mt-1">
-                <div>Duo recommandé :</div>
-                <ul class="small mb-0 ps-3">
-                  <li>
-                    {{ recommended_duo[0].name }} + {{ recommended_duo[1].name }} —
-                    {{ ('%.1f' % recommended_duo[2]).rstrip('0').rstrip('.') }} h communes
-                  </li>
-                </ul>
-              </div>
-              {% endif %}
-              {% else %}
-              Classe entière
-              {% endif %}
-            </div>
-            {% if link.group_count == 2 %}
-            {% set teacher_a = link.teacher_for_label('A') %}
-            {% set teacher_b = link.teacher_for_label('B') %}
-            <div class="row g-2">
-              <div class="col-md-6">
-                <label class="form-label small mb-1">Sous-groupe A — {{ link.subgroup_name_for('A') }}</label>
-                <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}_A">
-                  <option value="" {% if not teacher_a %}selected{% endif %}>— Aucun enseignant —</option>
-                  {% for teacher in available_teachers %}
-                  <option value="{{ teacher.id }}" {% if teacher_a and teacher.id == teacher_a.id %}selected{% endif %}>{{ teacher.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label small mb-1">Sous-groupe B — {{ link.subgroup_name_for('B') }}</label>
-                <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}_B">
-                  <option value="" {% if not teacher_b %}selected{% endif %}>— Aucun enseignant —</option>
-                  {% for teacher in available_teachers %}
-                  <option value="{{ teacher.id }}" {% if teacher_b and teacher.id == teacher_b.id %}selected{% endif %}>{{ teacher.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-            </div>
+              <button type="submit" class="btn btn-outline-secondary">Mettre à jour</button>
+            </form>
             {% else %}
-            {% set assigned_teacher = link.teacher_for_label(None) %}
-            <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}">
-              <option value="" {% if not assigned_teacher %}selected{% endif %}>— Aucun enseignant —</option>
-              {% for teacher in available_teachers %}
-              <option value="{{ teacher.id }}" {% if assigned_teacher and teacher.id == assigned_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
-              {% endfor %}
-            </select>
+            <p class="text-muted small mb-0">Ajoutez des enseignants dans la section Contraintes pour définir une charge horaire.</p>
             {% endif %}
-          </div>
-          {% endfor %}
-          {% endif %}
-          <button type="submit" class="btn btn-outline-secondary">Mettre à jour</button>
-        </form>
-        {% else %}
-        <p class="text-muted mb-0 small">Ajoutez des enseignants dans la section Contraintes pour les associer aux classes.</p>
-        {% endif %}
           </div>
         </div>
       </div>
-      {% endif %}
       <div class="accordion-item shadow-sm">
         <h2 class="accordion-header" id="headingQuickActions">
           <button

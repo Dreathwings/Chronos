@@ -30,6 +30,7 @@ from .models import (
     Course,
     CourseAllowedWeek,
     CourseClassLink,
+    CourseTeacherHour,
     CourseScheduleLog,
     CourseName,
     Equipment,
@@ -40,7 +41,6 @@ from .models import (
     Teacher,
     TeacherAvailability,
     SEMESTER_CHOICES,
-    recommend_teacher_duos_for_classes,
     semester_date_window,
 )
 from .progress import progress_registry, ScheduleProgressTracker
@@ -516,8 +516,8 @@ def _sync_course_class_links(
             base_teacher = link.teacher_a or link.teacher_b
             if base_teacher and link.teacher_b is None:
                 link.teacher_b = base_teacher
-            if link.subgroup_a_course_name is None:
-                link.subgroup_a_course_name = preserved_name_a
+        if link.subgroup_a_course_name is None:
+            link.subgroup_a_course_name = preserved_name_a
             if link.subgroup_b_course_name is None:
                 link.subgroup_b_course_name = preserved_name_b
         elif course.is_sae:
@@ -528,6 +528,63 @@ def _sync_course_class_links(
             link.subgroup_a_course_name = None
             link.subgroup_b_course_name = None
         db.session.flush([link])
+
+
+def _sync_course_teacher_hours(
+    course: Course, allowed_teacher_ids: Iterable[int]
+) -> None:
+    allowed_ids = {int(tid) for tid in allowed_teacher_ids if tid is not None}
+    for allocation in list(course.teacher_hour_allocations):
+        if allocation.teacher_id not in allowed_ids:
+            course.teacher_hour_allocations.remove(allocation)
+            db.session.flush()
+
+
+def _update_course_teacher_hours(
+    course: Course, hours_by_teacher: dict[int, int]
+) -> None:
+    allowed_ids = {
+        teacher.id for teacher in course.teachers if teacher.id is not None
+    }
+    existing = {
+        allocation.teacher_id: allocation
+        for allocation in list(course.teacher_hour_allocations)
+    }
+
+    for teacher_id, allocation in list(existing.items()):
+        if teacher_id not in allowed_ids:
+            course.teacher_hour_allocations.remove(allocation)
+            db.session.flush()
+            existing.pop(teacher_id, None)
+
+    for teacher_id, raw_hours in hours_by_teacher.items():
+        if teacher_id not in allowed_ids:
+            continue
+        try:
+            hours = int(raw_hours)
+        except (TypeError, ValueError):
+            hours = 0
+        hours = max(hours, 0)
+        allocation = existing.get(teacher_id)
+        if hours <= 0:
+            if allocation is not None:
+                course.teacher_hour_allocations.remove(allocation)
+                db.session.flush()
+                existing.pop(teacher_id, None)
+            continue
+        if allocation is None:
+            allocation = CourseTeacherHour(teacher_id=teacher_id, hours=hours)
+            course.teacher_hour_allocations.append(allocation)
+            db.session.flush()
+            existing[teacher_id] = allocation
+        else:
+            allocation.hours = hours
+
+    submitted_ids = set(hours_by_teacher.keys())
+    for teacher_id, allocation in list(existing.items()):
+        if teacher_id not in submitted_ids and teacher_id in allowed_ids:
+            course.teacher_hour_allocations.remove(allocation)
+            db.session.flush()
 
 
 def _parse_unavailability_tokens(raw: str | None) -> set[str]:
@@ -2296,6 +2353,10 @@ def course_detail(course_id: int):
             _sync_simple_relationship(course.softwares, selected_softwares)
             _sync_course_class_links(course, class_ids, existing_links=class_links_map)
             _sync_simple_relationship(course.teachers, selected_teachers)
+            _sync_course_teacher_hours(
+                course,
+                (teacher.id for teacher in selected_teachers if teacher is not None),
+            )
             _sync_course_allowed_weeks(course, (start for start, _ in selected_weeks))
             try:
                 db.session.commit()
@@ -2344,81 +2405,35 @@ def course_detail(course_id: int):
             except ValueError as exc:
                 db.session.commit()
                 flash(str(exc), "danger")
-        elif form_name == "update-class-teachers":
-            allowed_teacher_ids = {teacher.id for teacher in course.teachers if teacher.id}
-            if course.is_cm:
-                teacher = _parse_teacher_selection(
-                    request.form.get("course_teacher_all"),
-                    allowed_ids=allowed_teacher_ids,
+        elif form_name == "update-teacher-hours":
+            allowed_teacher_ids = {
+                teacher.id for teacher in course.teachers if teacher.id is not None
+            }
+            if not allowed_teacher_ids:
+                flash(
+                    "Ajoutez d'abord des enseignants dans la section Contraintes.",
+                    "danger",
                 )
-                for link in course.class_links:
-                    link.teacher_a = teacher
-                    link.teacher_b = None
-            elif course.is_sae:
-                assignments: list[tuple[CourseClassLink, Teacher, Teacher]] = []
-                for link in course.class_links:
-                    teacher_a = _parse_teacher_selection(
-                        request.form.get(
-                            f"class_link_teacher_a_{link.class_group_id}"
-                        ),
-                        allowed_ids=allowed_teacher_ids,
-                    )
-                    teacher_b = _parse_teacher_selection(
-                        request.form.get(
-                            f"class_link_teacher_b_{link.class_group_id}"
-                        ),
-                        allowed_ids=allowed_teacher_ids,
-                    )
-                    if teacher_a is None or teacher_b is None:
-                        db.session.rollback()
-                        flash(
-                            "Pour les SAE, deux enseignants doivent être attribués à chaque classe.",
-                            "danger",
-                        )
-                        return redirect(
-                            url_for("main.course_detail", course_id=course_id)
-                        )
-                    if teacher_a.id == teacher_b.id:
-                        db.session.rollback()
-                        flash(
-                            "Pour les SAE, les deux enseignants doivent être distincts.",
-                            "danger",
-                        )
-                        return redirect(
-                            url_for("main.course_detail", course_id=course_id)
-                        )
-                    assignments.append((link, teacher_a, teacher_b))
-                for link, teacher_a, teacher_b in assignments:
-                    link.teacher_a = teacher_a
-                    link.teacher_b = teacher_b
-            else:
-                for link in course.class_links:
-                    if link.group_count == 2:
-                        teacher_a = _parse_teacher_selection(
-                            request.form.get(
-                                f"class_link_teacher_{link.class_group_id}_A"
-                            ),
-                            allowed_ids=allowed_teacher_ids,
-                        )
-                        teacher_b = _parse_teacher_selection(
-                            request.form.get(
-                                f"class_link_teacher_{link.class_group_id}_B"
-                            ),
-                            allowed_ids=allowed_teacher_ids,
-                        )
-                        link.teacher_a = teacher_a
-                        link.teacher_b = teacher_b
-                    else:
-                        teacher = _parse_teacher_selection(
-                            request.form.get(
-                                f"class_link_teacher_{link.class_group_id}"
-                            ),
-                            allowed_ids=allowed_teacher_ids,
-                        )
-                        link.teacher_a = teacher
-                        link.teacher_b = None
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            submitted: dict[int, int] = {}
+            for field, value in request.form.items():
+                if not field.startswith("teacher_hours_"):
+                    continue
+                _, _, suffix = field.partition("teacher_hours_")
+                try:
+                    teacher_id = int(suffix)
+                except (TypeError, ValueError):
+                    continue
+                if teacher_id not in allowed_teacher_ids:
+                    continue
+                try:
+                    hours = int(value)
+                except (TypeError, ValueError):
+                    hours = 0
+                submitted[teacher_id] = max(hours, 0)
+            _update_course_teacher_hours(course, submitted)
             db.session.commit()
-            flash("Enseignants par classe mis à jour", "success")
+            flash("Répartition des heures mise à jour", "success")
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
@@ -2502,22 +2517,16 @@ def course_detail(course_id: int):
         .first()
     )
 
-    available_teachers = sorted(
-        course.teachers,
-        key=lambda teacher: (teacher.name or "").lower(),
+    teacher_hours_map = {
+        allocation.teacher_id: allocation
+        for allocation in course.teacher_hour_allocations
+    }
+    sorted_course_teachers = sorted(
+        course.teachers, key=lambda teacher: (teacher.name or "").lower()
     )
-
-    teacher_duos_by_class: dict[int, tuple[Teacher, Teacher, float]] = {}
-    teacher_duos_average_hours: float | None = None
-    if course.course_type == "TP" and available_teachers:
-        teacher_duos_by_class = recommend_teacher_duos_for_classes(
-            course.class_links,
-            available_teachers,
-        )
-        if teacher_duos_by_class:
-            total_overlap = sum(pair[2] for pair in teacher_duos_by_class.values())
-            teacher_duos_average_hours = total_overlap / len(teacher_duos_by_class)
-
+    total_teacher_hours = sum(
+        allocation.hours or 0 for allocation in course.teacher_hour_allocations
+    )
     closing_spans = _closing_period_spans()
 
     week_ranges = _semester_week_ranges(course.semester)
@@ -2567,7 +2576,9 @@ def course_detail(course_id: int):
         course_names=course_names,
         semester_choices=SEMESTER_CHOICES,
         default_semester=DEFAULT_SEMESTER,
-        available_teachers=available_teachers,
+        teacher_hours_map=teacher_hours_map,
+        sorted_course_teachers=sorted_course_teachers,
+        total_teacher_hours=total_teacher_hours,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
@@ -2579,8 +2590,6 @@ def course_detail(course_id: int):
         selected_course_week_labels=selected_course_week_labels,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
-        teacher_duos_by_class=teacher_duos_by_class,
-        teacher_duos_average_hours=teacher_duos_average_hours,
     )
 
 

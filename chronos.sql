@@ -483,6 +483,20 @@ CREATE TABLE IF NOT EXISTS `course_teacher` (
   CONSTRAINT `course_teacher_ibfk_2` FOREIGN KEY (`teacher_id`) REFERENCES `teacher` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
 
+-- Listage de la structure de table chronos. course_teacher_hour
+CREATE TABLE IF NOT EXISTS `course_teacher_hour` (
+  `course_id` int(11) NOT NULL,
+  `teacher_id` int(11) NOT NULL,
+  `hours` int(11) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`course_id`,`teacher_id`),
+  KEY `course_teacher_hour_teacher_id` (`teacher_id`),
+  CONSTRAINT `course_teacher_hour_ibfk_1` FOREIGN KEY (`course_id`) REFERENCES `course` (`id`),
+  CONSTRAINT `course_teacher_hour_ibfk_2` FOREIGN KEY (`teacher_id`) REFERENCES `teacher` (`id`),
+  CONSTRAINT `chk_course_teacher_hours_non_negative` CHECK (`hours` >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin;
+
+-- Listage des données de la table chronos.course_teacher_hour : ~0 rows (environ)
+
 -- Listage des données de la table chronos.course_teacher : ~59 rows (environ)
 INSERT INTO `course_teacher` (`course_id`, `teacher_id`) VALUES
 	(1, 48),

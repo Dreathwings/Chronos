@@ -142,6 +142,11 @@ class Teacher(db.Model, TimeStampedModel):
     courses: Mapped[List["Course"]] = relationship(
         secondary=course_teacher, back_populates="teachers"
     )
+    teacher_hour_allocations: Mapped[List["CourseTeacherHour"]] = relationship(
+        "CourseTeacherHour",
+        back_populates="teacher",
+        cascade="all, delete-orphan",
+    )
     availabilities: Mapped[List["TeacherAvailability"]] = relationship(
         back_populates="teacher",
         cascade="all, delete-orphan",
@@ -199,6 +204,30 @@ class Teacher(db.Model, TimeStampedModel):
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"Teacher<{self.id} {self.name}>"
+
+
+class CourseTeacherHour(db.Model):
+    __tablename__ = "course_teacher_hour"
+
+    course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), primary_key=True)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("teacher.id"), primary_key=True)
+    hours: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    course: Mapped["Course"] = relationship("Course", back_populates="teacher_hour_allocations")
+    teacher: Mapped[Teacher] = relationship("Teacher", back_populates="teacher_hour_allocations")
+
+    __table_args__ = (
+        CheckConstraint(
+            "hours >= 0",
+            name="chk_course_teacher_hours_non_negative",
+        ),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"CourseTeacherHour<Course {self.course_id} / Teacher {self.teacher_id} "
+            f"hours={self.hours}>"
+        )
 
 
 class Room(db.Model, TimeStampedModel):
@@ -271,6 +300,11 @@ class Course(db.Model, TimeStampedModel):
     equipments: Mapped[List["Equipment"]] = relationship(secondary=course_equipment, back_populates="courses")
     class_links: Mapped[List["CourseClassLink"]] = relationship(
         "CourseClassLink",
+        back_populates="course",
+        cascade="all, delete-orphan",
+    )
+    teacher_hour_allocations: Mapped[List["CourseTeacherHour"]] = relationship(
+        "CourseTeacherHour",
         back_populates="course",
         cascade="all, delete-orphan",
     )
@@ -430,6 +464,8 @@ class Course(db.Model, TimeStampedModel):
 
     @property
     def total_required_hours(self) -> int:
+        if self.teacher_hour_allocations:
+            return sum(max(int(allocation.hours or 0), 0) for allocation in self.teacher_hour_allocations)
         group_total = sum(link.group_count for link in self.class_links)
         if self.is_cm:
             multiplier = 1
