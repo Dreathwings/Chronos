@@ -94,6 +94,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_class_group_count_column()
         _ensure_course_class_subgroup_name_columns()
         _ensure_course_class_teacher_columns()
+        _ensure_course_teacher_hours_column()
         _ensure_course_type_column()
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
@@ -470,6 +471,38 @@ def _ensure_course_class_teacher_columns() -> None:
                 connection.execute(text(statement))
     except SQLAlchemyError as exc:  # pragma: no cover
         current_app.logger.warning("Unable to add teacher columns to course_class: %s", exc)
+
+
+def _ensure_course_teacher_hours_column() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course_teacher" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course_teacher")}
+    if "assigned_hours" in existing_columns:
+        return
+
+    dialect = engine.dialect.name
+    if dialect == "mysql":
+        add_column = "ALTER TABLE course_teacher ADD COLUMN assigned_hours DOUBLE NOT NULL DEFAULT 0"
+    elif dialect == "postgresql":
+        add_column = "ALTER TABLE course_teacher ADD COLUMN assigned_hours DOUBLE PRECISION NOT NULL DEFAULT 0"
+    else:
+        add_column = "ALTER TABLE course_teacher ADD COLUMN assigned_hours FLOAT NOT NULL DEFAULT 0"
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(add_column))
+            connection.execute(
+                text(
+                    "UPDATE course_teacher SET assigned_hours = 0 WHERE assigned_hours IS NULL"
+                )
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        current_app.logger.warning(
+            "Unable to add assigned_hours column to course_teacher: %s", exc
+        )
 
 
 def _ensure_course_class_subgroup_name_columns() -> None:
