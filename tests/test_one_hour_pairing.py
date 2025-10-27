@@ -57,7 +57,7 @@ class OneHourPlacementTestCase(DatabaseTestCase):
         link = CourseClassLink(class_group=self.class_group)
         link.teacher_a = self.teacher
         course.class_links.append(link)
-        course.teachers.append(self.teacher)
+        course.set_teacher_hours(self.teacher, course.total_required_hours)
         db.session.add(course)
         db.session.commit()
         return course, link
@@ -179,7 +179,7 @@ class OneHourPlacementTestCase(DatabaseTestCase):
         link_secondary = CourseClassLink(class_group=second_group)
         link_secondary.teacher_a = self.teacher
         course.class_links.extend([link_primary, link_secondary])
-        course.teachers.append(self.teacher)
+        course.set_teacher_hours(self.teacher, course.total_required_hours)
         db.session.add(course)
         db.session.commit()
 

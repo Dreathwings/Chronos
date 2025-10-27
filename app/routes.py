@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import threading
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Iterable, List, MutableSequence
+from typing import Iterable, List, MutableSequence, Mapping, Sequence
 
 from flask import (
     Blueprint,
@@ -116,6 +117,8 @@ STUDENT_PATHWAY_CHOICES = {
 }
 
 STUDENT_GROUP_CHOICES: tuple[str, ...] = ("A", "B")
+
+TEACHER_HOURS_FIELD_RE = re.compile(r"^teacher_hours\[(\d+)\]$")
 
 
 def _normalise_course_type(raw_value: str | None) -> str:
@@ -375,6 +378,63 @@ def _parse_week_selection(values: Iterable[str]) -> list[tuple[date, date]]:
         selections.append((span_start, span_end))
     selections.sort(key=lambda span: span[0])
     return selections
+
+
+def _parse_teacher_hours_inputs(
+    form_data: Mapping[str, str],
+    teacher_lookup: Mapping[int, Teacher],
+) -> tuple[dict[int, float], set[int], list[str]]:
+    desired: dict[int, float] = {}
+    preserve_ids: set[int] = set()
+    invalid_entries: list[str] = []
+
+    for key, raw_value in form_data.items():
+        match = TEACHER_HOURS_FIELD_RE.match(key)
+        if not match:
+            continue
+        try:
+            teacher_id = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        teacher = teacher_lookup.get(teacher_id)
+        if teacher is None:
+            continue
+        raw = (raw_value or "").strip()
+        if not raw:
+            continue
+        normalised = raw.replace(",", ".")
+        try:
+            hours = float(normalised)
+        except ValueError:
+            preserve_ids.add(teacher_id)
+            invalid_entries.append(teacher.name)
+            continue
+        if hours <= 0:
+            continue
+        desired[teacher_id] = round(hours, 2)
+
+    return desired, preserve_ids, invalid_entries
+
+
+def _sync_course_teacher_hours(
+    course: Course,
+    desired_hours: Mapping[int, float],
+    *,
+    teacher_lookup: Mapping[int, Teacher],
+    preserve_existing_ids: Sequence[int] | set[int] = (),
+) -> None:
+    preserved_ids = set(desired_hours.keys()) | set(preserve_existing_ids)
+
+    for link in list(course.teacher_links):
+        if link.teacher_id not in preserved_ids:
+            course.teacher_links.remove(link)
+            db.session.flush()
+
+    for teacher_id, hours in desired_hours.items():
+        teacher = teacher_lookup.get(teacher_id)
+        if teacher is None:
+            continue
+        course.set_teacher_hours(teacher, hours)
 
 
 def _unique_entities(entities: Iterable[object]) -> list[object]:
@@ -787,6 +847,9 @@ def dashboard():
         .all()
     )
     teachers = Teacher.query.order_by(Teacher.name).all()
+    teacher_lookup = {
+        teacher.id: teacher for teacher in teachers if teacher.id is not None
+    }
     rooms = Room.query.order_by(Room.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
     equipments = Equipment.query.order_by(Equipment.name).all()
@@ -1282,7 +1345,7 @@ def teacher_detail(teacher_id: int):
             course_id = int(request.form["course_id"])
             course = Course.query.get_or_404(course_id)
             if teacher not in course.teachers:
-                course.teachers.append(teacher)
+                course.set_teacher_hours(teacher, course.total_required_hours)
                 db.session.commit()
                 flash("Enseignant assigné au cours", "success")
         elif form_name == "set-availability":
@@ -2231,6 +2294,9 @@ def course_detail(course_id: int):
     equipments = Equipment.query.order_by(Equipment.name).all()
     softwares = Software.query.order_by(Software.name).all()
     teachers = Teacher.query.order_by(Teacher.name).all()
+    teacher_lookup = {
+        teacher.id: teacher for teacher in teachers if teacher.id is not None
+    }
     rooms = Room.query.order_by(Room.name).all()
     class_groups = ClassGroup.query.order_by(ClassGroup.name).all()
     course_names = CourseName.query.order_by(CourseName.name).all()
@@ -2281,13 +2347,9 @@ def course_detail(course_id: int):
                 if software is not None
             ]
             class_ids = {int(cid) for cid in request.form.getlist("classes")}
-            selected_teachers = [
-                teacher
-                for teacher in (
-                    Teacher.query.get(int(tid)) for tid in request.form.getlist("teachers")
-                )
-                if teacher is not None
-            ]
+            desired_teacher_hours, preserve_teacher_ids, invalid_teacher_entries = (
+                _parse_teacher_hours_inputs(request.form, teacher_lookup)
+            )
             selected_weeks = _parse_week_selection(
                 request.form.getlist("allowed_week_starts")
             )
@@ -2295,8 +2357,19 @@ def course_detail(course_id: int):
             _sync_simple_relationship(course.equipments, selected_equipments)
             _sync_simple_relationship(course.softwares, selected_softwares)
             _sync_course_class_links(course, class_ids, existing_links=class_links_map)
-            _sync_simple_relationship(course.teachers, selected_teachers)
+            _sync_course_teacher_hours(
+                course,
+                desired_teacher_hours,
+                teacher_lookup=teacher_lookup,
+                preserve_existing_ids=preserve_teacher_ids,
+            )
             _sync_course_allowed_weeks(course, (start for start, _ in selected_weeks))
+            if invalid_teacher_entries:
+                invalid_list = ", ".join(sorted(set(invalid_teacher_entries)))
+                flash(
+                    f"Valeur d'heures invalide ignorée pour : {invalid_list}.",
+                    "warning",
+                )
             try:
                 db.session.commit()
                 flash("Cours mis à jour", "success")
@@ -2581,6 +2654,7 @@ def course_detail(course_id: int):
         generation_display_status=generation_display_status,
         teacher_duos_by_class=teacher_duos_by_class,
         teacher_duos_average_hours=teacher_duos_average_hours,
+        teacher_hours_map=course.teacher_hours_map,
     )
 
 

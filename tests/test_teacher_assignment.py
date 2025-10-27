@@ -1506,7 +1506,7 @@ class ScheduleGenerationFailureTestCase(DatabaseTestCase):
         db.session.commit()
 
         link.teacher_a = teacher
-        course.teachers.append(teacher)
+        course.set_teacher_hours(teacher, course.total_required_hours)
         db.session.commit()
 
         with self.assertRaises(ValueError) as context:

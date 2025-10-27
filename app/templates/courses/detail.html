@@ -136,20 +136,42 @@
             </div>
           </div>
           <div>
-            <label class="form-label">Enseignants</label>
+            <label class="form-label">Heures par enseignant</label>
+            <div class="form-text mb-2">
+              Indiquez le volume horaire à assurer pour chaque enseignant. Laissez vide pour retirer l'association.
+            </div>
             <input
               type="search"
               class="form-control form-control-sm mb-2"
               placeholder="Rechercher un enseignant..."
               data-filter-target="#course-teachers-list"
             >
-              <div id="course-teachers-list" class="vstack gap-1">
-                {% for teacher in teachers %}
-                <div class="form-check" data-filter-item data-filter-text="{{ teacher.name|lower|e }}">
-                  <input class="form-check-input" type="checkbox" name="teachers" value="{{ teacher.id }}" id="teacher-{{ teacher.id }}" {% if teacher in course.teachers %}checked{% endif %}>
-                  <label class="form-check-label" for="teacher-{{ teacher.id }}">{{ teacher.name }}</label>
+            <div id="course-teachers-list" class="vstack gap-2">
+              {% for teacher in teachers %}
+              {% set assigned_hours = teacher_hours_map.get(teacher.id) %}
+              <div
+                class="course-teacher-hours-item border"
+                data-filter-item
+                data-filter-text="{{ teacher.name|lower|e }}"
+              >
+                <div class="flex-grow-1">
+                  <label class="form-label mb-0" for="teacher-hours-{{ teacher.id }}">{{ teacher.name }}</label>
                 </div>
-                {% endfor %}
+                <div class="input-group input-group-sm course-teacher-hours-input">
+                  <input
+                    type="number"
+                    class="form-control form-control-sm text-end"
+                    min="0"
+                    step="0.5"
+                    name="teacher_hours[{{ teacher.id }}]"
+                    id="teacher-hours-{{ teacher.id }}"
+                    value="{{ ('%.2f' % assigned_hours).rstrip('0').rstrip('.') if assigned_hours is not none else '' }}"
+                    data-filter-keep-if-filled
+                  >
+                  <span class="input-group-text">h</span>
+                </div>
+              </div>
+              {% endfor %}
             </div>
           </div>
           <div>
@@ -628,7 +650,20 @@
         items.forEach(function(item) {
           const filterText = (item.getAttribute('data-filter-text') || item.textContent || '').toLowerCase();
           const checkbox = item.querySelector('input[type="checkbox"]');
-          const isSelected = checkbox ? checkbox.checked : false;
+          let isSelected = checkbox ? checkbox.checked : false;
+          if (!isSelected) {
+            const filledInput = item.querySelector('[data-filter-keep-if-filled]');
+            if (filledInput) {
+              const rawValue = (filledInput.value || '').trim();
+              if (rawValue) {
+                const normalised = rawValue.replace(',', '.');
+                const numericValue = Number.parseFloat(normalised);
+                if (!Number.isNaN(numericValue) && numericValue > 0) {
+                  isSelected = true;
+                }
+              }
+            }
+          }
           const matchesQuery = hasQuery && filterText.indexOf(query) !== -1;
           if (isSelected || matchesQuery) {
             item.classList.remove('d-none');

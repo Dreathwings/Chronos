@@ -11,6 +11,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -20,7 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.ext.associationproxy import association_proxy
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, object_session
 
 from . import db
 from .utils import parse_unavailability_ranges
@@ -53,14 +54,6 @@ room_software = Table(
     Column("room_id", ForeignKey("room.id"), primary_key=True),
     Column("software_id", ForeignKey("software.id"), primary_key=True),
 )
-
-course_teacher = Table(
-    "course_teacher",
-    db.Model.metadata,
-    Column("course_id", ForeignKey("course.id"), primary_key=True),
-    Column("teacher_id", ForeignKey("teacher.id"), primary_key=True),
-)
-
 
 course_name_preferred_room = Table(
     "course_name_preferred_room",
@@ -128,6 +121,39 @@ class ClosingPeriod(db.Model, TimeStampedModel):
         return f"ClosingPeriod<{self.start_date}→{self.end_date}>"
 
 
+class CourseTeacherLink(db.Model, TimeStampedModel):
+    __tablename__ = "course_teacher"
+
+    course_id: Mapped[int] = mapped_column(
+        ForeignKey("course.id"), primary_key=True
+    )
+    teacher_id: Mapped[int] = mapped_column(
+        ForeignKey("teacher.id"), primary_key=True
+    )
+    assigned_hours: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0
+    )
+
+    course: Mapped["Course"] = relationship(
+        "Course", back_populates="teacher_links"
+    )
+    teacher: Mapped["Teacher"] = relationship(
+        "Teacher", back_populates="course_links"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "assigned_hours >= 0", name="chk_course_teacher_hours_non_negative"
+        ),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"CourseTeacherLink<Course {self.course_id} Teacher {self.teacher_id} "
+            f"{self.assigned_hours}h>"
+        )
+
+
 class Teacher(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
@@ -139,8 +165,15 @@ class Teacher(db.Model, TimeStampedModel):
     sessions: Mapped[List["Session"]] = relationship(
         back_populates="teacher", cascade="all, delete-orphan"
     )
-    courses: Mapped[List["Course"]] = relationship(
-        secondary=course_teacher, back_populates="teachers"
+    course_links: Mapped[List["CourseTeacherLink"]] = relationship(
+        "CourseTeacherLink",
+        back_populates="teacher",
+        cascade="all, delete-orphan",
+    )
+    courses = association_proxy(
+        "course_links",
+        "course",
+        creator=lambda course: CourseTeacherLink(course=course),
     )
     availabilities: Mapped[List["TeacherAvailability"]] = relationship(
         back_populates="teacher",
@@ -266,7 +299,16 @@ class Course(db.Model, TimeStampedModel):
     configured_name: Mapped[Optional["CourseName"]] = relationship(
         "CourseName", back_populates="courses"
     )
-    teachers: Mapped[List[Teacher]] = relationship(secondary=course_teacher, back_populates="courses")
+    teacher_links: Mapped[List["CourseTeacherLink"]] = relationship(
+        "CourseTeacherLink",
+        back_populates="course",
+        cascade="all, delete-orphan",
+    )
+    teachers = association_proxy(
+        "teacher_links",
+        "teacher",
+        creator=lambda teacher: CourseTeacherLink(teacher=teacher),
+    )
     softwares: Mapped[List["Software"]] = relationship(secondary=course_software, back_populates="courses")
     equipments: Mapped[List["Equipment"]] = relationship(secondary=course_equipment, back_populates="courses")
     class_links: Mapped[List["CourseClassLink"]] = relationship(
@@ -359,6 +401,50 @@ class Course(db.Model, TimeStampedModel):
             return None
         return window[0]
 
+    def teacher_link_for(
+        self, teacher: "Teacher" | int | None
+    ) -> "CourseTeacherLink" | None:
+        teacher_id = None
+        if isinstance(teacher, Teacher):
+            teacher_id = teacher.id
+        else:
+            teacher_id = teacher
+        if teacher_id is None:
+            return None
+        for link in self.teacher_links:
+            if link.teacher_id == teacher_id:
+                return link
+        return None
+
+    def set_teacher_hours(self, teacher: "Teacher", hours: float | None) -> None:
+        session = object_session(self)
+        link = self.teacher_link_for(teacher)
+        if hours is None or hours <= 0:
+            if link is not None:
+                self.teacher_links.remove(link)
+                if session is not None:
+                    session.flush()
+            return
+        hours = round(float(hours), 2)
+        if link is None:
+            self.teacher_links.append(
+                CourseTeacherLink(teacher=teacher, assigned_hours=hours)
+            )
+            if session is not None:
+                session.flush()
+            return
+        link.assigned_hours = hours
+        if session is not None:
+            session.flush()
+
+    @property
+    def teacher_hours_map(self) -> dict[int, float]:
+        return {
+            link.teacher_id: link.assigned_hours
+            for link in self.teacher_links
+            if link.teacher_id is not None
+        }
+
     @property
     def semester_end(self) -> date | None:
         window = self.semester_window
@@ -430,7 +516,7 @@ class Course(db.Model, TimeStampedModel):
 
     @property
     def total_required_hours(self) -> int:
-        group_total = sum(link.group_count for link in self.class_links)
+        group_total = sum((link.group_count or 1) for link in self.class_links)
         if self.is_cm:
             multiplier = 1
         else:

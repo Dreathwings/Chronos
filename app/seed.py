@@ -63,7 +63,7 @@ def seed_data() -> None:
     python.softwares.append(vscode)
     room.softwares.append(vscode)
 
-    python.teachers.append(teacher)
+    python.set_teacher_hours(teacher, python.total_required_hours)
 
     python_group_a = CourseName(name="Python Avancé — Groupe A")
     python_group_b = CourseName(name="Python Avancé — Groupe B")

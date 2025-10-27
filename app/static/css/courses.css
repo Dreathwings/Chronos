@@ -51,6 +51,29 @@
   padding-right: 0.5rem;
 }
 
+.course-detail-layout .course-teacher-hours-item {
+  align-items: center;
+  background-color: #fff;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  border-radius: 0.75rem;
+  display: flex;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.course-detail-layout .course-teacher-hours-item + .course-teacher-hours-item {
+  margin-top: 0.25rem;
+}
+
+.course-detail-layout .course-teacher-hours-input .form-control {
+  max-width: 6.5rem;
+  min-width: 5.25rem;
+}
+
+.course-detail-layout .course-teacher-hours-input .input-group-text {
+  font-weight: 600;
+}
+
 .course-detail-layout #course-classes-list .border {
   border-color: rgba(15, 23, 42, 0.1) !important;
   border-radius: 0.75rem;
