@@ -479,29 +479,74 @@ def _ensure_course_teacher_hours_column() -> None:
     if "course_teacher" not in inspector.get_table_names():
         return
 
-    existing_columns = {column["name"] for column in inspector.get_columns("course_teacher")}
-    if "assigned_hours" in existing_columns:
-        return
+    existing_columns = {
+        column["name"] for column in inspector.get_columns("course_teacher")
+    }
 
     dialect = engine.dialect.name
-    if dialect == "mysql":
-        add_column = "ALTER TABLE course_teacher ADD COLUMN assigned_hours DOUBLE NOT NULL DEFAULT 0"
-    elif dialect == "postgresql":
-        add_column = "ALTER TABLE course_teacher ADD COLUMN assigned_hours DOUBLE PRECISION NOT NULL DEFAULT 0"
-    else:
-        add_column = "ALTER TABLE course_teacher ADD COLUMN assigned_hours FLOAT NOT NULL DEFAULT 0"
+
+    statements: list[str] = []
+    if "assigned_hours" not in existing_columns:
+        if dialect == "mysql":
+            statements.append(
+                "ALTER TABLE course_teacher ADD COLUMN assigned_hours DOUBLE NOT NULL DEFAULT 0"
+            )
+        elif dialect == "postgresql":
+            statements.append(
+                "ALTER TABLE course_teacher ADD COLUMN assigned_hours DOUBLE PRECISION NOT NULL DEFAULT 0"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE course_teacher ADD COLUMN assigned_hours FLOAT NOT NULL DEFAULT 0"
+            )
+
+    timestamp_column_defs = {
+        "mysql": {
+            "created_at": "ALTER TABLE course_teacher ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "ALTER TABLE course_teacher ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        },
+        "postgresql": {
+            "created_at": "ALTER TABLE course_teacher ADD COLUMN created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "ALTER TABLE course_teacher ADD COLUMN updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP",
+        },
+    }
+
+    sqlite_timestamp_defs = {
+        "created_at": "ALTER TABLE course_teacher ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "ALTER TABLE course_teacher ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP",
+    }
+
+    timestamp_defs = timestamp_column_defs.get(dialect, sqlite_timestamp_defs)
+
+    for column_name in ("created_at", "updated_at"):
+        if column_name not in existing_columns:
+            statements.append(timestamp_defs[column_name])
+
+    if not statements:
+        return
 
     try:
         with engine.begin() as connection:
-            connection.execute(text(add_column))
+            for statement in statements:
+                connection.execute(text(statement))
             connection.execute(
                 text(
                     "UPDATE course_teacher SET assigned_hours = 0 WHERE assigned_hours IS NULL"
                 )
             )
+            connection.execute(
+                text(
+                    "UPDATE course_teacher SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE course_teacher SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"
+                )
+            )
     except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
         current_app.logger.warning(
-            "Unable to add assigned_hours column to course_teacher: %s", exc
+            "Unable to update course_teacher columns: %s", exc
         )
 
 
