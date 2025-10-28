@@ -44,19 +44,45 @@
   margin-top: 1.5rem;
 }
 
-.course-detail-layout #course-teachers-list,
+.course-detail-layout #course-teachers-select-list,
+.course-detail-layout #course-teachers-hours-list,
 .course-detail-layout #course-classes-list {
   max-height: 320px;
   overflow-y: auto;
   padding-right: 0.5rem;
 }
 
+.course-detail-layout .teacher-allocation-card {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 0.25rem 1rem rgba(15, 23, 42, 0.04);
+}
+
+.course-detail-layout .teacher-allocation-card .card-header {
+  background-color: transparent;
+  border-bottom: none;
+}
+
+.course-detail-layout .teacher-allocation-card .nav-tabs .nav-link {
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #495057;
+  font-weight: 600;
+}
+
+.course-detail-layout .teacher-allocation-card .nav-tabs .nav-link.active {
+  border-color: #0d6efd;
+  color: #0d6efd;
+}
+
+.course-detail-layout .teacher-select-row,
 .course-detail-layout .teacher-hours-row {
   background-color: #fff;
   border-color: rgba(15, 23, 42, 0.12) !important;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.course-detail-layout .teacher-select-row.is-selected,
 .course-detail-layout .teacher-hours-row.is-selected {
   border-color: rgba(13, 110, 253, 0.45) !important;
   box-shadow: 0 0.25rem 0.75rem rgba(13, 110, 253, 0.08);

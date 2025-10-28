@@ -2357,8 +2357,18 @@ def course_detail(course_id: int):
                 if software is not None
             ]
             class_ids = {int(cid) for cid in request.form.getlist("classes")}
+            raw_selected_teacher_ids = request.form.getlist("selected_teachers")
+            selected_teacher_ids: set[int] = set()
+            for raw_teacher_id in raw_selected_teacher_ids:
+                try:
+                    selected_teacher_ids.add(int(raw_teacher_id))
+                except (TypeError, ValueError):
+                    continue
+
             teacher_hours: dict[int, int] = {}
             for teacher in teachers:
+                if teacher.id not in selected_teacher_ids:
+                    continue
                 field_name = f"teacher_hours_{teacher.id}"
                 raw_hours = request.form.get(field_name)
                 if raw_hours is None:

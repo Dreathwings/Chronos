@@ -147,52 +147,154 @@
             </div>
           </div>
           <div>
-            <label class="form-label">Enseignants et heures à générer</label>
-            <div class="form-text">Renseignez le volume horaire à planifier pour chaque enseignant. Indiquez 0 pour retirer un intervenant.</div>
-            <input
-              type="search"
-              class="form-control form-control-sm mb-2"
-              placeholder="Rechercher un enseignant..."
-              data-filter-target="#course-teachers-list"
-            >
-            <div id="course-teachers-list" class="vstack gap-2">
-              {% for teacher in teachers %}
-              {% set planned = teacher_hours_map.get(teacher.id, 0) %}
-              {% set scheduled = scheduled_hours_map.get(teacher.id, 0) %}
-              <div
-                class="border rounded p-2 teacher-hours-row {% if planned > 0 %}is-selected{% endif %}"
-                data-filter-item
-                data-filter-text="{{ teacher.name|lower|e }}"
-              >
-                <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2">
-                  <div>
-                    <div class="fw-semibold">{{ teacher.name }}</div>
-                    {% if teacher.email %}
-                    <div class="text-muted small">{{ teacher.email }}</div>
-                    {% endif %}
-                  </div>
-                  <div class="d-flex align-items-center gap-2 teacher-hours-input">
-                    <label class="form-label mb-0 small" for="teacher-hours-{{ teacher.id }}">Heures à générer</label>
-                    <input
-                      type="number"
-                      class="form-control form-control-sm"
-                      min="0"
-                      step="1"
-                      name="teacher_hours_{{ teacher.id }}"
-                      id="teacher-hours-{{ teacher.id }}"
-                      value="{{ planned }}"
+            <label class="form-label">Enseignants</label>
+            <div class="card teacher-allocation-card">
+              <div class="card-header pb-0">
+                <ul class="nav nav-tabs card-header-tabs" id="teacherAllocationTabs" role="tablist">
+                  <li class="nav-item" role="presentation">
+                    <button
+                      class="nav-link active"
+                      id="teacher-selection-tab"
+                      data-bs-toggle="tab"
+                      data-bs-target="#teacher-selection-pane"
+                      type="button"
+                      role="tab"
+                      aria-controls="teacher-selection-pane"
+                      aria-selected="true"
+                    >Sélection</button>
+                  </li>
+                  <li class="nav-item" role="presentation">
+                    <button
+                      class="nav-link"
+                      id="teacher-hours-tab"
+                      data-bs-toggle="tab"
+                      data-bs-target="#teacher-hours-pane"
+                      type="button"
+                      role="tab"
+                      aria-controls="teacher-hours-pane"
+                      aria-selected="false"
+                    >Heures à générer</button>
+                  </li>
+                </ul>
+              </div>
+              <div class="card-body tab-content">
+                <div
+                  class="tab-pane fade show active"
+                  id="teacher-selection-pane"
+                  role="tabpanel"
+                  aria-labelledby="teacher-selection-tab"
+                >
+                  <div class="form-text mb-2">Sélectionnez les enseignants qui interviendront sur ce cours.</div>
+                  <input
+                    type="search"
+                    class="form-control form-control-sm mb-3"
+                    placeholder="Rechercher un enseignant..."
+                    data-filter-target="#course-teachers-select-list"
+                  >
+                  <div id="course-teachers-select-list" class="vstack gap-2">
+                    {% for teacher in teachers %}
+                    {% set planned = teacher_hours_map.get(teacher.id, 0) %}
+                    {% set scheduled = scheduled_hours_map.get(teacher.id, 0) %}
+                    <div
+                      class="border rounded p-2 teacher-select-row {% if planned > 0 %}is-selected{% endif %}"
+                      data-filter-item
+                      data-filter-text="{{ teacher.name|lower|e }} {{ teacher.email|lower|e if teacher.email }}"
+                      data-teacher-id="{{ teacher.id }}"
                     >
+                      <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2">
+                        <div>
+                          <div class="fw-semibold">{{ teacher.name }}</div>
+                          {% if teacher.email %}
+                          <div class="text-muted small">{{ teacher.email }}</div>
+                          {% endif %}
+                        </div>
+                        <div class="form-check mb-0">
+                          <input
+                            class="form-check-input teacher-select-checkbox"
+                            type="checkbox"
+                            name="selected_teachers"
+                            value="{{ teacher.id }}"
+                            id="teacher-select-{{ teacher.id }}"
+                            {% if planned > 0 %}checked{% endif %}
+                          >
+                          <label class="form-check-label" for="teacher-select-{{ teacher.id }}">Inclure</label>
+                        </div>
+                      </div>
+                      <div class="text-muted small mt-2">
+                        {% if scheduled %}
+                        Heures déjà planifiées : {{ scheduled }} h
+                        {% else %}
+                        Aucune séance planifiée pour le moment.
+                        {% endif %}
+                      </div>
+                    </div>
+                    {% endfor %}
                   </div>
                 </div>
-                <div class="text-muted small mt-2">
-                  {% if scheduled %}
-                  Heures déjà planifiées : {{ scheduled }} h
-                  {% else %}
-                  Aucune séance planifiée pour le moment.
-                  {% endif %}
+                <div
+                  class="tab-pane fade"
+                  id="teacher-hours-pane"
+                  role="tabpanel"
+                  aria-labelledby="teacher-hours-tab"
+                >
+                  <div class="form-text mb-2">Renseignez le volume horaire à planifier pour chaque enseignant sélectionné dans l'onglet précédent.</div>
+                  <input
+                    type="search"
+                    class="form-control form-control-sm mb-3"
+                    placeholder="Filtrer les enseignants sélectionnés..."
+                    data-filter-target="#course-teachers-hours-list"
+                  >
+                  <div
+                    id="teacher-hours-empty"
+                    class="alert alert-info d-none py-2 px-3 mb-3 small"
+                    role="alert"
+                  >
+                    Sélectionnez au moins un enseignant dans l'onglet « Sélection » pour définir ses heures.
+                  </div>
+                  <div id="course-teachers-hours-list" class="vstack gap-2">
+                    {% for teacher in teachers %}
+                    {% set planned = teacher_hours_map.get(teacher.id, 0) %}
+                    {% set scheduled = scheduled_hours_map.get(teacher.id, 0) %}
+                    <div
+                      class="border rounded p-2 teacher-hours-row {% if planned > 0 %}is-selected{% endif %}"
+                      data-filter-item
+                      data-filter-text="{{ teacher.name|lower|e }} {{ teacher.email|lower|e if teacher.email }}"
+                      data-teacher-id="{{ teacher.id }}"
+                    >
+                      <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2">
+                        <div>
+                          <div class="fw-semibold">{{ teacher.name }}</div>
+                          {% if teacher.email %}
+                          <div class="text-muted small">{{ teacher.email }}</div>
+                          {% endif %}
+                        </div>
+                        <div class="d-flex align-items-center gap-2 teacher-hours-input">
+                          <label class="form-label mb-0 small" for="teacher-hours-{{ teacher.id }}">Heures à générer</label>
+                          <input
+                            type="number"
+                            class="form-control form-control-sm"
+                            min="0"
+                            step="1"
+                            name="teacher_hours_{{ teacher.id }}"
+                            id="teacher-hours-{{ teacher.id }}"
+                            value="{{ planned }}"
+                            data-default-hours="{{ course.session_length_hours }}"
+                            {% if planned == 0 %}disabled{% endif %}
+                          >
+                        </div>
+                      </div>
+                      <div class="text-muted small mt-2">
+                        {% if scheduled %}
+                        Heures déjà planifiées : {{ scheduled }} h
+                        {% else %}
+                        Aucune séance planifiée pour le moment.
+                        {% endif %}
+                      </div>
+                    </div>
+                    {% endfor %}
+                  </div>
                 </div>
               </div>
-              {% endfor %}
             </div>
           </div>
           <div>
@@ -574,26 +676,100 @@
 
   document.addEventListener('DOMContentLoaded', function() {
     chronosBindFilterInputs();
-    document.querySelectorAll('.teacher-hours-input input[type="number"]').forEach(function(input) {
-      const row = input.closest('.teacher-hours-row');
-      if (!row) {
-        return;
-      }
-      const refreshRow = function() {
-        const value = parseInt(input.value, 10);
-        if (!isNaN(value) && value > 0) {
-          row.classList.add('is-selected');
-        } else {
-          row.classList.remove('is-selected');
+    function chronosSyncTeacherSelections() {
+      const selectionRows = document.querySelectorAll('.teacher-select-row');
+      const selectionCheckboxes = document.querySelectorAll('.teacher-select-checkbox');
+      const hoursRows = document.querySelectorAll('.teacher-hours-row');
+      const emptyNotice = document.getElementById('teacher-hours-empty');
+      const hourFilters = document.querySelectorAll('[data-filter-target="#course-teachers-hours-list"]');
+      let selectedCount = 0;
+
+      const hoursRowByTeacherId = {};
+      hoursRows.forEach(function(row) {
+        const teacherId = row.getAttribute('data-teacher-id');
+        if (teacherId) {
+          hoursRowByTeacherId[teacherId] = row;
         }
-        document.querySelectorAll('[data-filter-target="#course-teachers-list"]').forEach(function(filterInput) {
-          filterInput.dispatchEvent(new Event('input'));
-        });
-      };
-      input.addEventListener('input', function() {
-        refreshRow();
       });
-      refreshRow();
+
+      const selectionRowByTeacherId = {};
+      selectionRows.forEach(function(row) {
+        const teacherId = row.getAttribute('data-teacher-id');
+        if (teacherId) {
+          selectionRowByTeacherId[teacherId] = row;
+        }
+      });
+
+      selectionCheckboxes.forEach(function(checkbox) {
+        const teacherId = checkbox.value;
+        const hoursRow = hoursRowByTeacherId[teacherId];
+        const selectionRow = selectionRowByTeacherId[teacherId];
+        const hoursInput = hoursRow ? hoursRow.querySelector('input[type="number"]') : null;
+        const isChecked = checkbox.checked;
+
+        if (selectionRow) {
+          selectionRow.classList.toggle('is-selected', isChecked);
+        }
+
+        if (hoursRow) {
+          hoursRow.classList.toggle('is-selected', isChecked);
+        }
+
+        if (hoursInput) {
+          if (isChecked) {
+            hoursInput.removeAttribute('disabled');
+            const currentValue = parseInt(hoursInput.value, 10);
+            if (isNaN(currentValue) || currentValue <= 0) {
+              const defaultHours = parseInt(hoursInput.getAttribute('data-default-hours'), 10);
+              if (!isNaN(defaultHours) && defaultHours > 0) {
+                hoursInput.value = defaultHours;
+              }
+            }
+            selectedCount += 1;
+          } else {
+            hoursInput.setAttribute('disabled', 'disabled');
+          }
+        }
+      });
+
+      if (emptyNotice) {
+        emptyNotice.classList.toggle('d-none', selectedCount > 0);
+      }
+
+      hourFilters.forEach(function(filterInput) {
+        filterInput.dispatchEvent(new Event('input'));
+      });
+    }
+
+    chronosSyncTeacherSelections();
+    document.querySelectorAll('.teacher-select-checkbox').forEach(function(checkbox) {
+      checkbox.addEventListener('change', chronosSyncTeacherSelections);
+    });
+    document.querySelectorAll('#course-teachers-hours-list input[type="number"]').forEach(function(input) {
+      input.addEventListener('input', function() {
+        const row = input.closest('.teacher-hours-row');
+        if (!row) {
+          return;
+        }
+        const value = parseInt(input.value, 10);
+        const hasHours = !isNaN(value) && value > 0;
+        row.classList.toggle('has-hours', hasHours);
+        if (!hasHours) {
+          const teacherId = row.getAttribute('data-teacher-id');
+          const checkbox = document.querySelector('.teacher-select-checkbox[value="' + teacherId + '"]');
+          if (checkbox && checkbox.checked) {
+            checkbox.checked = false;
+            chronosSyncTeacherSelections();
+          }
+        }
+      });
+      const initialValue = parseInt(input.value, 10);
+      if (!isNaN(initialValue) && initialValue > 0) {
+        const row = input.closest('.teacher-hours-row');
+        if (row) {
+          row.classList.add('has-hours');
+        }
+      }
     });
     const calendarEl = document.getElementById('course-calendar');
     const events = {{ events_json|safe }};
