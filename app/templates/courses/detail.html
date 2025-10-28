@@ -56,7 +56,7 @@
             <textarea name="description" class="form-control" rows="3">{{ course.description }}</textarea>
           </div>
           <div class="row g-2">
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Type de cours</label>
               <select class="form-select" name="course_type">
                 <option value="CM" {% if course.course_type == 'CM' %}selected{% endif %}>CM</option>
@@ -67,7 +67,7 @@
               </select>
               <div class="form-text">Les cours sont générés selon l'ordre : CM → SAE → TD → TP → Éval.</div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Semestre</label>
               <select class="form-select" name="semester">
                 {% for semester in semester_choices %}
@@ -76,9 +76,21 @@
               </select>
               <div class="form-text">La période est déterminée automatiquement selon le semestre.</div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Durée séance (h)</label>
               <input type="number" class="form-control" name="session_length_hours" value="{{ course.session_length_hours }}" min="1">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Séances / semaine</label>
+              <input type="number" class="form-control" name="sessions_per_week" value="{{ course.sessions_per_week }}" min="1">
+              <div class="form-text">Nombre de séances à générer pour chaque semaine sélectionnée.</div>
+            </div>
+          </div>
+          <div class="row g-2">
+            <div class="col-md-3">
+              <label class="form-label">Couleur</label>
+              <input type="color" class="form-control form-control-color" name="color" value="{{ course.color or '#0d6efd' }}">
+              <div class="form-text">Couleur affichée dans les calendriers.</div>
             </div>
           </div>
           <div class="text-muted small">
@@ -143,13 +155,44 @@
               placeholder="Rechercher un enseignant..."
               data-filter-target="#course-teachers-list"
             >
-              <div id="course-teachers-list" class="vstack gap-1">
-                {% for teacher in teachers %}
-                <div class="form-check" data-filter-item data-filter-text="{{ teacher.name|lower|e }}">
-                  <input class="form-check-input" type="checkbox" name="teachers" value="{{ teacher.id }}" id="teacher-{{ teacher.id }}" {% if teacher in course.teachers %}checked{% endif %}>
+            <div id="course-teachers-list" class="vstack gap-2">
+              {% for teacher in teachers %}
+              {% set teacher_selected = teacher in course.teachers %}
+              {% set hours_value = teacher_hours_map.get(teacher.id, course.session_length_hours) %}
+              <div
+                class="border rounded p-2"
+                data-filter-item
+                data-filter-text="{{ teacher.name|lower|e }}"
+              >
+                <div class="form-check d-flex align-items-center gap-2">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    name="teachers"
+                    value="{{ teacher.id }}"
+                    id="teacher-{{ teacher.id }}"
+                    data-teacher-checkbox
+                    {% if teacher_selected %}checked{% endif %}
+                  >
                   <label class="form-check-label" for="teacher-{{ teacher.id }}">{{ teacher.name }}</label>
                 </div>
-                {% endfor %}
+                <div class="mt-2">
+                  <label class="form-label small mb-1" for="teacher-hours-{{ teacher.id }}">Heures à générer</label>
+                  <input
+                    type="number"
+                    class="form-control form-control-sm"
+                    name="teacher_hours_{{ teacher.id }}"
+                    id="teacher-hours-{{ teacher.id }}"
+                    value="{{ hours_value }}"
+                    min="0"
+                    data-teacher-hours-for="{{ teacher.id }}"
+                    data-default-hours="{{ hours_value }}"
+                    {% if not teacher_selected %}disabled{% endif %}
+                  >
+                  <div class="form-text">Volume total d'heures assigné à cet enseignant pour la génération automatique.</div>
+                </div>
+              </div>
+              {% endfor %}
             </div>
           </div>
           <div>
@@ -174,7 +217,7 @@
                   {% if course.course_type == 'TP' %}
                   Ce cours sera planifié en deux sous-groupes qui utilisent les noms définis dans la page Configuration.
                   {% elif course.course_type == 'SAE' %}
-                  Deux enseignants doivent être assignés simultanément pour cette classe.
+                  Chaque classe est encadrée par un binôme d'enseignants sur des séances de 4 h.
                   {% elif course.course_type == 'CM' %}
                   Toutes les classes inscrites suivent le cours ensemble.
                   {% else %}
@@ -185,9 +228,6 @@
               {% endfor %}
             </div>
           </div>
-          {% if course.class_links %}
-          <div class="form-text">Les enseignants sont définis depuis la section dédiée ci-dessous.</div>
-          {% endif %}
           <div>
             <label class="form-label">Équipements requis</label>
             {% for equipment in equipments %}
@@ -211,153 +251,6 @@
           </div>
         </div>
       </div>
-      {% if course.class_links %}
-      <div class="accordion-item shadow-sm">
-        <h2 class="accordion-header" id="headingTeachersByClass">
-          <button
-            class="accordion-button collapsed bg-secondary text-white"
-            type="button"
-            data-bs-toggle="collapse"
-            data-bs-target="#collapseTeachersByClass"
-            aria-expanded="false"
-            aria-controls="collapseTeachersByClass"
-          >
-            Enseignants par classe
-          </button>
-        </h2>
-        <div
-          id="collapseTeachersByClass"
-          class="accordion-collapse collapse"
-          aria-labelledby="headingTeachersByClass"
-          data-bs-parent="#courseDetailsAccordion"
-        >
-          <div class="accordion-body">
-        {% if available_teachers %}
-        <form method="post" class="vstack gap-3">
-          <input type="hidden" name="form" value="update-class-teachers">
-          {% if course.course_type == 'CM' %}
-          {% set class_names = course.class_links | map(attribute='class_group.name') | list %}
-          {% set ns = namespace(shared_teacher=None) %}
-          {% for link in course.class_links %}
-          {% if ns.shared_teacher is none and (link.teacher_a or link.teacher_b) %}
-          {% set ns.shared_teacher = link.teacher_a or link.teacher_b %}
-          {% endif %}
-          {% endfor %}
-          <div class="border rounded p-2">
-            <div class="fw-semibold">Cours magistral</div>
-            <div class="text-muted small mb-2">
-              Enseignant appliqué à l'ensemble des classes : {{ class_names | join(', ') }}.
-            </div>
-            <select class="form-select form-select-sm" name="course_teacher_all">
-              <option value="" {% if not ns.shared_teacher %}selected{% endif %}>— Aucun enseignant —</option>
-              {% for teacher in available_teachers %}
-              <option value="{{ teacher.id }}" {% if ns.shared_teacher and teacher.id == ns.shared_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          {% elif course.course_type == 'SAE' %}
-          {% for link in course.class_links %}
-          <div class="border rounded p-2">
-            <div class="fw-semibold">{{ link.class_group.name }}</div>
-            <div class="text-muted small mb-2">Deux enseignants doivent encadrer cette classe.</div>
-            <div class="row g-2">
-              <div class="col-md-6">
-                <label class="form-label small mb-1">Enseignant 1</label>
-                <select class="form-select form-select-sm" name="class_link_teacher_a_{{ link.class_group_id }}">
-                  <option value="" {% if not link.teacher_a %}selected{% endif %}>— Aucun enseignant —</option>
-                  {% for teacher in available_teachers %}
-                  <option value="{{ teacher.id }}" {% if link.teacher_a and teacher.id == link.teacher_a.id %}selected{% endif %}>{{ teacher.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label small mb-1">Enseignant 2</label>
-                <select class="form-select form-select-sm" name="class_link_teacher_b_{{ link.class_group_id }}">
-                  <option value="" {% if not link.teacher_b %}selected{% endif %}>— Aucun enseignant —</option>
-                  {% for teacher in available_teachers %}
-                  <option value="{{ teacher.id }}" {% if link.teacher_b and teacher.id == link.teacher_b.id %}selected{% endif %}>{{ teacher.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-            </div>
-          </div>
-          {% endfor %}
-          {% else %}
-          {% for link in course.class_links %}
-          {% set assigned_teacher = link.teacher_a or link.teacher_b %}
-          <div class="border rounded p-2">
-            <div class="fw-semibold">{{ link.class_group.name }}</div>
-            <div class="text-muted small mb-2">
-              {% if course.course_type == 'TP' %}
-              Travaux pratiques — demi-groupes
-              {% if teacher_duos_average_hours is not none and loop.first %}
-              <div class="mt-1">
-                <span class="text-muted small">
-                  Moyenne des disponibilités communes proposées :
-                  {{ ('%.1f' % teacher_duos_average_hours).rstrip('0').rstrip('.') }} h
-                </span>
-              </div>
-              {% endif %}
-              {% set recommended_duo = teacher_duos_by_class.get(link.class_group_id) %}
-              {% if recommended_duo %}
-              <div class="mt-1">
-                <div>Duo recommandé :</div>
-                <ul class="small mb-0 ps-3">
-                  <li>
-                    {{ recommended_duo[0].name }} + {{ recommended_duo[1].name }} —
-                    {{ ('%.1f' % recommended_duo[2]).rstrip('0').rstrip('.') }} h communes
-                  </li>
-                </ul>
-              </div>
-              {% endif %}
-              {% else %}
-              Classe entière
-              {% endif %}
-            </div>
-            {% if link.group_count == 2 %}
-            {% set teacher_a = link.teacher_for_label('A') %}
-            {% set teacher_b = link.teacher_for_label('B') %}
-            <div class="row g-2">
-              <div class="col-md-6">
-                <label class="form-label small mb-1">Sous-groupe A — {{ link.subgroup_name_for('A') }}</label>
-                <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}_A">
-                  <option value="" {% if not teacher_a %}selected{% endif %}>— Aucun enseignant —</option>
-                  {% for teacher in available_teachers %}
-                  <option value="{{ teacher.id }}" {% if teacher_a and teacher.id == teacher_a.id %}selected{% endif %}>{{ teacher.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label small mb-1">Sous-groupe B — {{ link.subgroup_name_for('B') }}</label>
-                <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}_B">
-                  <option value="" {% if not teacher_b %}selected{% endif %}>— Aucun enseignant —</option>
-                  {% for teacher in available_teachers %}
-                  <option value="{{ teacher.id }}" {% if teacher_b and teacher.id == teacher_b.id %}selected{% endif %}>{{ teacher.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-            </div>
-            {% else %}
-            {% set assigned_teacher = link.teacher_for_label(None) %}
-            <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}">
-              <option value="" {% if not assigned_teacher %}selected{% endif %}>— Aucun enseignant —</option>
-              {% for teacher in available_teachers %}
-              <option value="{{ teacher.id }}" {% if assigned_teacher and teacher.id == assigned_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
-              {% endfor %}
-            </select>
-            {% endif %}
-          </div>
-          {% endfor %}
-          {% endif %}
-          <button type="submit" class="btn btn-outline-secondary">Mettre à jour</button>
-        </form>
-        {% else %}
-        <p class="text-muted mb-0 small">Ajoutez des enseignants dans la section Contraintes pour les associer aux classes.</p>
-        {% endif %}
-          </div>
-        </div>
-      </div>
-      {% endif %}
       <div class="accordion-item shadow-sm">
         <h2 class="accordion-header" id="headingQuickActions">
           <button
@@ -442,6 +335,95 @@
         </div>
       </div>
       <div class="accordion-item shadow-sm">
+        <h2 class="accordion-header" id="headingSessionManagement">
+          <button
+            class="accordion-button collapsed bg-light"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#collapseSessionManagement"
+            aria-expanded="false"
+            aria-controls="collapseSessionManagement"
+          >
+            Gestion des séances
+          </button>
+        </h2>
+        <div
+          id="collapseSessionManagement"
+          class="accordion-collapse collapse"
+          aria-labelledby="headingSessionManagement"
+          data-bs-parent="#courseSummaryAccordion"
+        >
+          <div class="accordion-body">
+            {% if course_sessions %}
+            <div class="vstack gap-3">
+              {% for session in course_sessions %}
+              <div class="border rounded p-3">
+                <div class="d-flex flex-column flex-lg-row justify-content-between gap-2 mb-3">
+                  <div>
+                    <div class="fw-semibold">
+                      {{ session.start_time.strftime('%d/%m/%Y') }} — {{ session.start_time.strftime('%H:%M') }} → {{ session.end_time.strftime('%H:%M') }}
+                    </div>
+                    <div class="text-muted small">
+                      {{ session.room.name }} · {% if session.teacher %}{{ session.teacher.name }}{% else %}Aucun enseignant{% endif %}
+                    </div>
+                    <div class="text-muted small">{{ session.attendee_names() | join(', ') }}</div>
+                  </div>
+                  <div class="text-muted small">
+                    Durée : {{ session.duration_hours }} h
+                  </div>
+                </div>
+                <form method="post" class="row g-2 align-items-end">
+                  <input type="hidden" name="form" value="update-session">
+                  <input type="hidden" name="session_id" value="{{ session.id }}">
+                  <div class="col-md-3">
+                    <label class="form-label small">Date</label>
+                    <input type="date" class="form-control form-control-sm" name="date" value="{{ session.start_time.strftime('%Y-%m-%d') }}" required>
+                  </div>
+                  <div class="col-md-2">
+                    <label class="form-label small">Début</label>
+                    <select class="form-select form-select-sm" name="start_time">
+                      {% set session_start = session.start_time.strftime('%H:%M') %}
+                      {% for start_time in start_times %}
+                      {% set start_label = start_time.strftime('%H:%M') %}
+                      <option value="{{ start_label }}" {% if start_label == session_start %}selected{% endif %}>{{ start_label }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label small">Enseignant</label>
+                    <select class="form-select form-select-sm" name="teacher_id" {% if not available_teachers %}disabled{% endif %}>
+                      {% for teacher in available_teachers %}
+                      <option value="{{ teacher.id }}" {% if session.teacher and session.teacher.id == teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label small">Salle</label>
+                    <select class="form-select form-select-sm" name="room_id">
+                      {% for room in rooms %}
+                      <option value="{{ room.id }}" {% if session.room_id == room.id %}selected{% endif %}>{{ room.name }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-1 text-end">
+                    <button type="submit" class="btn btn-outline-primary btn-sm">Mettre à jour</button>
+                  </div>
+                </form>
+                <form method="post" class="text-end mt-2">
+                  <input type="hidden" name="form" value="delete-session">
+                  <input type="hidden" name="session_id" value="{{ session.id }}">
+                  <button type="submit" class="btn btn-outline-danger btn-sm">Supprimer</button>
+                </form>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted mb-0">Aucune séance n'est planifiée pour le moment.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item shadow-sm">
         <h2 class="accordion-header" id="headingGenerationLog">
           <button
             class="accordion-button collapsed bg-dark text-white"
@@ -522,13 +504,13 @@
           data-bs-parent="#courseSummaryAccordion"
         >
           <div class="accordion-body">
-        {% if teachers and rooms and course.class_links %}
+        {% if available_teachers and rooms and course.class_links %}
         <form method="post" class="row g-3">
           <input type="hidden" name="form" value="manual-session">
           <div class="col-md-4">
             <label class="form-label">Enseignant</label>
             <select class="form-select" name="teacher_id">
-              {% for teacher in teachers %}
+              {% for teacher in available_teachers %}
               <option value="{{ teacher.id }}">{{ teacher.name }}</option>
               {% endfor %}
             </select>
@@ -546,29 +528,17 @@
             <select class="form-select" name="class_group_choice">
               {% if course.is_cm %}
                 {% set class_names = course.class_links | map(attribute='class_group.name') | join(', ') %}
-                {% set cm_teacher = None %}
-                {% for link in course.class_links %}
-                  {% if cm_teacher is none and (link.teacher_a or link.teacher_b) %}
-                    {% set cm_teacher = link.teacher_a or link.teacher_b %}
-                  {% endif %}
-                {% endfor %}
-                {% if cm_teacher is none and course.teachers %}
-                  {% set cm_teacher = course.teachers[0] %}
-                {% endif %}
                 <option value="ALL">
                   Toutes les classes
                   {% if class_names %}— {{ class_names }}{% endif %}
-                  {% if cm_teacher %}( {{ cm_teacher.name }} ){% else %}( Aucun enseignant ){% endif %}
                 </option>
               {% else %}
                 {% for link in course.class_links %}
                   {% for subgroup_label in link.group_labels() %}
                   {% set value = link.class_group.id ~ ':' ~ (subgroup_label if subgroup_label else '') %}
-                  {% set assigned_teacher = link.teacher_for_label(subgroup_label) %}
                   {% set subgroup_display = link.subgroup_name_for(subgroup_label) %}
                   <option value="{{ value }}">
                     {{ link.class_group.name }} — {% if subgroup_label %}{{ subgroup_display }}{% else %}classe entière{% endif %}
-                    {% if assigned_teacher %}( {{ assigned_teacher.name }} ){% else %}( Aucun enseignant ){% endif %}
                   </option>
                   {% endfor %}
                 {% endfor %}
@@ -598,7 +568,7 @@
           </div>
         </form>
         {% else %}
-        <p class="text-muted mb-0">Ajoutez au moins un enseignant, une salle et associez une classe pour planifier manuellement une séance.</p>
+        <p class="text-muted mb-0">Ajoutez au moins un enseignant associé au cours, une salle et une classe pour planifier manuellement une séance.</p>
         {% endif %}
           </div>
         </div>
@@ -645,6 +615,22 @@
 
   document.addEventListener('DOMContentLoaded', function() {
     chronosBindFilterInputs();
+    document.querySelectorAll('[data-teacher-checkbox]').forEach(function(checkbox) {
+      const teacherId = checkbox.value;
+      const hoursInput = document.querySelector('[data-teacher-hours-for="' + teacherId + '"]');
+      const defaultValue = hoursInput ? hoursInput.getAttribute('data-default-hours') : null;
+      const updateHoursState = function() {
+        if (!hoursInput) {
+          return;
+        }
+        hoursInput.disabled = !checkbox.checked;
+        if (!checkbox.checked && defaultValue !== null) {
+          hoursInput.value = defaultValue;
+        }
+      };
+      checkbox.addEventListener('change', updateHoursState);
+      updateHoursState();
+    });
     const calendarEl = document.getElementById('course-calendar');
     const events = {{ events_json|safe }};
     const calendar = window.createChronosCalendar(calendarEl, events);

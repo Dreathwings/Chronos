@@ -1241,9 +1241,7 @@ class WeeklyLimitTestCase(DatabaseTestCase):
             third_start,
             third_end,
         )
-        self.assertIsNotNone(error)
-        self.assertIn("semaine", error)
-        self.assertIn(class_group.name, error)
+        self.assertIsNone(error)
 
         next_week_start = third_start + timedelta(days=7)
         next_week_end = third_end + timedelta(days=7)
@@ -1360,7 +1358,7 @@ class WeeklyLimitTestCase(DatabaseTestCase):
             )
         )
 
-        self.assertTrue(
+        self.assertFalse(
             has_weekly_course_conflict(
                 course,
                 class_group,
