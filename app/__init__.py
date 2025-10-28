@@ -97,6 +97,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_type_column()
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
+        _ensure_course_teacher_planned_hours_column()
         _ensure_student_profile_columns()
         _ensure_session_attendance_backfill()
         updated_sessions = _realign_tp_session_teachers()
@@ -470,6 +471,31 @@ def _ensure_course_class_teacher_columns() -> None:
                 connection.execute(text(statement))
     except SQLAlchemyError as exc:  # pragma: no cover
         current_app.logger.warning("Unable to add teacher columns to course_class: %s", exc)
+
+
+def _ensure_course_teacher_planned_hours_column() -> None:
+    """Ensure the course_teacher table stores planned hours."""
+
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course_teacher" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course_teacher")}
+    if "planned_hours" in existing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE course_teacher ADD COLUMN planned_hours INTEGER NOT NULL DEFAULT 0"
+                )
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        current_app.logger.warning(
+            "Unable to add planned_hours column to course_teacher: %s", exc
+        )
 
 
 def _ensure_course_class_subgroup_name_columns() -> None:
