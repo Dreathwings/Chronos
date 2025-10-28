@@ -477,14 +477,11 @@ def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> N
         db.session.flush()
         existing_starts.add(week_start)
 
-    occurrence_goal = len(course.allowed_weeks)
-    if occurrence_goal > 0:
-        course.sessions_per_week = occurrence_goal
-        course.sessions_required = occurrence_goal
-    else:
-        fallback_goal = max(int(course.sessions_per_week or 0), 1)
-        course.sessions_per_week = fallback_goal
-        course.sessions_required = fallback_goal
+    target_occurrences = max(int(course.sessions_per_week or 0), 0)
+    if target_occurrences <= 0:
+        target_occurrences = max(int(course.sessions_required or 0), 1)
+    course.sessions_per_week = target_occurrences
+    course.sessions_required = max(target_occurrences, 1)
 
 
 def _sync_course_class_links(
@@ -2306,12 +2303,14 @@ def course_detail(course_id: int):
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
-            course.sessions_per_week = max(
+            session_goal = max(
                 _parse_non_negative_int(
                     request.form.get("sessions_per_week"), course.sessions_per_week
                 ),
                 1,
             )
+            course.sessions_per_week = session_goal
+            course.sessions_required = session_goal
             raw_color = (request.form.get("color") or "").strip()
             course.color = raw_color if raw_color else None
             course.configured_name = selected_course_name

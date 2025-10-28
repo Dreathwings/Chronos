@@ -2278,13 +2278,15 @@ def generate_schedule(
             )
             week_occurrences = sorted({_week_start_for(day) for day in candidate_days})
             if week_occurrences:
-                effective_occurrences = len(week_occurrences)
-            else:
-                effective_occurrences = len({span_start for span_start, _ in normalised_weeks})
-        else:
-            effective_occurrences = course.sessions_required
-
-        effective_occurrences = max(int(effective_occurrences), 1)
+                reporter.info(
+                    "Semaines disponibles : "
+                    + ", ".join(week.strftime("%d/%m/%Y") for week in week_occurrences)
+                )
+        effective_occurrences = max(
+            int(course.sessions_per_week or 0),
+            int(course.sessions_required or 0),
+            1,
+        )
 
         if not course.classes:
             message = "Associez au moins une classe au cours avant de planifier."
