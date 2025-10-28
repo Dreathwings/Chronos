@@ -94,9 +94,11 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_class_group_count_column()
         _ensure_course_class_subgroup_name_columns()
         _ensure_course_class_teacher_columns()
+        _ensure_course_class_teacher_hours_columns()
         _ensure_course_type_column()
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
+        _ensure_course_color_and_cm_hours_columns()
         _ensure_student_profile_columns()
         _ensure_session_attendance_backfill()
         updated_sessions = _realign_tp_session_teachers()
@@ -472,6 +474,73 @@ def _ensure_course_class_teacher_columns() -> None:
         current_app.logger.warning("Unable to add teacher columns to course_class: %s", exc)
 
 
+def _ensure_course_class_teacher_hours_columns() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course_class" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course_class")}
+    missing_hours_columns = []
+    if "teacher_a_hours" not in existing_columns:
+        missing_hours_columns.append(
+            "ALTER TABLE course_class ADD COLUMN teacher_a_hours INTEGER DEFAULT 0"
+        )
+    if "teacher_b_hours" not in existing_columns:
+        missing_hours_columns.append(
+            "ALTER TABLE course_class ADD COLUMN teacher_b_hours INTEGER DEFAULT 0"
+        )
+
+    if not missing_hours_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            for statement in missing_hours_columns:
+                connection.execute(text(statement))
+            if "teacher_a_hours" not in existing_columns:
+                connection.execute(
+                    text(
+                        "UPDATE course_class SET teacher_a_hours = 0 "
+                        "WHERE teacher_a_hours IS NULL"
+                    )
+                )
+            if "teacher_b_hours" not in existing_columns:
+                connection.execute(
+                    text(
+                        "UPDATE course_class SET teacher_b_hours = 0 "
+                        "WHERE teacher_b_hours IS NULL"
+                    )
+                )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard for legacy DBs
+        current_app.logger.warning(
+            "Unable to add teacher hour columns to course_class: %s", exc
+        )
+        return
+
+    if engine.dialect.name not in {"sqlite"}:
+        try:
+            with engine.begin() as connection:
+                if "teacher_a_hours" not in existing_columns:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE course_class MODIFY teacher_a_hours "
+                            "INTEGER NOT NULL DEFAULT 0"
+                        )
+                    )
+                if "teacher_b_hours" not in existing_columns:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE course_class MODIFY teacher_b_hours "
+                            "INTEGER NOT NULL DEFAULT 0"
+                        )
+                    )
+        except SQLAlchemyError:
+            current_app.logger.warning(
+                "Unable to tighten constraints on course_class teacher hour columns; continuing with relaxed columns."
+            )
+
+
 def _ensure_course_class_subgroup_name_columns() -> None:
     engine = db.engine
     inspector = inspect(engine)
@@ -603,6 +672,60 @@ def _ensure_course_course_name_column() -> None:
         except SQLAlchemyError:
             current_app.logger.warning(
                 "Unable to add foreign key constraint to course.course_name_id; continuing without constraint."
+            )
+
+
+def _ensure_course_color_and_cm_hours_columns() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course")}
+    statements: list[str] = []
+    needs_cm_update = False
+
+    if "color" not in existing_columns:
+        statements.append("ALTER TABLE course ADD COLUMN color VARCHAR(9)")
+
+    if "cm_required_hours" not in existing_columns:
+        statements.append(
+            "ALTER TABLE course ADD COLUMN cm_required_hours INTEGER DEFAULT 0"
+        )
+        needs_cm_update = True
+
+    if not statements:
+        return
+
+    try:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+            if needs_cm_update:
+                connection.execute(
+                    text(
+                        "UPDATE course SET cm_required_hours = 0 "
+                        "WHERE cm_required_hours IS NULL"
+                    )
+                )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard for legacy DBs
+        current_app.logger.warning(
+            "Unable to add color/cm columns to course: %s", exc
+        )
+        return
+
+    if needs_cm_update and engine.dialect.name not in {"sqlite"}:
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE course MODIFY cm_required_hours "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+        except SQLAlchemyError:
+            current_app.logger.warning(
+                "Unable to tighten constraints on course.cm_required_hours; continuing with relaxed column."
             )
 
 
