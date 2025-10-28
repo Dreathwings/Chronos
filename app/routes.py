@@ -50,7 +50,6 @@ from .scheduler import (
     fits_in_windows,
     format_class_label,
     generate_schedule,
-    has_weekly_course_conflict,
     overlaps,
     respects_weekly_chronology,
 )
@@ -137,6 +136,24 @@ def _normalise_semester(raw_value: str | None) -> str:
     if value in SEMESTER_CHOICES:
         return value
     return DEFAULT_SEMESTER
+
+
+def _normalise_color(raw_value: str | None) -> str | None:
+    if not raw_value:
+        return None
+    value = raw_value.strip()
+    if not value:
+        return None
+    if not value.startswith("#"):
+        return None
+    hex_part = value[1:]
+    if len(hex_part) not in (3, 6, 8):
+        return None
+    try:
+        int(hex_part, 16)
+    except ValueError:
+        return None
+    return "#" + hex_part.upper()
 
 
 def _parse_non_negative_int(raw_value: str | None, default: int = 0) -> int:
@@ -730,25 +747,6 @@ def _validate_session_constraints(
             subgroup_label=subgroup_label,
         ):
             return "La classe est indisponible sur ce créneau."
-        if has_weekly_course_conflict(
-            course,
-            class_group,
-            start_dt,
-            subgroup_label=subgroup_label,
-            ignore_session_id=ignore_session_id,
-            additional_hours=candidate_hours,
-        ):
-            week_start = start_dt.date() - timedelta(days=start_dt.weekday())
-            link = course.class_link_for(class_group)
-            label = format_class_label(
-                class_group, link=link, subgroup_label=subgroup_label
-            )
-            return (
-                "La durée hebdomadaire autorisée pour "
-                f"{label} est déjà atteinte sur la semaine du "
-                f"{week_start.strftime('%d/%m/%Y')}"
-                "."
-            )
         if not respects_weekly_chronology(
             course,
             class_group,
@@ -2256,6 +2254,16 @@ def course_detail(course_id: int):
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
+            if request.form.get("use_color"):
+                selected_color = _normalise_color(request.form.get("color"))
+                if selected_color:
+                    course.color = selected_color
+                elif not course.color:
+                    course.color = "#0D6EFD"
+            else:
+                course.color = None
+            if course.course_type != "CM":
+                course.cm_required_hours = 0
             course.configured_name = selected_course_name
             course.name = Course.compose_name(
                 course.course_type,
@@ -2354,6 +2362,10 @@ def course_detail(course_id: int):
                 for link in course.class_links:
                     link.teacher_a = teacher
                     link.teacher_b = None
+                cm_hours_value = _parse_non_negative_int(
+                    request.form.get("cm_required_hours"), course.cm_required_hours
+                )
+                course.cm_required_hours = cm_hours_value
             elif course.is_sae:
                 assignments: list[tuple[CourseClassLink, Teacher, Teacher]] = []
                 for link in course.class_links:
@@ -2391,6 +2403,11 @@ def course_detail(course_id: int):
                 for link, teacher_a, teacher_b in assignments:
                     link.teacher_a = teacher_a
                     link.teacher_b = teacher_b
+                    hours_value = _parse_non_negative_int(
+                        request.form.get(f"class_link_hours_{link.class_group_id}"),
+                        link.teacher_a_hours,
+                    )
+                    link.set_configured_hours(class_hours=hours_value)
             else:
                 for link in course.class_links:
                     if link.group_count == 2:
@@ -2408,6 +2425,22 @@ def course_detail(course_id: int):
                         )
                         link.teacher_a = teacher_a
                         link.teacher_b = teacher_b
+                        hours_a = _parse_non_negative_int(
+                            request.form.get(
+                                f"class_link_hours_{link.class_group_id}_A"
+                            ),
+                            link.teacher_a_hours,
+                        )
+                        hours_b = _parse_non_negative_int(
+                            request.form.get(
+                                f"class_link_hours_{link.class_group_id}_B"
+                            ),
+                            link.teacher_b_hours,
+                        )
+                        link.set_configured_hours(
+                            subgroup_a_hours=hours_a,
+                            subgroup_b_hours=hours_b,
+                        )
                     else:
                         teacher = _parse_teacher_selection(
                             request.form.get(
@@ -2417,8 +2450,13 @@ def course_detail(course_id: int):
                         )
                         link.teacher_a = teacher
                         link.teacher_b = None
+                        hours_value = _parse_non_negative_int(
+                            request.form.get(f"class_link_hours_{link.class_group_id}"),
+                            link.teacher_a_hours,
+                        )
+                        link.set_configured_hours(class_hours=hours_value)
             db.session.commit()
-            flash("Enseignants par classe mis à jour", "success")
+            flash("Enseignants et volumes horaires mis à jour", "success")
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
@@ -2549,6 +2587,7 @@ def course_detail(course_id: int):
     ]
 
     remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
+    teacher_hour_summary = course.teacher_hour_summary
     generation_display_status = _effective_generation_status(
         course,
         latest_generation_log,
@@ -2581,6 +2620,106 @@ def course_detail(course_id: int):
         generation_display_status=generation_display_status,
         teacher_duos_by_class=teacher_duos_by_class,
         teacher_duos_average_hours=teacher_duos_average_hours,
+        teacher_hour_summary=teacher_hour_summary,
+    )
+
+
+@bp.route("/sessions/<int:session_id>/edit", methods=["GET", "POST"])
+def edit_session(session_id: int):
+    session = Session.query.options(selectinload(Session.course), selectinload(Session.attendees)).get_or_404(session_id)
+    course = session.course
+    if course is None:
+        flash("Cours introuvable pour cette séance.", "danger")
+        return redirect(url_for("main.dashboard"))
+
+    teachers = sorted(course.teachers, key=lambda teacher: (teacher.name or "").lower())
+    if not teachers:
+        teachers = Teacher.query.order_by(Teacher.name).all()
+    rooms = Room.query.order_by(Room.name).all()
+
+    if session.attendees:
+        class_groups = list(session.attendees)
+    elif session.class_group:
+        class_groups = [session.class_group]
+    else:
+        class_groups = []
+
+    if course.is_cm and not class_groups:
+        class_groups = [link.class_group for link in course.class_links]
+
+    start_date = session.start_time.date().isoformat()
+    start_time_value = session.start_time.strftime("%H:%M")
+    duration_value = session.duration_hours or course.session_length_hours
+
+    if request.method == "POST":
+        teacher_id = int(request.form["teacher_id"])
+        room_id = int(request.form["room_id"])
+        start_date_raw = request.form.get("date")
+        start_time_raw = request.form.get("start_time")
+        duration_raw = request.form.get("duration")
+        duration_value = max(int(duration_raw) if duration_raw else course.session_length_hours, 1)
+        start_dt = _parse_datetime(start_date_raw, start_time_raw)
+        end_dt = start_dt + timedelta(hours=duration_value)
+        teacher = Teacher.query.get_or_404(teacher_id)
+        if teachers and teacher_id not in {entry.id for entry in teachers}:
+            flash("Sélectionnez un enseignant associé au cours", "danger")
+            start_date = start_date_raw or start_date
+            start_time_value = start_time_raw or start_time_value
+            return render_template(
+                "sessions/edit.html",
+                session=session,
+                course=course,
+                teachers=teachers,
+                rooms=rooms,
+                start_times=START_TIMES,
+                start_date=start_date,
+                start_time_value=start_time_value,
+                duration=duration_value,
+            )
+        room = Room.query.get_or_404(room_id)
+
+        effective_groups = class_groups or [link.class_group for link in course.class_links]
+        labels: dict[int, str | None] | None = None
+        if effective_groups:
+            labels = {}
+            for group in effective_groups:
+                if group and group.id:
+                    labels[group.id] = session.subgroup_label if group.id == session.class_group_id else None
+
+        error_message = _validate_session_constraints(
+            course,
+            teacher,
+            room,
+            effective_groups,
+            start_dt,
+            end_dt,
+            ignore_session_id=session.id,
+            class_group_labels=labels,
+        )
+
+        if error_message:
+            flash(error_message, "danger")
+            start_date = start_date_raw
+            start_time_value = start_time_raw
+        else:
+            session.teacher = teacher
+            session.room = room
+            session.start_time = start_dt
+            session.end_time = end_dt
+            db.session.commit()
+            flash("Séance mise à jour", "success")
+            return redirect(url_for("main.course_detail", course_id=course.id))
+
+    return render_template(
+        "sessions/edit.html",
+        session=session,
+        course=course,
+        teachers=teachers,
+        rooms=rooms,
+        start_times=START_TIMES,
+        start_date=start_date,
+        start_time_value=start_time_value,
+        duration=duration_value,
     )
 
 

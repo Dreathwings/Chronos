@@ -822,144 +822,6 @@ def _course_sessions_in_week(
         yield session
 
 
-def _course_hours_in_week(
-    course: Course,
-    week_start: date,
-    week_end: date,
-    pending_sessions: Iterable[Session] = (),
-    *,
-    ignore_session_id: int | None = None,
-) -> int:
-    return sum(
-        session.duration_hours
-        for session in _course_sessions_in_week(
-            course,
-            week_start,
-            week_end,
-            pending_sessions,
-            ignore_session_id=ignore_session_id,
-        )
-    )
-
-
-def _course_class_sessions_in_week(
-    course: Course,
-    class_group: ClassGroup,
-    week_start: date,
-    week_end: date,
-    pending_sessions: Iterable[Session] = (),
-    *,
-    subgroup_label: str | None = None,
-    ignore_session_id: int | None = None,
-) -> Iterable[Session]:
-    target_label = _normalise_label(subgroup_label)
-
-    for session in _course_sessions_in_week(
-        course,
-        week_start,
-        week_end,
-        pending_sessions,
-        ignore_session_id=ignore_session_id,
-    ):
-        if not _session_involves_class(session, class_group):
-            continue
-        session_label = _normalise_label(session.subgroup_label)
-        if session_label != target_label:
-            continue
-        yield session
-
-
-def _course_class_hours_in_week(
-    course: Course,
-    class_group: ClassGroup,
-    week_start: date,
-    week_end: date,
-    pending_sessions: Iterable[Session] = (),
-    *,
-    subgroup_label: str | None = None,
-    ignore_session_id: int | None = None,
-) -> int:
-    return sum(
-        session.duration_hours
-        for session in _course_class_sessions_in_week(
-            course,
-            class_group,
-            week_start,
-            week_end,
-            pending_sessions,
-            subgroup_label=subgroup_label,
-            ignore_session_id=ignore_session_id,
-        )
-    )
-
-
-def has_weekly_course_conflict(
-    course: Course,
-    class_group: ClassGroup,
-    start: datetime | date,
-    *,
-    subgroup_label: str | None = None,
-    pending_sessions: Iterable[Session] = (),
-    ignore_session_id: int | None = None,
-    additional_hours: int | None = None,
-) -> bool:
-    target_day = start.date() if isinstance(start, datetime) else start
-    week_start, week_end = _week_bounds(target_day)
-    weekly_limit = max(int(course.session_length_hours), 0)
-    if weekly_limit == 0:
-        return False
-    scheduled_hours = _course_class_hours_in_week(
-        course,
-        class_group,
-        week_start,
-        week_end,
-        pending_sessions,
-        subgroup_label=subgroup_label,
-        ignore_session_id=ignore_session_id,
-    )
-    extra_hours = (
-        weekly_limit if additional_hours is None else max(int(additional_hours), 0)
-    )
-    return scheduled_hours + extra_hours > weekly_limit
-
-
-def _warn_weekly_limit(
-    reporter: ScheduleReporter, weekly_conflicts: dict[str, Iterable[date]]
-) -> None:
-    if not weekly_conflicts:
-        return
-    for label, weeks in sorted(weekly_conflicts.items(), key=lambda item: item[0]):
-        unique_weeks = sorted({week for week in weeks})
-        if not unique_weeks:
-            continue
-        week_labels = [week.strftime("%d/%m/%Y") for week in unique_weeks]
-        if len(week_labels) == 1:
-            message = (
-                "La durée hebdomadaire autorisée pour "
-                f"{label} est déjà atteinte sur la semaine du {week_labels[0]}"
-            )
-        elif len(week_labels) == 2:
-            message = (
-                "La durée hebdomadaire autorisée pour "
-                f"{label} est déjà atteinte sur les semaines du {week_labels[0]} "
-                f"et du {week_labels[1]}"
-            )
-        elif len(week_labels) == 3:
-            message = (
-                "La durée hebdomadaire autorisée pour "
-                f"{label} est déjà atteinte sur les semaines du {week_labels[0]}, "
-                f"du {week_labels[1]} et du {week_labels[2]}"
-            )
-        else:
-            message = (
-                "La durée hebdomadaire autorisée pour "
-                f"{label} est déjà atteinte sur les semaines du {week_labels[0]}, "
-                f"du {week_labels[1]} et du {week_labels[2]}… "
-                f"(+{len(week_labels) - 3} autre(s))"
-            )
-        reporter.warning(message)
-
-
 def respects_weekly_chronology(
     course: Course,
     class_group: ClassGroup,
@@ -1099,12 +961,18 @@ def _class_hours_needed(
     occurrences_goal: int | None = None,
 ) -> int:
     target_label = _normalise_label(subgroup_label)
+    link = course.class_link_for(class_group)
+    configured_hours = 0
+    if link is not None:
+        configured_hours = link.configured_hours(subgroup_label)
     existing = sum(
         session.duration_hours
         for session in course.sessions
         if session.class_group_id == class_group.id
         and _normalise_label(session.subgroup_label) == target_label
     )
+    if configured_hours:
+        return max(configured_hours - existing, 0)
     target_occurrences = (
         occurrences_goal if occurrences_goal is not None else course.sessions_required
     )
@@ -2251,7 +2119,10 @@ def generate_schedule(
             raise ValueError(message)
         target_ids = {group.id for group in class_groups}
         existing_day_hours = _cm_existing_hours_by_day(course, target_ids)
-        total_required = effective_occurrences * course.session_length_hours
+        if course.cm_required_hours:
+            total_required = max(course.cm_required_hours, 0)
+        else:
+            total_required = effective_occurrences * course.session_length_hours
         already_scheduled = sum(existing_day_hours.values())
         hours_remaining = max(total_required - already_scheduled, 0)
         progress.initialise(hours_remaining)
@@ -2369,26 +2240,10 @@ def generate_schedule(
                 ordered_days = sorted(available_days, key=_cm_day_sort_key)
 
                 chronology_weeks: set[date] = set()
-                weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
 
                 def _attempt_day(day: date) -> bool:
                     nonlocal hours_remaining, block_index
                     week_start, _ = _week_bounds(day)
-                    conflict_detected = False
-                    for group in class_groups:
-                        if has_weekly_course_conflict(
-                            course,
-                            group,
-                            day,
-                            pending_sessions=created_sessions,
-                            additional_hours=desired_hours,
-                        ):
-                            link = link_lookup.get(group.id) if link_lookup else None
-                            label = format_class_label(group, link=link)
-                            weekly_limit_weeks[label].add(week_start)
-                            conflict_detected = True
-                    if conflict_detected:
-                        return False
                     if not all(
                         _day_respects_chronology(
                             course, group, day, created_sessions, subgroup_label=None
@@ -2529,7 +2384,6 @@ def generate_schedule(
                                 hours_remaining += relocated_hours
                                 block_index = max(block_index - 1, 0)
                                 continue
-                        _warn_weekly_limit(reporter, weekly_limit_weeks)
                         for week_start in sorted(chronology_weeks):
                             reporter.warning(
                                 "Ordre CM → TD → TP impossible à respecter "
@@ -2703,7 +2557,6 @@ def generate_schedule(
                 ordered_days = sorted(available_days, key=_day_sort_key)
 
                 chronology_weeks: set[date] = set()
-                weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
 
                 def _candidate_base_offsets(day: date) -> list[int]:
                     offsets: list[int] = []
@@ -2740,19 +2593,6 @@ def generate_schedule(
                 def _attempt_day(day: date) -> bool:
                     nonlocal hours_remaining, block_index
                     week_start, _ = _week_bounds(day)
-                    if has_weekly_course_conflict(
-                        course,
-                        class_group,
-                        day,
-                        subgroup_label=subgroup_label,
-                        pending_sessions=created_sessions,
-                        additional_hours=desired_hours,
-                    ):
-                        label = format_class_label(
-                            class_group, link=link, subgroup_label=subgroup_label
-                        )
-                        weekly_limit_weeks[label].add(week_start)
-                        return False
                     if not _day_respects_chronology(
                         course,
                         class_group,
@@ -2971,7 +2811,6 @@ def generate_schedule(
                                 hours_remaining = max(hours_remaining - block_hours, 0)
                                 block_index += 1
                                 continue
-                    _warn_weekly_limit(reporter, weekly_limit_weeks)
                     for week_start in sorted(chronology_weeks):
                         reporter.warning(
                             f"Chronologie CM → TD → TP impossible pour {class_group.name} "

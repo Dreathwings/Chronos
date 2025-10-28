@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from math import ceil
 from itertools import combinations
@@ -259,6 +260,8 @@ class Course(db.Model, TimeStampedModel):
     course_name_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("course_name.id"), nullable=True
     )
+    color: Mapped[Optional[str]] = mapped_column(String(9))
+    cm_required_hours: Mapped[int] = mapped_column(Integer, default=0)
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
     computers_required: Mapped[int] = mapped_column(Integer, default=0)
@@ -306,6 +309,7 @@ class Course(db.Model, TimeStampedModel):
             "semester IN ('S1','S2','S3','S4','S5','S6')",
             name="chk_course_semester_valid",
         ),
+        CheckConstraint("cm_required_hours >= 0", name="chk_course_cm_hours_non_negative"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -430,16 +434,84 @@ class Course(db.Model, TimeStampedModel):
 
     @property
     def total_required_hours(self) -> int:
-        group_total = sum(link.group_count for link in self.class_links)
+        if self.is_cm and self.cm_required_hours:
+            return max(self.cm_required_hours, 0)
+
         if self.is_cm:
-            multiplier = 1
-        else:
-            multiplier = group_total or 1
+            return self.sessions_required * self.session_length_hours
+
+        total = 0
+        for link in self.class_links:
+            if link.group_count == 2:
+                total += max(link.teacher_a_hours, 0)
+                total += max(link.teacher_b_hours, 0)
+            else:
+                total += max(link.teacher_a_hours, link.teacher_b_hours, 0)
+        if total > 0:
+            return total
+
+        group_total = sum(link.group_count for link in self.class_links)
+        multiplier = group_total or 1
         if self.allowed_weeks:
             occurrences = len(self.allowed_weeks)
         else:
             occurrences = self.sessions_required
         return occurrences * self.session_length_hours * multiplier
+
+    @property
+    def teacher_hour_summary(self) -> list[dict[str, object]]:
+        configured: dict[int, int] = defaultdict(int)
+        scheduled: dict[int, int] = defaultdict(int)
+        teacher_objects: dict[int, Teacher] = {}
+
+        if self.is_cm:
+            target_teacher: Teacher | None = None
+            for link in self.class_links:
+                if link.teacher_a:
+                    target_teacher = link.teacher_a
+                    teacher_objects[target_teacher.id] = target_teacher
+                    break
+                if link.teacher_b:
+                    target_teacher = link.teacher_b
+                    teacher_objects[target_teacher.id] = target_teacher
+                    break
+            if target_teacher and self.cm_required_hours:
+                configured[target_teacher.id] += max(self.cm_required_hours, 0)
+        else:
+            for link in self.class_links:
+                if link.teacher_a:
+                    teacher_objects[link.teacher_a.id] = link.teacher_a
+                    configured[link.teacher_a.id] += max(link.teacher_a_hours, 0)
+                if link.teacher_b:
+                    teacher_objects[link.teacher_b.id] = link.teacher_b
+                    configured[link.teacher_b.id] += max(link.teacher_b_hours, 0)
+
+        for session in self.sessions:
+            if session.teacher_id:
+                scheduled[session.teacher_id] += session.duration_hours
+                if session.teacher:
+                    teacher_objects[session.teacher_id] = session.teacher
+
+        summary: list[dict[str, object]] = []
+        for teacher_id, teacher in sorted(
+            teacher_objects.items(), key=lambda item: (item[1].name or "").lower()
+        ):
+            configured_hours = configured.get(teacher_id, 0)
+            scheduled_hours = scheduled.get(teacher_id, 0)
+            remaining_hours = (
+                max(configured_hours - scheduled_hours, 0)
+                if configured_hours
+                else None
+            )
+            summary.append(
+                {
+                    "teacher": teacher,
+                    "configured_hours": configured_hours,
+                    "scheduled_hours": scheduled_hours,
+                    "remaining_hours": remaining_hours,
+                }
+            )
+        return summary
 
     @property
     def latest_generation_log(self) -> "CourseScheduleLog | None":
@@ -585,7 +657,7 @@ class Session(db.Model, TimeStampedModel):
             primary_entry.get("phone") if isinstance(primary_entry, dict) else None
         )
 
-        return {
+        event = {
             "id": str(self.id),
             "title": title,
             "start": self.start_time.isoformat(),
@@ -625,6 +697,11 @@ class Session(db.Model, TimeStampedModel):
                 "is_grouped": False,
             },
         }
+        course_color = getattr(self.course, "color", None)
+        if course_color:
+            event["backgroundColor"] = course_color
+            event["borderColor"] = course_color
+        return event
 
     @property
     def duration_hours(self) -> int:
@@ -1213,6 +1290,8 @@ class CourseClassLink(db.Model):
     teacher_b_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teacher.id"))
     subgroup_a_course_name_id: Mapped[Optional[int]] = mapped_column(ForeignKey("course_name.id"))
     subgroup_b_course_name_id: Mapped[Optional[int]] = mapped_column(ForeignKey("course_name.id"))
+    teacher_a_hours: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    teacher_b_hours: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="class_links")
     class_group: Mapped[ClassGroup] = relationship(back_populates="course_links")
@@ -1231,6 +1310,8 @@ class CourseClassLink(db.Model):
 
     __table_args__ = (
         CheckConstraint("group_count >= 1 AND group_count <= 2", name="chk_course_class_group_count"),
+        CheckConstraint("teacher_a_hours >= 0", name="chk_course_class_teacher_a_hours_non_negative"),
+        CheckConstraint("teacher_b_hours >= 0", name="chk_course_class_teacher_b_hours_non_negative"),
     )
 
     @property
@@ -1339,6 +1420,34 @@ class CourseClassLink(db.Model):
                 (self.subgroup_name_for("B"), self.teacher_for_label("B")),
             ]
         return [("", teacher)]
+
+    def configured_hours(self, subgroup_label: str | None = None) -> int:
+        if self.group_count == 2:
+            label = (subgroup_label or "").strip().upper()
+            if label == "A":
+                return max(self.teacher_a_hours, 0)
+            if label == "B":
+                return max(self.teacher_b_hours, 0)
+            return max(self.teacher_a_hours, self.teacher_b_hours, 0)
+        return max(self.teacher_a_hours, self.teacher_b_hours, 0)
+
+    def set_configured_hours(
+        self, *,
+        class_hours: int | None = None,
+        subgroup_a_hours: int | None = None,
+        subgroup_b_hours: int | None = None,
+    ) -> None:
+        if self.group_count == 2:
+            if subgroup_a_hours is not None:
+                self.teacher_a_hours = max(int(subgroup_a_hours), 0)
+            if subgroup_b_hours is not None:
+                self.teacher_b_hours = max(int(subgroup_b_hours), 0)
+        else:
+            value = 0
+            if class_hours is not None:
+                value = max(int(class_hours), 0)
+            self.teacher_a_hours = value
+            self.teacher_b_hours = value
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return (

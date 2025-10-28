@@ -81,6 +81,26 @@
               <input type="number" class="form-control" name="session_length_hours" value="{{ course.session_length_hours }}" min="1">
             </div>
           </div>
+          <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+              <label class="form-label">Couleur du cours</label>
+              <div class="d-flex align-items-center gap-2 flex-wrap">
+                <input
+                  type="color"
+                  class="form-control form-control-color"
+                  id="course-color-picker"
+                  name="color"
+                  value="{{ course.color or '#0d6efd' }}"
+                  {% if not course.color %}disabled{% endif %}
+                >
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="course-color-enabled" name="use_color" value="1" {% if course.color %}checked{% endif %}>
+                  <label class="form-check-label" for="course-color-enabled">Personnaliser</label>
+                </div>
+              </div>
+              <div class="form-text">La couleur est utilisée pour les séances affichées dans le calendrier.</div>
+            </div>
+          </div>
           <div class="text-muted small">
             {% if course.semester_start and course.semester_end %}
             Période du semestre : {{ course.semester_start.strftime('%d/%m/%Y') }} → {{ course.semester_end.strftime('%d/%m/%Y') }}
@@ -222,7 +242,7 @@
             aria-expanded="false"
             aria-controls="collapseTeachersByClass"
           >
-            Enseignants par classe
+            Enseignants &amp; heures par classe
           </button>
         </h2>
         <div
@@ -243,23 +263,38 @@
           {% set ns.shared_teacher = link.teacher_a or link.teacher_b %}
           {% endif %}
           {% endfor %}
-          <div class="border rounded p-2">
+          {% set default_hours = course.cm_required_hours if course.cm_required_hours else course.sessions_required * course.session_length_hours %}
+          <div class="border rounded p-3">
             <div class="fw-semibold">Cours magistral</div>
             <div class="text-muted small mb-2">
               Enseignant appliqué à l'ensemble des classes : {{ class_names | join(', ') }}.
             </div>
-            <select class="form-select form-select-sm" name="course_teacher_all">
-              <option value="" {% if not ns.shared_teacher %}selected{% endif %}>— Aucun enseignant —</option>
-              {% for teacher in available_teachers %}
-              <option value="{{ teacher.id }}" {% if ns.shared_teacher and teacher.id == ns.shared_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
-              {% endfor %}
-            </select>
+            <div class="row g-2 align-items-end">
+              <div class="col-md-7">
+                <label class="form-label small mb-1">Enseignant</label>
+                <select class="form-select form-select-sm" name="course_teacher_all">
+                  <option value="" {% if not ns.shared_teacher %}selected{% endif %}>— Aucun enseignant —</option>
+                  {% for teacher in available_teachers %}
+                  <option value="{{ teacher.id }}" {% if ns.shared_teacher and teacher.id == ns.shared_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-5">
+                <label class="form-label small mb-1">Heures à générer</label>
+                <input type="number" class="form-control form-control-sm" name="cm_required_hours" value="{{ default_hours }}" min="0">
+                <div class="form-text">Volume total partagé par toutes les classes.</div>
+              </div>
+            </div>
           </div>
           {% elif course.course_type == 'SAE' %}
           {% for link in course.class_links %}
-          <div class="border rounded p-2">
+          {% set hours_value = link.teacher_a_hours if link.teacher_a_hours else link.teacher_b_hours %}
+          {% if not hours_value %}
+          {% set hours_value = course.session_length_hours * course.sessions_required %}
+          {% endif %}
+          <div class="border rounded p-3">
             <div class="fw-semibold">{{ link.class_group.name }}</div>
-            <div class="text-muted small mb-2">Deux enseignants doivent encadrer cette classe.</div>
+            <div class="text-muted small mb-2">Deux enseignants encadrent chaque séance de 4 h.</div>
             <div class="row g-2">
               <div class="col-md-6">
                 <label class="form-label small mb-1">Enseignant 1</label>
@@ -280,16 +315,20 @@
                 </select>
               </div>
             </div>
+            <div class="mt-2">
+              <label class="form-label small mb-1">Heures par classe</label>
+              <input type="number" class="form-control form-control-sm" name="class_link_hours_{{ link.class_group_id }}" value="{{ hours_value }}" min="0" step="1">
+              <div class="form-text">Chaque enseignant couvrira ce volume (séances communes).</div>
+            </div>
           </div>
           {% endfor %}
           {% else %}
           {% for link in course.class_links %}
-          {% set assigned_teacher = link.teacher_a or link.teacher_b %}
-          <div class="border rounded p-2">
+          <div class="border rounded p-3">
             <div class="fw-semibold">{{ link.class_group.name }}</div>
             <div class="text-muted small mb-2">
               {% if course.course_type == 'TP' %}
-              Travaux pratiques — demi-groupes
+              Travaux pratiques — un enseignant par demi-groupe.
               {% if teacher_duos_average_hours is not none and loop.first %}
               <div class="mt-1">
                 <span class="text-muted small">
@@ -311,7 +350,7 @@
               </div>
               {% endif %}
               {% else %}
-              Classe entière
+              Classe entière — un enseignant par séance.
               {% endif %}
             </div>
             {% if link.group_count == 2 %}
@@ -326,6 +365,10 @@
                   <option value="{{ teacher.id }}" {% if teacher_a and teacher.id == teacher_a.id %}selected{% endif %}>{{ teacher.name }}</option>
                   {% endfor %}
                 </select>
+                <div class="mt-2">
+                  <label class="form-label small mb-1">Heures sous-groupe A</label>
+                  <input type="number" class="form-control form-control-sm" name="class_link_hours_{{ link.class_group_id }}_A" value="{{ link.teacher_a_hours }}" min="0">
+                </div>
               </div>
               <div class="col-md-6">
                 <label class="form-label small mb-1">Sous-groupe B — {{ link.subgroup_name_for('B') }}</label>
@@ -335,16 +378,29 @@
                   <option value="{{ teacher.id }}" {% if teacher_b and teacher.id == teacher_b.id %}selected{% endif %}>{{ teacher.name }}</option>
                   {% endfor %}
                 </select>
+                <div class="mt-2">
+                  <label class="form-label small mb-1">Heures sous-groupe B</label>
+                  <input type="number" class="form-control form-control-sm" name="class_link_hours_{{ link.class_group_id }}_B" value="{{ link.teacher_b_hours }}" min="0">
+                </div>
               </div>
             </div>
             {% else %}
             {% set assigned_teacher = link.teacher_for_label(None) %}
-            <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}">
-              <option value="" {% if not assigned_teacher %}selected{% endif %}>— Aucun enseignant —</option>
-              {% for teacher in available_teachers %}
-              <option value="{{ teacher.id }}" {% if assigned_teacher and teacher.id == assigned_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
-              {% endfor %}
-            </select>
+            <div class="row g-2 align-items-end">
+              <div class="col-md-7">
+                <label class="form-label small mb-1">Enseignant</label>
+                <select class="form-select form-select-sm" name="class_link_teacher_{{ link.class_group_id }}">
+                  <option value="" {% if not assigned_teacher %}selected{% endif %}>— Aucun enseignant —</option>
+                  {% for teacher in available_teachers %}
+                  <option value="{{ teacher.id }}" {% if assigned_teacher and teacher.id == assigned_teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-5">
+                <label class="form-label small mb-1">Heures pour la classe</label>
+                <input type="number" class="form-control form-control-sm" name="class_link_hours_{{ link.class_group_id }}" value="{{ link.teacher_a_hours }}" min="0">
+              </div>
+            </div>
             {% endif %}
           </div>
           {% endfor %}
@@ -442,6 +498,66 @@
         </div>
       </div>
       <div class="accordion-item shadow-sm">
+        <h2 class="accordion-header" id="headingSessionTable">
+          <button
+            class="accordion-button collapsed bg-light"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#collapseSessionTable"
+            aria-expanded="false"
+            aria-controls="collapseSessionTable"
+          >
+            Séances planifiées
+          </button>
+        </h2>
+        <div
+          id="collapseSessionTable"
+          class="accordion-collapse collapse"
+          aria-labelledby="headingSessionTable"
+          data-bs-parent="#courseSummaryAccordion"
+        >
+          <div class="accordion-body">
+            {% if course.sessions %}
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Heure</th>
+                    <th scope="col">Durée</th>
+                    <th scope="col">Enseignant</th>
+                    <th scope="col">Salle</th>
+                    <th scope="col">Classe(s)</th>
+                    <th scope="col" class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for session in course.sessions|sort(attribute='start_time') %}
+                  <tr>
+                    <td>{{ session.start_time.strftime('%d/%m/%Y') }}</td>
+                    <td>{{ session.start_time.strftime('%H:%M') }}</td>
+                    <td>{{ session.duration_hours }} h</td>
+                    <td>{{ session.teacher.name if session.teacher else '—' }}</td>
+                    <td>{{ session.room.name if session.room else '—' }}</td>
+                    <td>{{ session.attendee_names() | join(', ') }}</td>
+                    <td class="text-end">
+                      <a
+                        class="btn btn-sm btn-outline-primary"
+                        href="{{ url_for('main.edit_session', session_id=session.id) }}"
+                      >Modifier</a>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <p class="text-muted mb-0 small">Aucune séance n'a encore été planifiée.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item shadow-sm">
         <h2 class="accordion-header" id="headingGenerationLog">
           <button
             class="accordion-button collapsed bg-dark text-white"
@@ -499,6 +615,67 @@
         {% else %}
         <p class="text-muted mb-0 small">Aucune génération enregistrée pour ce cours.</p>
         {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item shadow-sm">
+        <h2 class="accordion-header" id="headingTeacherSummary">
+          <button
+            class="accordion-button collapsed bg-warning text-dark"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#collapseTeacherSummary"
+            aria-expanded="false"
+            aria-controls="collapseTeacherSummary"
+          >
+            Récapitulatif par enseignant
+          </button>
+        </h2>
+        <div
+          id="collapseTeacherSummary"
+          class="accordion-collapse collapse"
+          aria-labelledby="headingTeacherSummary"
+          data-bs-parent="#courseSummaryAccordion"
+        >
+          <div class="accordion-body">
+            {% if teacher_hour_summary %}
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th scope="col">Enseignant</th>
+                    <th scope="col" class="text-center">Heures prévues</th>
+                    <th scope="col" class="text-center">Heures planifiées</th>
+                    <th scope="col" class="text-center">Reste</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for entry in teacher_hour_summary %}
+                  <tr>
+                    <th scope="row">{{ entry.teacher.name }}</th>
+                    <td class="text-center">
+                      {% if entry.configured_hours %}
+                      {{ entry.configured_hours }} h
+                      {% else %}
+                      —
+                      {% endif %}
+                    </td>
+                    <td class="text-center">{{ entry.scheduled_hours }} h</td>
+                    <td class="text-center">
+                      {% if entry.remaining_hours is none %}
+                      —
+                      {% else %}
+                      {{ entry.remaining_hours }} h
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <p class="text-muted mb-0 small">Aucun enseignant n'est encore associé au cours.</p>
+            {% endif %}
           </div>
         </div>
       </div>
@@ -645,6 +822,15 @@
 
   document.addEventListener('DOMContentLoaded', function() {
     chronosBindFilterInputs();
+    const colorToggle = document.getElementById('course-color-enabled');
+    const colorInput = document.getElementById('course-color-picker');
+    if (colorToggle && colorInput) {
+      const updateColorState = function() {
+        colorInput.disabled = !colorToggle.checked;
+      };
+      colorToggle.addEventListener('change', updateColorState);
+      updateColorState();
+    }
     const calendarEl = document.getElementById('course-calendar');
     const events = {{ events_json|safe }};
     const calendar = window.createChronosCalendar(calendarEl, events);

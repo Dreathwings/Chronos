@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block title %}Modifier une séance — {{ session.course.name }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-secondary text-white">
+        Modifier la séance
+      </div>
+      <div class="card-body">
+        <dl class="row mb-4">
+          <dt class="col-sm-4">Cours</dt>
+          <dd class="col-sm-8">{{ session.course.name }}</dd>
+          <dt class="col-sm-4">Classe(s)</dt>
+          <dd class="col-sm-8">{{ session.attendee_names() | join(', ') }}</dd>
+          {% if session.subgroup_display_name() %}
+          <dt class="col-sm-4">Sous-groupe</dt>
+          <dd class="col-sm-8">{{ session.subgroup_display_name() }}</dd>
+          {% endif %}
+        </dl>
+        <form method="post" class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Enseignant</label>
+            <select class="form-select" name="teacher_id" required>
+              {% for teacher in teachers %}
+              <option value="{{ teacher.id }}" {% if session.teacher_id == teacher.id %}selected{% endif %}>{{ teacher.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Salle</label>
+            <select class="form-select" name="room_id" required>
+              {% for room in rooms %}
+              <option value="{{ room.id }}" {% if session.room_id == room.id %}selected{% endif %}>{{ room.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Date</label>
+            <input type="date" class="form-control" name="date" value="{{ start_date }}" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Heure de début</label>
+            <select class="form-select" name="start_time">
+              {% for start_time in start_times %}
+              {% set value = start_time.strftime('%H:%M') %}
+              <option value="{{ value }}" {% if value == start_time_value %}selected{% endif %}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Durée (h)</label>
+            <input type="number" class="form-control" name="duration" value="{{ duration }}" min="1">
+          </div>
+          <div class="col-12 d-flex justify-content-between align-items-center">
+            <a href="{{ url_for('main.course_detail', course_id=session.course_id) }}" class="btn btn-outline-secondary">Annuler</a>
+            <button type="submit" class="btn btn-primary">Enregistrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

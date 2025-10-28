@@ -27,9 +27,8 @@ from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
     generate_schedule,
-    has_weekly_course_conflict,
     _relocate_sessions_for_groups,
-    _warn_weekly_limit,
+    _class_hours_needed,
 )
 
 
@@ -186,6 +185,35 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         teachers = event["extendedProps"]["teachers"]
         self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
+
+    def test_session_event_uses_course_color(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        course.color = "#FF00FF"
+        teacher = Teacher(name="Alice")
+        room = Room(name="B203", capacity=24)
+        db.session.add_all([teacher, room])
+        db.session.commit()
+
+        link.teacher_a = teacher
+        db.session.commit()
+
+        start = datetime(2024, 1, 11, 8, 0)
+        end = datetime(2024, 1, 11, 10, 0)
+        session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=start,
+            end_time=end,
+        )
+        session.attendees = [class_group]
+        db.session.add(session)
+        db.session.commit()
+
+        event = session.as_event()
+        self.assertEqual(event["backgroundColor"], "#FF00FF")
+        self.assertEqual(event["borderColor"], "#FF00FF")
 
     def test_best_teacher_duos_prefers_shared_availability(self) -> None:
         teacher_a = Teacher(name="Alice")
@@ -1152,246 +1180,151 @@ class EquipmentValidationTestCase(DatabaseTestCase):
         self.assertIsNone(error)
 
 
-class WeeklyLimitTestCase(DatabaseTestCase):
-    def _create_course(self) -> tuple[Course, ClassGroup, Room]:
-        base_name = CourseName(name="Algorithmes")
+class ConfiguredHoursTestCase(DatabaseTestCase):
+    def test_cm_total_required_hours_uses_configured_value(self) -> None:
+        base_name = CourseName(name="Synthèse")
         course = Course(
-            name=Course.compose_name("TD", base_name.name, "S1"),
-            course_type="TD",
-            session_length_hours=2,
+            name=Course.compose_name("CM", base_name.name, "S1"),
+            course_type="CM",
+            session_length_hours=3,
             sessions_required=2,
             semester="S1",
             configured_name=base_name,
+            cm_required_hours=18,
         )
-        class_group = ClassGroup(name="INFO1", size=28)
-        link = CourseClassLink(class_group=class_group, group_count=1)
-        course.class_links.append(link)
-        room = Room(name="B301", capacity=30)
-        db.session.add_all([course, class_group, base_name, room])
-        db.session.commit()
-        return course, class_group, room
-
-    def _create_teacher(self) -> Teacher:
-        teacher = Teacher(name="Alice")
-        db.session.add(teacher)
-        db.session.commit()
-        availabilities = [
-            TeacherAvailability(
-                teacher=teacher,
-                weekday=weekday,
-                start_time=time(8, 0),
-                end_time=time(18, 0),
-            )
-            for weekday in (0, 2)
-        ]
-        db.session.add_all(availabilities)
-        db.session.commit()
-        return teacher
-
-    def test_validation_limits_weekly_hours_to_session_length(self) -> None:
-        course, class_group, room = self._create_course()
-        teacher = self._create_teacher()
-
-        first_start = datetime(2024, 1, 8, 8, 0, 0)
-        first_end = datetime(2024, 1, 8, 9, 0, 0)
-        first_session = Session(
-            course=course,
-            teacher=teacher,
-            room=room,
-            class_group=class_group,
-            start_time=first_start,
-            end_time=first_end,
-        )
-        first_session.attendees = [class_group]
-        db.session.add(first_session)
+        db.session.add_all([base_name, course])
         db.session.commit()
 
-        second_start = datetime(2024, 1, 10, 8, 0, 0)
-        second_end = datetime(2024, 1, 10, 9, 0, 0)
-        self.assertIsNone(
-            _validate_session_constraints(
-                course,
-                teacher,
-                room,
-                [class_group],
-                second_start,
-                second_end,
-            )
-        )
+        self.assertEqual(course.total_required_hours, 18)
 
-        second_session = Session(
-            course=course,
-            teacher=teacher,
-            room=room,
-            class_group=class_group,
-            start_time=second_start,
-            end_time=second_end,
-        )
-        second_session.attendees = [class_group]
-        db.session.add(second_session)
-        db.session.commit()
-
-        third_start = datetime(2024, 1, 10, 13, 30, 0)
-        third_end = datetime(2024, 1, 10, 14, 30, 0)
-        error = _validate_session_constraints(
-            course,
-            teacher,
-            room,
-            [class_group],
-            third_start,
-            third_end,
-        )
-        self.assertIsNotNone(error)
-        self.assertIn("semaine", error)
-        self.assertIn(class_group.name, error)
-
-        next_week_start = third_start + timedelta(days=7)
-        next_week_end = third_end + timedelta(days=7)
-        self.assertIsNone(
-            _validate_session_constraints(
-                course,
-                teacher,
-                room,
-                [class_group],
-                next_week_start,
-                next_week_end,
-            )
-        )
-
-        self.assertFalse(
-            has_weekly_course_conflict(
-                course,
-                class_group,
-                third_start,
-                ignore_session_id=first_session.id,
-                additional_hours=1,
-            )
-        )
-
-    def test_weekly_limit_independent_between_course_classes(self) -> None:
-        course, primary_class, room = self._create_course()
-        teacher = self._create_teacher()
-
-        second_class = ClassGroup(name="INFO2", size=26)
-        second_link = CourseClassLink(class_group=second_class, group_count=1)
-        course.class_links.append(second_link)
-        db.session.add(second_class)
-        db.session.commit()
-
-        first_start = datetime(2024, 1, 8, 8, 0, 0)
-        first_end = datetime(2024, 1, 8, 10, 0, 0)
-        first_session = Session(
-            course=course,
-            teacher=teacher,
-            room=room,
-            class_group=primary_class,
-            start_time=first_start,
-            end_time=first_end,
-        )
-        first_session.attendees = [primary_class]
-        db.session.add(first_session)
-        db.session.commit()
-
-        overlap_start = datetime(2024, 1, 10, 8, 0, 0)
-        overlap_end = datetime(2024, 1, 10, 9, 0, 0)
-
-        error = _validate_session_constraints(
-            course,
-            teacher,
-            room,
-            [second_class],
-            overlap_start,
-            overlap_end,
-        )
-        self.assertIsNone(error)
-
-        self.assertFalse(
-            has_weekly_course_conflict(
-                course,
-                second_class,
-                overlap_start,
-                additional_hours=1,
-            )
-        )
-
-    def test_weekly_limit_independent_between_tp_subgroups(self) -> None:
+    def test_class_link_configured_hours_for_subgroups(self) -> None:
         course, link, class_group = self._create_tp_course()
-        teacher = self._create_teacher()
-        room = Room(name="B302", capacity=24)
-        db.session.add(room)
+        link.set_configured_hours(subgroup_a_hours=6, subgroup_b_hours=8)
         db.session.commit()
 
-        first_start = datetime(2024, 1, 8, 8, 0, 0)
-        first_end = datetime(2024, 1, 8, 10, 0, 0)
-        first_session = Session(
+        self.assertEqual(link.configured_hours("A"), 6)
+        self.assertEqual(link.configured_hours("B"), 8)
+
+        teacher = Teacher(name="Alice")
+        room = Room(name="B200", capacity=24)
+        db.session.add_all([teacher, room])
+        db.session.commit()
+
+        session_a = Session(
             course=course,
             teacher=teacher,
             room=room,
             class_group=class_group,
             subgroup_label="A",
-            start_time=first_start,
-            end_time=first_end,
+            start_time=datetime(2024, 1, 8, 8, 0),
+            end_time=datetime(2024, 1, 8, 10, 0),
         )
-        first_session.attendees = [class_group]
-        db.session.add(first_session)
+        session_a.attendees = [class_group]
+        db.session.add(session_a)
         db.session.commit()
 
-        overlap_start = datetime(2024, 1, 10, 8, 0, 0)
-        overlap_end = datetime(2024, 1, 10, 9, 0, 0)
+        self.assertEqual(link.configured_hours("A"), 6)
 
-        error = _validate_session_constraints(
-            course,
-            teacher,
-            room,
-            [class_group],
-            overlap_start,
-            overlap_end,
-            class_group_labels={class_group.id: "B"},
-        )
-        self.assertIsNone(error)
-
-        self.assertFalse(
-            has_weekly_course_conflict(
-                course,
-                class_group,
-                overlap_start,
-                subgroup_label="B",
-                additional_hours=1,
-            )
-        )
-
-        self.assertTrue(
-            has_weekly_course_conflict(
-                course,
-                class_group,
-                overlap_start,
-                subgroup_label="A",
-                additional_hours=1,
-            )
-        )
-
-
-class SchedulerFormattingTestCase(DatabaseTestCase):
-    def test_weekly_limit_warnings_are_grouped(self) -> None:
-        base_name = CourseName(name="Synthèse")
+    def test_total_required_hours_falls_back_to_sessions(self) -> None:
+        base_name = CourseName(name="Analyse")
         course = Course(
-            name=Course.compose_name("CM", base_name.name, "S1"),
-            course_type="CM",
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
             session_length_hours=2,
-            sessions_required=1,
+            sessions_required=3,
             semester="S1",
             configured_name=base_name,
         )
-        reporter = ScheduleReporter(course)
-        weeks = {
-            date(2025, 9, 8) + timedelta(days=7 * offset)
-            for offset in range(6)
-        }
+        class_group = ClassGroup(name="INFO1", size=30)
+        link = CourseClassLink(class_group=class_group, group_count=1)
+        course.class_links.append(link)
+        db.session.add_all([base_name, course, class_group])
+        db.session.commit()
 
-        _warn_weekly_limit(reporter, {"Synthèse": weeks})
+        self.assertEqual(course.total_required_hours, 6)
 
-        self.assertEqual(reporter.status, "warning")
-        self.assertEqual(len(reporter.entries), 0)
+    def test_class_hours_needed_respects_configured_hours(self) -> None:
+        base_name = CourseName(name="Physique")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=3,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO2", size=28)
+        link = CourseClassLink(class_group=class_group, group_count=1)
+        course.class_links.append(link)
+        teacher = Teacher(name="Alice")
+        room = Room(name="B201", capacity=30)
+        db.session.add_all([base_name, course, class_group, teacher, room])
+        db.session.commit()
+
+        link.set_configured_hours(class_hours=10)
+        db.session.commit()
+
+        session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=datetime(2024, 1, 8, 8, 0),
+            end_time=datetime(2024, 1, 8, 11, 0),
+        )
+        session.attendees = [class_group]
+        db.session.add(session)
+        db.session.commit()
+
+        remaining = _class_hours_needed(course, class_group)
+        self.assertEqual(remaining, 7)
+
+    def test_teacher_hour_summary_lists_configured_and_scheduled(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        room = Room(name="B204", capacity=24)
+        db.session.add_all([teacher_a, teacher_b, room])
+        db.session.commit()
+
+        link.teacher_a = teacher_a
+        link.teacher_b = teacher_b
+        link.set_configured_hours(subgroup_a_hours=4, subgroup_b_hours=6)
+        db.session.commit()
+
+        session_a = Session(
+            course=course,
+            teacher=teacher_a,
+            room=room,
+            class_group=class_group,
+            subgroup_label="A",
+            start_time=datetime(2024, 1, 9, 8, 0),
+            end_time=datetime(2024, 1, 9, 10, 0),
+        )
+        session_a.attendees = [class_group]
+        session_b = Session(
+            course=course,
+            teacher=teacher_b,
+            room=room,
+            class_group=class_group,
+            subgroup_label="B",
+            start_time=datetime(2024, 1, 10, 8, 0),
+            end_time=datetime(2024, 1, 10, 11, 0),
+        )
+        session_b.attendees = [class_group]
+        db.session.add_all([session_a, session_b])
+        db.session.commit()
+
+        summary = course.teacher_hour_summary
+        self.assertEqual(len(summary), 2)
+        alice_entry = next(entry for entry in summary if entry["teacher"].name == "Alice")
+        bruno_entry = next(entry for entry in summary if entry["teacher"].name == "Bruno")
+        self.assertEqual(alice_entry["configured_hours"], 4)
+        self.assertEqual(alice_entry["scheduled_hours"], 2)
+        self.assertEqual(alice_entry["remaining_hours"], 2)
+        self.assertEqual(bruno_entry["configured_hours"], 6)
+        self.assertEqual(bruno_entry["scheduled_hours"], 3)
+        self.assertEqual(bruno_entry["remaining_hours"], 3)
 
 
 class SchedulerRelocationTestCase(DatabaseTestCase):
