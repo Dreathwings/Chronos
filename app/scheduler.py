@@ -498,9 +498,18 @@ def _describe_teacher_unavailability(
         for assigned in link.preferred_teachers(subgroup_label):
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
-        fallback_pool = link.assigned_teachers()
-    elif course.teachers:
-        fallback_pool = list(course.teachers)
+
+    link_teachers = link.assigned_teachers() if link is not None else []
+    course_teachers = [
+        teacher for teacher in getattr(course, "teachers", []) if teacher is not None
+    ]
+
+    fallback_pool: list[Teacher]
+    if link_teachers or course_teachers:
+        fallback_pool = list(link_teachers)
+        for teacher in course_teachers:
+            if teacher not in fallback_pool:
+                fallback_pool.append(teacher)
     else:
         fallback_pool = Teacher.query.all()
 
@@ -1069,11 +1078,18 @@ def find_available_teacher(
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
 
-    if link is not None:
-        fallback_pool = link.assigned_teachers()
-        allowed_ids = {teacher.id for teacher in fallback_pool if teacher.id is not None}
-    elif course.teachers:
-        fallback_pool = list(course.teachers)
+    link_teachers = link.assigned_teachers() if link is not None else []
+    course_teachers = [
+        teacher for teacher in getattr(course, "teachers", []) if teacher is not None
+    ]
+    if link_teachers or course_teachers:
+        fallback_pool = list(link_teachers)
+        for teacher in course_teachers:
+            if teacher not in fallback_pool:
+                fallback_pool.append(teacher)
+        allowed_ids = {
+            teacher.id for teacher in fallback_pool if teacher.id is not None
+        } or None
     else:
         fallback_pool = Teacher.query.all()
 
