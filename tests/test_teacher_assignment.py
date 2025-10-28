@@ -1730,5 +1730,62 @@ class ScheduleGenerationFailureTestCase(DatabaseTestCase):
         self.assertIn("semaine", summary_text)
 
 
+class SchedulerWeeklyLimitOverflowTestCase(DatabaseTestCase):
+    def test_generation_allows_overflow_when_all_weeks_full(self) -> None:
+        base_name = CourseName(name="Probabilités")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=3,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=24)
+        link = CourseClassLink(class_group=class_group, group_count=1)
+        course.class_links.append(link)
+        teacher = Teacher(name="Alice")
+        room = Room(name="B105", capacity=28)
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all([base_name, course, class_group, link, teacher, room, *availabilities])
+        db.session.commit()
+
+        course.teachers.append(teacher)
+        db.session.commit()
+
+        window_start = date(2025, 9, 8)
+        window_end = date(2025, 9, 19)
+
+        created = generate_schedule(
+            course,
+            window_start=window_start,
+            window_end=window_end,
+        )
+        self.assertEqual(len(created), 3)
+
+        sessions = Session.query.filter_by(course=course).all()
+        hours_per_week: dict[date, int] = {}
+        for session in sessions:
+            week_start = session.start_time.date() - timedelta(
+                days=session.start_time.weekday()
+            )
+            hours_per_week[week_start] = (
+                hours_per_week.get(week_start, 0) + session.duration_hours
+            )
+
+        self.assertTrue(
+            any(hours > course.session_length_hours for hours in hours_per_week.values()),
+            "Expected at least one week to exceed the weekly hour limit when no capacity remains",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
