@@ -245,8 +245,14 @@ class ScheduleReporter:
     def info(self, message: str, *, suggestions: Iterable[str] | None = None) -> None:
         self._add_entry("info", message, suggestions=suggestions)
 
-    def warning(self, message: str, *, suggestions: Iterable[str] | None = None) -> None:
-        self._add_entry("warning", message, suggestions=suggestions)
+    def warning(
+        self,
+        message: str,
+        *,
+        suggestions: Iterable[str] | None = None,
+        record: bool = False,
+    ) -> None:
+        self._add_entry("warning", message, suggestions=suggestions, record=record)
         if self.status != "error":
             self.status = "warning"
 
@@ -297,12 +303,18 @@ class ScheduleReporter:
         return log
 
     def _add_entry(
-        self, level: str, message: str, *, suggestions: Iterable[str] | None = None
+        self,
+        level: str,
+        message: str,
+        *,
+        suggestions: Iterable[str] | None = None,
+        record: bool = True,
     ) -> None:
         text = message.strip()
         if not text:
             return
-        if level == "error":
+        should_record = record and level in {"warning", "error"}
+        if should_record:
             entry: dict[str, object] = {"level": level, "message": text}
             if suggestions:
                 unique_suggestions: list[str] = []
@@ -314,7 +326,7 @@ class ScheduleReporter:
                     entry["suggestions"] = unique_suggestions
             self.entries.append(entry)
         logger = getattr(current_app, "logger", None)
-        if logger is not None:
+        if logger is not None and level == "error":
             log_level = self.LEVELS.get(level, logging.INFO)
             logger.log(log_level, "[%s] %s", self.course.name, text)
 
@@ -399,7 +411,7 @@ class PlacementDiagnostics:
             full_message = (
                 f"{base_label} — {kind} — jour {day_label} : {reason}"
             )
-            reporter.warning(full_message)
+            reporter.warning(full_message, record=True)
             formatted.append(full_message)
 
         if self.class_reasons and self.teacher_reasons:
