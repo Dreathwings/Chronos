@@ -81,9 +81,12 @@
               <input type="number" class="form-control" name="session_length_hours" value="{{ course.session_length_hours }}" min="1">
             </div>
             <div class="col-md-3">
-              <label class="form-label">Séances à générer</label>
+              <label class="form-label">Séances par semaine sélectionnée</label>
               <input type="number" class="form-control" name="sessions_per_week" value="{{ course.sessions_per_week }}" min="1">
-              <div class="form-text">Nombre total de séances automatiques à produire pour ce cours.</div>
+              <div class="form-text">
+                Nombre de séances automatiques à générer pour chacune des semaines cochées.
+                Sans sélection, la valeur s'applique à l'ensemble de la période.
+              </div>
             </div>
           </div>
           <div class="row g-2">

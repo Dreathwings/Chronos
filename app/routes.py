@@ -447,7 +447,7 @@ def _sync_course_teacher_allocations(
             allocation.target_hours = value
 
 
-def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> None:
+def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> int:
     closing_spans = _closing_period_spans()
     desired: list[date] = []
     seen: set[date] = set()
@@ -476,12 +476,7 @@ def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> N
         course.allowed_weeks.append(CourseAllowedWeek(week_start=week_start))
         db.session.flush()
         existing_starts.add(week_start)
-
-    target_occurrences = max(int(course.sessions_per_week or 0), 0)
-    if target_occurrences <= 0:
-        target_occurrences = max(int(course.sessions_required or 0), 1)
-    course.sessions_per_week = target_occurrences
-    course.sessions_required = max(target_occurrences, 1)
+    return len(course.allowed_weeks)
 
 
 def _sync_course_class_links(
@@ -2310,7 +2305,6 @@ def course_detail(course_id: int):
                 1,
             )
             course.sessions_per_week = session_goal
-            course.sessions_required = session_goal
             raw_color = (request.form.get("color") or "").strip()
             course.color = raw_color if raw_color else None
             course.configured_name = selected_course_name
@@ -2364,7 +2358,11 @@ def course_detail(course_id: int):
             _sync_course_class_links(course, class_ids, existing_links=class_links_map)
             _sync_simple_relationship(course.teachers, selected_teachers)
             _sync_course_teacher_allocations(course, teacher_hours)
-            _sync_course_allowed_weeks(course, (start for start, _ in selected_weeks))
+            allowed_week_count = _sync_course_allowed_weeks(
+                course, (start for start, _ in selected_weeks)
+            )
+            effective_week_count = max(allowed_week_count, 1)
+            course.sessions_required = max(session_goal * effective_week_count, 1)
             try:
                 db.session.commit()
                 flash("Cours mis à jour", "success")

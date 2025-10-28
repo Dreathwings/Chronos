@@ -2270,6 +2270,7 @@ def generate_schedule(
                 reporter.finalise(0)
                 raise ValueError(message)
 
+        available_week_count = 0
         if normalised_weeks:
             candidate_days = (
                 {day for day in allowed_days if day.weekday() < 5}
@@ -2282,11 +2283,14 @@ def generate_schedule(
                     "Semaines disponibles : "
                     + ", ".join(week.strftime("%d/%m/%Y") for week in week_occurrences)
                 )
-        effective_occurrences = max(
-            int(course.sessions_per_week or 0),
-            int(course.sessions_required or 0),
-            1,
-        )
+            available_week_count = len(week_occurrences)
+        per_week_goal = max(int(course.sessions_per_week or 0), 0)
+        base_week_count = available_week_count or len(normalised_weeks) or 1
+        if per_week_goal <= 0:
+            total_goal = max(int(course.sessions_required or 0), 1)
+        else:
+            total_goal = per_week_goal * base_week_count
+        effective_occurrences = max(int(course.sessions_required or 0), total_goal, 1)
 
         if not course.classes:
             message = "Associez au moins une classe au cours avant de planifier."
@@ -2295,10 +2299,24 @@ def generate_schedule(
             reporter.finalise(0)
             raise ValueError(message)
 
-        reporter.info(
-            f"Durée cible des séances : {course.session_length_hours} h — "
-            f"{effective_occurrences} occurrence(s) par groupe"
-        )
+        if per_week_goal > 0:
+            if normalised_weeks:
+                reporter.info(
+                    "Durée cible des séances : "
+                    f"{course.session_length_hours} h — {per_week_goal} occurrence(s) par semaine "
+                    f"({base_week_count} semaine(s) disponibles) ⇒ {effective_occurrences} occurrence(s) par groupe"
+                )
+            else:
+                reporter.info(
+                    "Durée cible des séances : "
+                    f"{course.session_length_hours} h — {per_week_goal} occurrence(s) par semaine ⇒ "
+                    f"{effective_occurrences} occurrence(s) par groupe"
+                )
+        else:
+            reporter.info(
+                "Durée cible des séances : "
+                f"{course.session_length_hours} h — {effective_occurrences} occurrence(s) par groupe"
+            )
 
         created_sessions = []
         slot_length_hours = max(int(course.session_length_hours), 1)

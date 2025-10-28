@@ -443,11 +443,19 @@ class Course(db.Model, TimeStampedModel):
             multiplier = 1
         else:
             multiplier = group_total or 1
+        per_week_goal = max(int(self.sessions_per_week or 0), 0)
         if self.allowed_weeks:
-            occurrences = len(self.allowed_weeks)
+            effective_week_count = len(self.allowed_weeks)
+            if per_week_goal <= 0:
+                occurrences = max(int(self.sessions_required or 0), 1)
+            else:
+                occurrences = per_week_goal * effective_week_count
         else:
-            occurrences = self.sessions_required
-        occurrences = max(int(occurrences), 1)
+            occurrences = max(
+                int(self.sessions_required or 0),
+                per_week_goal,
+                1,
+            )
         return occurrences * self.session_length_hours * multiplier
 
     @property
