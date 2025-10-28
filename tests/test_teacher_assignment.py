@@ -79,9 +79,9 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         db.session.commit()
 
         self.assertEqual(link.teacher_for_label("A"), teacher_a)
-        self.assertEqual(link.teacher_for_label("B"), teacher_a)
+        self.assertEqual(link.teacher_for_label("B"), teacher_b)
         self.assertEqual([t.id for t in link.preferred_teachers("A")], [teacher_a.id])
-        self.assertEqual([t.id for t in link.preferred_teachers("B")], [teacher_a.id])
+        self.assertEqual([t.id for t in link.preferred_teachers("B")], [teacher_b.id])
 
     def test_session_event_lists_only_relevant_subgroup_teacher(self) -> None:
         course, link, class_group = self._create_tp_course()
@@ -111,10 +111,7 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
 
         event = session.as_event()
         teachers = event["extendedProps"]["teachers"]
-        self.assertEqual(
-            {entry["id"] for entry in teachers},
-            {teacher_a.id, teacher_b.id},
-        )
+        self.assertEqual({entry["id"] for entry in teachers}, {teacher_b.id})
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
 
     def test_best_teacher_duos_prefers_shared_availability(self) -> None:
@@ -201,6 +198,30 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         self.assertEqual(len(pairs), 1)
         self.assertEqual({pairs[0][0].id, pairs[0][1].id}, {teacher_a.id, teacher_b.id})
         self.assertAlmostEqual(pairs[0][2], 0.0)
+
+    def test_preferred_teachers_limit_matches_course_type_rules(self) -> None:
+        base_name = CourseName(name="Projet SAE")
+        course = Course(
+            name=Course.compose_name("SAE", base_name.name, "S1"),
+            course_type="SAE",
+            session_length_hours=4,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=24)
+        link = CourseClassLink(class_group=class_group, group_count=1)
+        course.class_links.append(link)
+        teachers = [Teacher(name=f"Prof {index}") for index in range(1, 4)]
+        db.session.add_all([base_name, course, class_group, link, *teachers])
+        db.session.commit()
+
+        course.teachers.extend(teachers)
+        db.session.commit()
+
+        preferred = link.preferred_teachers(None)
+        self.assertEqual(len(preferred), 2)
+        self.assertEqual({teacher.id for teacher in preferred}, {teachers[0].id, teachers[1].id})
 
     def test_generate_schedule_respects_teacher_hour_allocations(self) -> None:
         base_name = CourseName(name="Algorithmique")
