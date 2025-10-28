@@ -256,10 +256,11 @@
                     {% set planned = teacher_hours_map.get(teacher.id, 0) %}
                     {% set scheduled = scheduled_hours_map.get(teacher.id, 0) %}
                     <div
-                      class="border rounded p-2 teacher-hours-row {% if planned > 0 %}is-selected{% endif %}"
+                      class="border rounded p-2 teacher-hours-row {% if planned > 0 %}is-selected{% else %}d-none{% endif %}"
                       data-filter-item
                       data-filter-text="{{ teacher.name|lower|e }} {{ teacher.email|lower|e if teacher.email }}"
                       data-teacher-id="{{ teacher.id }}"
+                      data-require-selection="true"
                     >
                       <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2">
                         <div>
@@ -660,6 +661,11 @@
         items.forEach(function(item) {
           const filterText = (item.getAttribute('data-filter-text') || item.textContent || '').toLowerCase();
           const isSelected = item.classList.contains('is-selected');
+          const requiresSelection = item.getAttribute('data-require-selection') === 'true';
+          if (requiresSelection && !isSelected) {
+            item.classList.add('d-none');
+            return;
+          }
           const matchesQuery = filterText.indexOf(query) !== -1;
           if (!hasQuery || matchesQuery || isSelected) {
             item.classList.remove('d-none');
@@ -713,6 +719,9 @@
 
         if (hoursRow) {
           hoursRow.classList.toggle('is-selected', isChecked);
+          if (hoursRow.getAttribute('data-require-selection') === 'true') {
+            hoursRow.classList.toggle('d-none', !isChecked);
+          }
         }
 
         if (hoursInput) {
