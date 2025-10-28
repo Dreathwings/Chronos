@@ -14,6 +14,7 @@ from app.models import (
     CourseClassLink,
     CourseName,
     CourseScheduleLog,
+    CourseTeacherAllocation,
     Equipment,
     Room,
     Session,
@@ -1241,9 +1242,7 @@ class WeeklyLimitTestCase(DatabaseTestCase):
             third_start,
             third_end,
         )
-        self.assertIsNotNone(error)
-        self.assertIn("semaine", error)
-        self.assertIn(class_group.name, error)
+        self.assertIsNone(error)
 
         next_week_start = third_start + timedelta(days=7)
         next_week_end = third_end + timedelta(days=7)
@@ -1360,7 +1359,7 @@ class WeeklyLimitTestCase(DatabaseTestCase):
             )
         )
 
-        self.assertTrue(
+        self.assertFalse(
             has_weekly_course_conflict(
                 course,
                 class_group,
@@ -1486,6 +1485,75 @@ class SchedulerRelocationTestCase(DatabaseTestCase):
         self.assertEqual(Session.query.filter_by(course=course).count(), 0)
         self.assertEqual(per_day_hours[first_start.date()], 0)
         self.assertEqual(weekday_frequencies.get(first_start.weekday(), 0), 0)
+
+
+class ScheduleTeacherFallbackTestCase(DatabaseTestCase):
+    def test_generate_schedule_switches_when_preferred_quota_spent(self) -> None:
+        base_name = CourseName(name="Analyse")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=3,
+            sessions_per_week=0,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO2", size=28)
+        link = CourseClassLink(class_group=class_group)
+        course.class_links.append(link)
+
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        room = Room(name="B103", capacity=40)
+
+        course.teachers.extend([teacher_a, teacher_b])
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=2),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=6),
+            ]
+        )
+        link.teacher_a = teacher_a
+
+        availabilities = []
+        for weekday in (0, 1, 2):
+            availabilities.append(
+                TeacherAvailability(
+                    teacher=teacher_a,
+                    weekday=weekday,
+                    start_time=time(8, 0),
+                    end_time=time(18, 0),
+                )
+            )
+            availabilities.append(
+                TeacherAvailability(
+                    teacher=teacher_b,
+                    weekday=weekday,
+                    start_time=time(8, 0),
+                    end_time=time(18, 0),
+                )
+            )
+
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                class_group,
+                room,
+                teacher_a,
+                teacher_b,
+                *availabilities,
+            ]
+        )
+        db.session.commit()
+
+        created = generate_schedule(course)
+
+        self.assertEqual(len(created), 3)
+        teacher_counts = Counter(session.teacher_id for session in created)
+        self.assertLessEqual(teacher_counts.get(teacher_a.id, 0), 1)
+        self.assertGreaterEqual(teacher_counts.get(teacher_b.id, 0), 2)
 
 
 class ScheduleGenerationFailureTestCase(DatabaseTestCase):

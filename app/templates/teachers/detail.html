@@ -109,6 +109,37 @@
         </form>
       </div>
     </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-header bg-secondary text-white">Récapitulatif des heures</div>
+      <div class="card-body">
+        {% if allocation_summary %}
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">Cours</th>
+                <th scope="col" class="text-end">Objectif (h)</th>
+                <th scope="col" class="text-end">Planifié (h)</th>
+                <th scope="col" class="text-end">Restant (h)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for entry in allocation_summary %}
+              <tr>
+                <td>{{ entry.course.name }}</td>
+                <td class="text-end">{{ entry.target_hours }}</td>
+                <td class="text-end">{{ entry.scheduled_hours }}</td>
+                <td class="text-end">{{ entry.remaining_hours }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">Aucun volume d'heures n'est défini pour cet enseignant.</p>
+        {% endif %}
+      </div>
+    </div>
   </div>
   <div class="col-xl-8">
     <div class="card shadow-sm">

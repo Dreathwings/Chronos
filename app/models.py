@@ -256,6 +256,8 @@ class Course(db.Model, TimeStampedModel):
     priority: Mapped[int] = mapped_column(Integer, default=1)
     course_type: Mapped[str] = mapped_column(String(3), default="CM")
     semester: Mapped[str] = mapped_column(String(2), default="S1")
+    sessions_per_week: Mapped[int] = mapped_column(Integer, default=1)
+    color: Mapped[Optional[str]] = mapped_column(String(7))
     course_name_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("course_name.id"), nullable=True
     )
@@ -269,6 +271,11 @@ class Course(db.Model, TimeStampedModel):
     teachers: Mapped[List[Teacher]] = relationship(secondary=course_teacher, back_populates="courses")
     softwares: Mapped[List["Software"]] = relationship(secondary=course_software, back_populates="courses")
     equipments: Mapped[List["Equipment"]] = relationship(secondary=course_equipment, back_populates="courses")
+    teacher_allocations: Mapped[List["CourseTeacherAllocation"]] = relationship(
+        "CourseTeacherAllocation",
+        back_populates="course",
+        cascade="all, delete-orphan",
+    )
     class_links: Mapped[List["CourseClassLink"]] = relationship(
         "CourseClassLink",
         back_populates="course",
@@ -297,6 +304,7 @@ class Course(db.Model, TimeStampedModel):
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
+        CheckConstraint("sessions_per_week >= 0", name="chk_sessions_per_week_non_negative"),
         CheckConstraint("computers_required >= 0", name="chk_course_computers_non_negative"),
         CheckConstraint(
             "course_type IN ('CM','TD','TP','SAE','Eval')",
@@ -393,6 +401,20 @@ class Course(db.Model, TimeStampedModel):
     def allowed_week_ranges(self) -> list[tuple[date, date]]:
         return [entry.week_span for entry in self.allowed_weeks]
 
+    @property
+    def allowed_week_payload(self) -> list[tuple[date, date, int]]:
+        fallback = max(int(self.sessions_per_week or 0), 0)
+        payload: list[tuple[date, date, int]] = []
+        for entry in self.allowed_weeks:
+            payload.append(
+                (
+                    entry.week_start,
+                    entry.week_end,
+                    entry.effective_sessions(fallback),
+                )
+            )
+        return payload
+
     def subgroup_name_for(
         self, class_group: "ClassGroup" | int, subgroup_label: str | None
     ) -> str | None:
@@ -435,15 +457,34 @@ class Course(db.Model, TimeStampedModel):
             multiplier = 1
         else:
             multiplier = group_total or 1
+        per_week_goal = max(int(self.sessions_per_week or 0), 0)
         if self.allowed_weeks:
-            occurrences = len(self.allowed_weeks)
+            occurrences = sum(
+                entry.effective_sessions(per_week_goal)
+                for entry in self.allowed_weeks
+            )
+            if occurrences <= 0:
+                occurrences = max(int(self.sessions_required or 0), 1)
         else:
-            occurrences = self.sessions_required
+            occurrences = max(
+                int(self.sessions_required or 0),
+                per_week_goal,
+                1,
+            )
         return occurrences * self.session_length_hours * multiplier
 
     @property
     def latest_generation_log(self) -> "CourseScheduleLog | None":
         return self.generation_logs[0] if self.generation_logs else None
+
+    @property
+    def teacher_allocation_map(self) -> dict[int, int]:
+        mapping: dict[int, int] = {}
+        for allocation in self.teacher_allocations:
+            if allocation.teacher_id is None:
+                continue
+            mapping[allocation.teacher_id] = max(allocation.target_hours or 0, 0)
+        return mapping
 
 
 class Session(db.Model, TimeStampedModel):
@@ -702,6 +743,7 @@ class CourseAllowedWeek(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), nullable=False)
     week_start: Mapped[date] = mapped_column(Date, nullable=False)
+    sessions_target: Mapped[Optional[int]] = mapped_column(Integer)
 
     course: Mapped["Course"] = relationship("Course", back_populates="allowed_weeks")
 
@@ -710,6 +752,10 @@ class CourseAllowedWeek(db.Model, TimeStampedModel):
             "course_id",
             "week_start",
             name="uq_course_allowed_week_unique",
+        ),
+        CheckConstraint(
+            "sessions_target IS NULL OR sessions_target >= 0",
+            name="chk_course_allowed_week_sessions_non_negative",
         ),
     )
 
@@ -720,6 +766,15 @@ class CourseAllowedWeek(db.Model, TimeStampedModel):
     @property
     def week_span(self) -> tuple[date, date]:
         return self.week_start, self.week_end
+
+    def effective_sessions(self, default: int) -> int:
+        value = self.sessions_target
+        if value is None:
+            return max(int(default or 0), 0)
+        try:
+            return max(int(value), 0)
+        except (TypeError, ValueError):
+            return max(int(default or 0), 0)
 
 
 class Equipment(db.Model):
@@ -1344,4 +1399,29 @@ class CourseClassLink(db.Model):
         return (
             f"CourseClassLink<Course {self.course_id} / Class {self.class_group_id} "
             f"groups={self.group_count}>"
+        )
+
+
+class CourseTeacherAllocation(db.Model):
+    __tablename__ = "course_teacher_allocation"
+
+    course_id: Mapped[int] = mapped_column(
+        ForeignKey("course.id"), primary_key=True, nullable=False
+    )
+    teacher_id: Mapped[int] = mapped_column(
+        ForeignKey("teacher.id"), primary_key=True, nullable=False
+    )
+    target_hours: Mapped[int] = mapped_column(Integer, default=0)
+
+    course: Mapped[Course] = relationship("Course", back_populates="teacher_allocations")
+    teacher: Mapped[Teacher] = relationship("Teacher")
+
+    __table_args__ = (
+        CheckConstraint("target_hours >= 0", name="chk_course_teacher_allocation_hours"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"CourseTeacherAllocation<Course {self.course_id} / Teacher {self.teacher_id}"
+            f" target={self.target_hours}h>"
         )

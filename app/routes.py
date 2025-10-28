@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+from collections import OrderedDict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, List, MutableSequence
 
@@ -30,6 +31,7 @@ from .models import (
     Course,
     CourseAllowedWeek,
     CourseClassLink,
+    CourseTeacherAllocation,
     CourseScheduleLog,
     CourseName,
     Equipment,
@@ -40,7 +42,6 @@ from .models import (
     Teacher,
     TeacherAvailability,
     SEMESTER_CHOICES,
-    recommend_teacher_duos_for_classes,
     semester_date_window,
 )
 from .progress import progress_registry, ScheduleProgressTracker
@@ -377,6 +378,31 @@ def _parse_week_selection(values: Iterable[str]) -> list[tuple[date, date]]:
     return selections
 
 
+def _collect_week_targets(
+    form_data,
+    existing_targets: dict[date, int],
+    fallback: int,
+) -> OrderedDict[date, int]:
+    targets: OrderedDict[date, int] = OrderedDict()
+    seen: set[date] = set()
+    for raw in form_data.getlist("allowed_week_starts"):
+        week_start = _parse_date(raw)
+        if week_start is None:
+            continue
+        span_start, _ = _week_bounds_for(week_start)
+        if span_start in seen:
+            continue
+        seen.add(span_start)
+        iso_key = span_start.isoformat()
+        field_name = f"allowed_week_sessions_{iso_key}"
+        default_value = existing_targets.get(span_start, fallback)
+        targets[span_start] = _parse_non_negative_int(
+            form_data.get(field_name),
+            default_value,
+        )
+    return targets
+
+
 def _unique_entities(entities: Iterable[object]) -> list[object]:
     seen_ids: set[int] = set()
     unique: list[object] = []
@@ -426,11 +452,34 @@ def _sync_simple_relationship(collection: MutableSequence, desired: Iterable[obj
             existing_ids.add(entity_id)
 
 
-def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> None:
+def _sync_course_teacher_allocations(
+    course: Course,
+    target_hours: dict[int, int],
+) -> None:
+    existing = {allocation.teacher_id: allocation for allocation in course.teacher_allocations}
+    desired_ids = set(target_hours.keys())
+    for teacher_id, allocation in list(existing.items()):
+        if teacher_id not in desired_ids:
+            course.teacher_allocations.remove(allocation)
+            db.session.delete(allocation)
+    for teacher_id, hours in target_hours.items():
+        allocation = existing.get(teacher_id)
+        value = max(int(hours), 0)
+        if allocation is None:
+            course.teacher_allocations.append(
+                CourseTeacherAllocation(teacher_id=teacher_id, target_hours=value)
+            )
+        else:
+            allocation.target_hours = value
+
+
+def _sync_course_allowed_weeks(
+    course: Course, week_targets: OrderedDict[date, int]
+) -> dict[date, int]:
     closing_spans = _closing_period_spans()
-    desired: list[date] = []
+    desired: list[tuple[date, int]] = []
     seen: set[date] = set()
-    for raw_start in week_starts:
+    for raw_start, raw_target in week_targets.items():
         if raw_start is None:
             continue
         week_start, week_end = _week_bounds_for(raw_start)
@@ -439,25 +488,32 @@ def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> N
         if _is_week_closed(week_start, week_end, closing_spans):
             continue
         seen.add(week_start)
-        desired.append(week_start)
-    desired.sort()
-    desired_set = set(desired)
+        desired.append((week_start, max(int(raw_target or 0), 0)))
+    desired.sort(key=lambda payload: payload[0])
+    desired_map = {week_start: target for week_start, target in desired}
 
     for entry in list(course.allowed_weeks):
-        if entry.week_start not in desired_set:
+        if entry.week_start not in desired_map:
             course.allowed_weeks.remove(entry)
             db.session.flush()
+        else:
+            entry.sessions_target = desired_map[entry.week_start]
 
     existing_starts = {entry.week_start for entry in course.allowed_weeks}
-    for week_start in desired:
+    for week_start, target in desired:
         if week_start in existing_starts:
             continue
-        course.allowed_weeks.append(CourseAllowedWeek(week_start=week_start))
+        course.allowed_weeks.append(
+            CourseAllowedWeek(week_start=week_start, sessions_target=target)
+        )
         db.session.flush()
         existing_starts.add(week_start)
 
-    occurrence_goal = len(course.allowed_weeks)
-    course.sessions_required = max(occurrence_goal, 1)
+    synchronised: dict[date, int] = {}
+    for entry in course.allowed_weeks:
+        if entry.week_start in desired_map:
+            synchronised[entry.week_start] = desired_map[entry.week_start]
+    return synchronised
 
 
 def _sync_course_class_links(
@@ -1256,6 +1312,28 @@ def teacher_detail(teacher_id: int):
     )
     assignable_courses = [course for course in courses if teacher not in course.teachers]
 
+    allocation_summary: list[dict[str, object]] = []
+    for course in teacher.courses:
+        target_hours = 0
+        for allocation in course.teacher_allocations:
+            if allocation.teacher_id == teacher.id:
+                target_hours = allocation.target_hours or 0
+                break
+        scheduled_hours = sum(
+            session.duration_hours
+            for session in course.sessions
+            if session.teacher_id == teacher.id
+        )
+        allocation_summary.append(
+            {
+                "course": course,
+                "target_hours": target_hours,
+                "scheduled_hours": scheduled_hours,
+                "remaining_hours": max(target_hours - scheduled_hours, 0),
+            }
+        )
+    allocation_summary.sort(key=lambda entry: entry["course"].name.lower())
+
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "update":
@@ -1361,6 +1439,7 @@ def teacher_detail(teacher_id: int):
         teacher=teacher,
         courses=courses,
         assignable_courses=assignable_courses,
+        allocation_summary=allocation_summary,
         events_json=json.dumps(events, ensure_ascii=False),
         availability_slots=SCHEDULE_SLOT_CHOICES,
         selected_availability_slots=selected_slots,
@@ -1966,11 +2045,7 @@ def generation_overview():
                 allowed_ranges = course.allowed_week_ranges
                 window_start = allowed_ranges[0][0] if allowed_ranges else None
                 window_end = allowed_ranges[-1][1] if allowed_ranges else None
-                allowed_payload = (
-                    [(start, end) for start, end in allowed_ranges]
-                    if allowed_ranges
-                    else None
-                )
+                allowed_payload = course.allowed_week_payload or None
                 try:
                     created_sessions = generate_schedule(
                         course,
@@ -2256,6 +2331,15 @@ def course_detail(course_id: int):
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
+            session_goal = max(
+                _parse_non_negative_int(
+                    request.form.get("sessions_per_week"), course.sessions_per_week
+                ),
+                1,
+            )
+            course.sessions_per_week = session_goal
+            raw_color = (request.form.get("color") or "").strip()
+            course.color = raw_color if raw_color else None
             course.configured_name = selected_course_name
             course.name = Course.compose_name(
                 course.course_type,
@@ -2288,15 +2372,39 @@ def course_detail(course_id: int):
                 )
                 if teacher is not None
             ]
-            selected_weeks = _parse_week_selection(
-                request.form.getlist("allowed_week_starts")
+            teacher_hours: dict[int, int] = {}
+            existing_allocations = course.teacher_allocation_map
+            for teacher in selected_teachers:
+                current_default = existing_allocations.get(
+                    teacher.id, course.session_length_hours
+                )
+                teacher_hours[teacher.id] = _parse_non_negative_int(
+                    request.form.get(f"teacher_hours_{teacher.id}"),
+                    current_default,
+                )
+            existing_week_targets = {
+                allowed.week_start: allowed.effective_sessions(session_goal)
+                for allowed in course.allowed_weeks
+            }
+            selected_week_targets = _collect_week_targets(
+                request.form,
+                existing_week_targets,
+                session_goal,
             )
 
             _sync_simple_relationship(course.equipments, selected_equipments)
             _sync_simple_relationship(course.softwares, selected_softwares)
             _sync_course_class_links(course, class_ids, existing_links=class_links_map)
             _sync_simple_relationship(course.teachers, selected_teachers)
-            _sync_course_allowed_weeks(course, (start for start, _ in selected_weeks))
+            _sync_course_teacher_allocations(course, teacher_hours)
+            synchronised_targets = _sync_course_allowed_weeks(
+                course, selected_week_targets
+            )
+            if synchronised_targets:
+                total_sessions = sum(max(value, 0) for value in synchronised_targets.values())
+                course.sessions_required = max(total_sessions, 1)
+            else:
+                course.sessions_required = max(session_goal, 1)
             try:
                 db.session.commit()
                 flash("Cours mis à jour", "success")
@@ -2308,11 +2416,7 @@ def course_detail(course_id: int):
             allowed_ranges = course.allowed_week_ranges
             window_start = allowed_ranges[0][0] if allowed_ranges else None
             window_end = allowed_ranges[-1][1] if allowed_ranges else None
-            allowed_payload = (
-                [(start, end) for start, end in allowed_ranges]
-                if allowed_ranges
-                else None
-            )
+            allowed_payload = course.allowed_week_payload or None
             if _wants_json_response():
                 tracker = _enqueue_course_schedule(
                     course,
@@ -2344,81 +2448,7 @@ def course_detail(course_id: int):
             except ValueError as exc:
                 db.session.commit()
                 flash(str(exc), "danger")
-        elif form_name == "update-class-teachers":
-            allowed_teacher_ids = {teacher.id for teacher in course.teachers if teacher.id}
-            if course.is_cm:
-                teacher = _parse_teacher_selection(
-                    request.form.get("course_teacher_all"),
-                    allowed_ids=allowed_teacher_ids,
-                )
-                for link in course.class_links:
-                    link.teacher_a = teacher
-                    link.teacher_b = None
-            elif course.is_sae:
-                assignments: list[tuple[CourseClassLink, Teacher, Teacher]] = []
-                for link in course.class_links:
-                    teacher_a = _parse_teacher_selection(
-                        request.form.get(
-                            f"class_link_teacher_a_{link.class_group_id}"
-                        ),
-                        allowed_ids=allowed_teacher_ids,
-                    )
-                    teacher_b = _parse_teacher_selection(
-                        request.form.get(
-                            f"class_link_teacher_b_{link.class_group_id}"
-                        ),
-                        allowed_ids=allowed_teacher_ids,
-                    )
-                    if teacher_a is None or teacher_b is None:
-                        db.session.rollback()
-                        flash(
-                            "Pour les SAE, deux enseignants doivent être attribués à chaque classe.",
-                            "danger",
-                        )
-                        return redirect(
-                            url_for("main.course_detail", course_id=course_id)
-                        )
-                    if teacher_a.id == teacher_b.id:
-                        db.session.rollback()
-                        flash(
-                            "Pour les SAE, les deux enseignants doivent être distincts.",
-                            "danger",
-                        )
-                        return redirect(
-                            url_for("main.course_detail", course_id=course_id)
-                        )
-                    assignments.append((link, teacher_a, teacher_b))
-                for link, teacher_a, teacher_b in assignments:
-                    link.teacher_a = teacher_a
-                    link.teacher_b = teacher_b
-            else:
-                for link in course.class_links:
-                    if link.group_count == 2:
-                        teacher_a = _parse_teacher_selection(
-                            request.form.get(
-                                f"class_link_teacher_{link.class_group_id}_A"
-                            ),
-                            allowed_ids=allowed_teacher_ids,
-                        )
-                        teacher_b = _parse_teacher_selection(
-                            request.form.get(
-                                f"class_link_teacher_{link.class_group_id}_B"
-                            ),
-                            allowed_ids=allowed_teacher_ids,
-                        )
-                        link.teacher_a = teacher_a
-                        link.teacher_b = teacher_b
-                    else:
-                        teacher = _parse_teacher_selection(
-                            request.form.get(
-                                f"class_link_teacher_{link.class_group_id}"
-                            ),
-                            allowed_ids=allowed_teacher_ids,
-                        )
-                        link.teacher_a = teacher
-                        link.teacher_b = None
-            db.session.commit()
-            flash("Enseignants par classe mis à jour", "success")
+        
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
@@ -2429,6 +2459,9 @@ def course_detail(course_id: int):
             end_dt = start_dt + timedelta(hours=duration)
             teacher = Teacher.query.get_or_404(teacher_id)
             room = Room.query.get_or_404(room_id)
+            if teacher not in course.teachers:
+                flash("Sélectionnez un enseignant associé au cours", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
             class_group_labels: dict[int, str | None] | None = None
             if course.is_cm:
                 if not class_choice_raw:
@@ -2486,6 +2519,68 @@ def course_detail(course_id: int):
             db.session.add(session)
             db.session.commit()
             flash("Séance ajoutée", "success")
+        elif form_name == "update-session":
+            session_id = int(request.form.get("session_id", 0))
+            session = Session.query.get_or_404(session_id)
+            if session.course_id != course.id:
+                flash("Cette séance n'appartient pas à ce cours", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            teacher_raw = request.form.get("teacher_id")
+            if teacher_raw:
+                teacher_id = int(teacher_raw)
+            else:
+                if session.teacher_id is None:
+                    flash("Sélectionnez un enseignant pour cette séance", "danger")
+                    return redirect(url_for("main.course_detail", course_id=course_id))
+                teacher_id = session.teacher_id
+            room_id = int(request.form.get("room_id", session.room_id or 0))
+            date_raw = request.form.get("date")
+            start_time_raw = request.form.get("start_time")
+            if not date_raw or not start_time_raw:
+                flash("Renseignez la date et l'heure de début", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            start_dt = _parse_datetime(date_raw, start_time_raw)
+            duration_hours = max(session.duration_hours, 1)
+            end_dt = start_dt + timedelta(hours=duration_hours)
+            teacher = Teacher.query.get_or_404(teacher_id)
+            if teacher not in course.teachers:
+                flash("Sélectionnez un enseignant associé au cours", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            room = Room.query.get_or_404(room_id)
+            class_groups = session.attendees or (
+                [session.class_group] if session.class_group else []
+            )
+            class_group_labels = None
+            if session.class_group_id and session.subgroup_label:
+                class_group_labels = {session.class_group_id: session.subgroup_label}
+            error_message = _validate_session_constraints(
+                course,
+                teacher,
+                room,
+                class_groups,
+                start_dt,
+                end_dt,
+                class_group_labels=class_group_labels,
+                ignore_session_id=session.id,
+            )
+            if error_message:
+                flash(error_message, "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            session.teacher_id = teacher_id
+            session.room_id = room_id
+            session.start_time = start_dt
+            session.end_time = end_dt
+            db.session.commit()
+            flash("Séance mise à jour", "success")
+        elif form_name == "delete-session":
+            session_id = int(request.form.get("session_id", 0))
+            session = Session.query.get_or_404(session_id)
+            if session.course_id != course.id:
+                flash("Cette séance n'appartient pas à ce cours", "danger")
+                return redirect(url_for("main.course_detail", course_id=course_id))
+            db.session.delete(session)
+            db.session.commit()
+            flash("Séance supprimée", "success")
         elif form_name == "clear-sessions":
             removed, _ = _clear_course_schedule(course)
             db.session.commit()
@@ -2507,16 +2602,11 @@ def course_detail(course_id: int):
         key=lambda teacher: (teacher.name or "").lower(),
     )
 
-    teacher_duos_by_class: dict[int, tuple[Teacher, Teacher, float]] = {}
-    teacher_duos_average_hours: float | None = None
-    if course.course_type == "TP" and available_teachers:
-        teacher_duos_by_class = recommend_teacher_duos_for_classes(
-            course.class_links,
-            available_teachers,
-        )
-        if teacher_duos_by_class:
-            total_overlap = sum(pair[2] for pair in teacher_duos_by_class.values())
-            teacher_duos_average_hours = total_overlap / len(teacher_duos_by_class)
+    teacher_hours_map = course.teacher_allocation_map
+    course_sessions = sorted(
+        course.sessions,
+        key=lambda session: (session.start_time, session.id or 0),
+    )
 
     closing_spans = _closing_period_spans()
 
@@ -2538,6 +2628,11 @@ def course_detail(course_id: int):
 
     week_ranges.sort(key=lambda span: span[0])
 
+    default_week_target = max(int(course.sessions_per_week or 0), 0)
+    course_week_session_map = {
+        start.isoformat(): default_week_target for start, _ in week_ranges
+    }
+
     course_week_options = [
         {"value": start.isoformat(), "label": _week_label(start, end)}
         for start, end in week_ranges
@@ -2547,6 +2642,12 @@ def course_detail(course_id: int):
         for allowed in course.allowed_weeks
         if not _is_week_closed(allowed.week_start, allowed.week_end, closing_spans)
     ]
+    for allowed in course.allowed_weeks:
+        if _is_week_closed(allowed.week_start, allowed.week_end, closing_spans):
+            continue
+        course_week_session_map[
+            allowed.week_start.isoformat()
+        ] = allowed.effective_sessions(default_week_target)
 
     remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
     generation_display_status = _effective_generation_status(
@@ -2568,6 +2669,8 @@ def course_detail(course_id: int):
         semester_choices=SEMESTER_CHOICES,
         default_semester=DEFAULT_SEMESTER,
         available_teachers=available_teachers,
+        course_sessions=course_sessions,
+        teacher_hours_map=teacher_hours_map,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
@@ -2577,10 +2680,9 @@ def course_detail(course_id: int):
         course_week_options=course_week_options,
         selected_course_week_values=selected_course_week_values,
         selected_course_week_labels=selected_course_week_labels,
+        course_week_session_map=course_week_session_map,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
-        teacher_duos_by_class=teacher_duos_by_class,
-        teacher_duos_average_hours=teacher_duos_average_hours,
     )
 
 
@@ -2758,11 +2860,7 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 allowed_ranges = course.allowed_week_ranges
                 window_start = allowed_ranges[0][0] if allowed_ranges else None
                 window_end = allowed_ranges[-1][1] if allowed_ranges else None
-                allowed_payload = (
-                    [(start, end) for start, end in allowed_ranges]
-                    if allowed_ranges
-                    else None
-                )
+                allowed_payload = course.allowed_week_payload or None
                 slice_progress = tracker.create_slice(
                     label=f"Planification de {course.name}"
                 )

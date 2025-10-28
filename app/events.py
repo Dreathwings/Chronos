@@ -42,6 +42,9 @@ def _sessions_can_chain(previous: Session, current: Session) -> bool:
 def _build_event_from_group(group: List[Session]) -> dict[str, object]:
     first = group[0]
     event = first.as_event()
+    if first.course.color:
+        event["backgroundColor"] = first.course.color
+        event["borderColor"] = first.course.color
     ordered_rooms: list[str] = []
     segments: list[dict[str, str]] = []
     extended = event.setdefault("extendedProps", {})
