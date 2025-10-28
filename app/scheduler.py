@@ -2439,6 +2439,38 @@ def generate_schedule(
                     chronology_weeks: set[date] = set()
                     weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
 
+                    def _candidate_base_offsets(day: date) -> list[int]:
+                        offsets: list[int] = []
+                        if (
+                            continuity_slot_index is not None
+                            and continuity_weekday is not None
+                            and day.weekday() == continuity_weekday
+                        ):
+                            offsets.append(continuity_slot_index)
+                        if desired_hours == 1:
+                            adjacency_offsets = _one_hour_adjacency_offsets(
+                                class_groups,
+                                day,
+                                pending_sessions=created_sessions,
+                                subgroup_label=None,
+                            )
+                            for offset in adjacency_offsets:
+                                if offset not in offsets:
+                                    offsets.append(offset)
+                        preferred_slot = _preferred_slot_index_for_groups(
+                            course,
+                            class_groups,
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=None,
+                        )
+                        if preferred_slot is not None and preferred_slot not in offsets:
+                            offsets.append(preferred_slot)
+                        fallback_offset = int(per_day_hours[day])
+                        if fallback_offset not in offsets:
+                            offsets.append(fallback_offset)
+                        return offsets
+
                     def _attempt_day(day: date) -> bool:
                         nonlocal hours_remaining, block_index
                         week_start, _ = _week_bounds(day)
@@ -2465,37 +2497,7 @@ def generate_schedule(
                         ):
                             chronology_weeks.add(week_start)
                             return False
-                        preferred_offsets: list[int] = []
-                        if (
-                            continuity_slot_index is not None
-                            and continuity_weekday is not None
-                            and day.weekday() == continuity_weekday
-                        ):
-                            preferred_offsets.append(continuity_slot_index)
-                        if desired_hours == 1:
-                            adjacency_offsets = _one_hour_adjacency_offsets(
-                                class_groups,
-                                day,
-                                pending_sessions=created_sessions,
-                                subgroup_label=None,
-                            )
-                            for offset in adjacency_offsets:
-                                if offset not in preferred_offsets:
-                                    preferred_offsets.append(offset)
-                        preferred_slot = _preferred_slot_index_for_groups(
-                            course,
-                            class_groups,
-                            day,
-                            pending_sessions=created_sessions,
-                            subgroup_label=None,
-                        )
-                        if preferred_slot is not None and preferred_slot not in preferred_offsets:
-                            preferred_offsets.append(preferred_slot)
-                        fallback_offset = int(per_day_hours[day])
-                        if fallback_offset not in preferred_offsets:
-                            preferred_offsets.append(fallback_offset)
-
-                        for base_offset in preferred_offsets:
+                        for base_offset in _candidate_base_offsets(day):
                             block_sessions = _cm_schedule_block_for_day(
                                 course=course,
                                 class_groups=class_groups,
@@ -2564,17 +2566,20 @@ def generate_schedule(
                                     )
                                     if not relocated:
                                         return False
-                                    placement = _cm_schedule_block_for_day(
-                                        course=course,
-                                        class_groups=class_groups,
-                                        primary_link=primary_link,
-                                        day=day,
-                                        desired_hours=desired_hours,
-                                        base_offset=base_offset,
-                                        pending_sessions=created_sessions,
-                                        reporter=None,
-                                    )
-                                    return bool(placement)
+                                    for base_offset in _candidate_base_offsets(day):
+                                        placement = _cm_schedule_block_for_day(
+                                            course=course,
+                                            class_groups=class_groups,
+                                            primary_link=primary_link,
+                                            day=day,
+                                            desired_hours=desired_hours,
+                                            base_offset=base_offset,
+                                            pending_sessions=created_sessions,
+                                            reporter=None,
+                                        )
+                                        if placement:
+                                            return True
+                                    return False
                                 finally:
                                     nested.rollback()
                                     created_sessions[:] = backup_created
