@@ -34,6 +34,7 @@ from app.scheduler import (
     has_weekly_course_conflict,
     _relocate_sessions_for_groups,
     _warn_weekly_limit,
+    _schedule_block_for_day,
 )
 
 
@@ -198,6 +199,75 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         self.assertEqual(len(pairs), 1)
         self.assertEqual({pairs[0][0].id, pairs[0][1].id}, {teacher_a.id, teacher_b.id})
         self.assertAlmostEqual(pairs[0][2], 0.0)
+
+    def test_split_session_does_not_switch_teachers(self) -> None:
+        course = Course(
+            name="Analyse TD",
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+        )
+        class_group = ClassGroup(name="MATH1", size=30)
+        link = CourseClassLink(class_group=class_group, group_count=1)
+        course.class_links.append(link)
+
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        room = Room(name="B201", capacity=40)
+        db.session.add_all([course, class_group, teacher_a, teacher_b, room])
+        db.session.commit()
+
+        course.teachers.extend([teacher_a, teacher_b])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(10, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(10, 15),
+                end_time=time(12, 15),
+            ),
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+        existing_session = Session(
+            course=course,
+            teacher=teacher_a,
+            room=room,
+            class_group=class_group,
+            start_time=datetime(2024, 1, 8, 8, 0, 0),
+            end_time=datetime(2024, 1, 8, 10, 0, 0),
+        )
+        existing_session.attendees = [class_group]
+        db.session.add(existing_session)
+        db.session.commit()
+
+        block_sessions = _schedule_block_for_day(
+            course=course,
+            class_group=class_group,
+            link=link,
+            subgroup_label=None,
+            day=date(2024, 1, 8),
+            desired_hours=2,
+            base_offset=0,
+            pending_sessions=(),
+            hour_tracker=None,
+            reporter=None,
+            failure_reasons=None,
+        )
+
+        self.assertIsNone(
+            block_sessions,
+            "A connected session segment should not be reassigned to a different teacher",
+        )
 
     def test_preferred_teachers_limit_matches_course_type_rules(self) -> None:
         base_name = CourseName(name="Projet SAE")

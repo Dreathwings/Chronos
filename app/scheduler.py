@@ -1131,6 +1131,7 @@ def find_available_teacher(
     target_class_ids: Set[int] | None = None,
     hour_tracker: "TeacherHourTracker | None" = None,
     required_hours: int | None = None,
+    locked_teacher_ids: Set[int] | None = None,
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
     allowed_ids: set[int] | None = None
@@ -1138,6 +1139,8 @@ def find_available_teacher(
         for assigned in link.preferred_teachers(subgroup_label):
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
+
+    locked_ids = {tid for tid in (locked_teacher_ids or set()) if tid is not None}
 
     allocation_teachers: list[Teacher] = []
     allocation_ids: set[int] = set()
@@ -1160,6 +1163,14 @@ def find_available_teacher(
     if allowed_ids is None and allocation_ids:
         allowed_ids = set(allocation_ids)
 
+    if locked_ids:
+        if allowed_ids is None:
+            allowed_ids = set(locked_ids)
+        else:
+            allowed_ids = {tid for tid in allowed_ids if tid in locked_ids}
+        if not allowed_ids:
+            return None
+
     def _append_unique(target: list[Teacher], items: Iterable[Teacher]) -> None:
         seen = {teacher.id for teacher in target if teacher.id is not None}
         for teacher in items:
@@ -1169,6 +1180,8 @@ def find_available_teacher(
             if allowed_ids is not None:
                 if teacher_id is None or teacher_id not in allowed_ids:
                     continue
+            if locked_ids and (teacher_id is None or teacher_id not in locked_ids):
+                continue
             if teacher_id is not None and teacher_id in seen:
                 continue
             target.append(teacher)
@@ -1398,6 +1411,84 @@ def _matching_sessions_for_groups(
         matches.append(session)
     matches.sort(key=lambda s: s.start_time)
     return matches
+
+
+def _gap_allows_continuation(previous_end: datetime, next_start: datetime) -> bool:
+    if next_start < previous_end:
+        return False
+    gap = next_start - previous_end
+    if gap <= MAX_SLOT_GAP:
+        return True
+    return (previous_end.time(), next_start.time()) in EXTENDED_BREAKS
+
+
+def _connected_teacher_ids(
+    *,
+    course: Course,
+    class_groups: Iterable[ClassGroup],
+    day: date,
+    segment_datetimes: list[tuple[datetime, datetime]],
+    pending_sessions: Iterable[Session] = (),
+    subgroup_label: str | None = None,
+    require_exact_attendees: bool = False,
+) -> set[int]:
+    if not segment_datetimes:
+        return set()
+    matches = _matching_sessions_for_groups(
+        course,
+        class_groups,
+        pending_sessions=pending_sessions,
+        subgroup_label=subgroup_label,
+        require_exact_attendees=require_exact_attendees,
+    )
+    same_day_sessions = [
+        session
+        for session in matches
+        if session.start_time and session.start_time.date() == day
+    ]
+    if not same_day_sessions:
+        return set()
+    block_start = segment_datetimes[0][0]
+    block_end = segment_datetimes[-1][1]
+
+    changed = True
+    while changed:
+        changed = False
+        for session in same_day_sessions:
+            session_start = session.start_time
+            session_end = session.end_time
+            if session_start is None or session_end is None:
+                continue
+            if overlaps(session_start, session_end, block_start, block_end):
+                if session_start < block_start:
+                    block_start = session_start
+                    changed = True
+                if session_end > block_end:
+                    block_end = session_end
+                    changed = True
+                continue
+            if session_end <= block_start:
+                if _gap_allows_continuation(session_end, block_start):
+                    if session_start < block_start:
+                        block_start = session_start
+                        changed = True
+                continue
+            if session_start >= block_end:
+                if _gap_allows_continuation(block_end, session_start):
+                    if session_end > block_end:
+                        block_end = session_end
+                        changed = True
+
+    teacher_ids: set[int] = set()
+    for session in same_day_sessions:
+        session_start = session.start_time
+        session_end = session.end_time
+        if session_start is None or session_end is None:
+            continue
+        if overlaps(session_start, session_end, block_start, block_end):
+            if session.teacher_id is not None:
+                teacher_ids.add(session.teacher_id)
+    return teacher_ids
 
 
 def _relocate_sessions_for_groups(
@@ -1702,6 +1793,21 @@ def _try_full_block(
                     _describe_class_unavailability(class_group, start_dt, end_dt)
                 )
             continue
+        segment_datetimes = [(start_dt, end_dt)]
+        locked_teacher_ids = _connected_teacher_ids(
+            course=course,
+            class_groups=[class_group],
+            day=day,
+            segment_datetimes=segment_datetimes,
+            pending_sessions=pending_sessions,
+            subgroup_label=subgroup_label,
+        )
+        if locked_teacher_ids and len(locked_teacher_ids) > 1:
+            if diagnostics is not None:
+                diagnostics.add_teacher(
+                    "Plusieurs enseignants déjà affectés sur les segments adjacents."
+                )
+            continue
         teacher = find_available_teacher(
             course,
             start_dt,
@@ -1711,6 +1817,7 @@ def _try_full_block(
             target_class_ids=target_class_ids or None,
             hour_tracker=hour_tracker,
             required_hours=desired_hours,
+            locked_teacher_ids=locked_teacher_ids or None,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1841,6 +1948,20 @@ def _try_split_block(
                             )
                         )
             continue
+        locked_teacher_ids = _connected_teacher_ids(
+            course=course,
+            class_groups=[class_group],
+            day=day,
+            segment_datetimes=segment_datetimes,
+            pending_sessions=pending_sessions,
+            subgroup_label=subgroup_label,
+        )
+        if locked_teacher_ids and len(locked_teacher_ids) > 1:
+            if diagnostics is not None:
+                diagnostics.add_teacher(
+                    "Plusieurs enseignants déjà affectés sur les segments adjacents."
+                )
+            continue
         teacher = find_available_teacher(
             course,
             start_dt,
@@ -1851,6 +1972,7 @@ def _try_split_block(
             target_class_ids=target_class_ids or None,
             hour_tracker=hour_tracker,
             required_hours=desired_hours,
+            locked_teacher_ids=locked_teacher_ids or None,
         )
         if not teacher:
             if diagnostics is not None:
@@ -2051,6 +2173,21 @@ def _cm_try_full_block(
                         _describe_class_unavailability(group, start_dt, end_dt)
                     )
             continue
+        segment_datetimes = [(start_dt, end_dt)]
+        locked_teacher_ids = _connected_teacher_ids(
+            course=course,
+            class_groups=class_groups,
+            day=day,
+            segment_datetimes=segment_datetimes,
+            pending_sessions=pending_sessions,
+            require_exact_attendees=True,
+        )
+        if locked_teacher_ids and len(locked_teacher_ids) > 1:
+            if diagnostics is not None:
+                diagnostics.add_teacher(
+                    "Plusieurs enseignants déjà affectés sur les segments adjacents."
+                )
+            continue
         teacher = find_available_teacher(
             course,
             start_dt,
@@ -2060,6 +2197,7 @@ def _cm_try_full_block(
             target_class_ids=target_class_ids or None,
             hour_tracker=hour_tracker,
             required_hours=desired_hours,
+            locked_teacher_ids=locked_teacher_ids or None,
         )
         if not teacher:
             if diagnostics is not None:
@@ -2179,6 +2317,20 @@ def _cm_try_split_block(
                         _describe_class_unavailability(group, segment_start, segment_end)
                     )
             continue
+        locked_teacher_ids = _connected_teacher_ids(
+            course=course,
+            class_groups=class_groups,
+            day=day,
+            segment_datetimes=segment_datetimes,
+            pending_sessions=pending_sessions,
+            require_exact_attendees=True,
+        )
+        if locked_teacher_ids and len(locked_teacher_ids) > 1:
+            if diagnostics is not None:
+                diagnostics.add_teacher(
+                    "Plusieurs enseignants déjà affectés sur les segments adjacents."
+                )
+            continue
         teacher = find_available_teacher(
             course,
             segment_datetimes[0][0],
@@ -2189,6 +2341,7 @@ def _cm_try_split_block(
             target_class_ids=target_class_ids or None,
             hour_tracker=hour_tracker,
             required_hours=desired_hours,
+            locked_teacher_ids=locked_teacher_ids or None,
         )
         if not teacher:
             if diagnostics is not None:
