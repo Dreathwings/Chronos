@@ -97,6 +97,8 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_course_type_column()
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
+        _ensure_course_sessions_per_week_column()
+        _ensure_course_color_column()
         _ensure_student_profile_columns()
         _ensure_session_attendance_backfill()
         updated_sessions = _realign_tp_session_teachers()
@@ -604,6 +606,46 @@ def _ensure_course_course_name_column() -> None:
             current_app.logger.warning(
                 "Unable to add foreign key constraint to course.course_name_id; continuing without constraint."
             )
+
+
+def _ensure_course_sessions_per_week_column() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course")}
+    if "sessions_per_week" in existing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE course ADD COLUMN sessions_per_week INTEGER DEFAULT 1"
+                )
+            )
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        current_app.logger.warning(
+            "Unable to add sessions_per_week column to course: %s", exc
+        )
+
+
+def _ensure_course_color_column() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course")}
+    if "color" in existing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE course ADD COLUMN color VARCHAR(7)"))
+    except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
+        current_app.logger.warning("Unable to add color column to course: %s", exc)
 
 
 def _ensure_student_profile_columns() -> None:
