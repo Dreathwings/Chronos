@@ -772,17 +772,32 @@ def _validate_session_constraints(
         return "L'établissement est fermé sur la période sélectionnée."
     if not fits_in_windows(start_dt.time(), end_dt.time()):
         return "Le créneau choisi dépasse les fenêtres horaires autorisées."
+    candidate_hours = max(int((end_dt - start_dt).total_seconds() // 3600), 0)
     if not teacher.is_available_during(start_dt, end_dt):
         return "L'enseignant n'est pas disponible sur ce créneau."
     if _has_conflict(teacher.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "L'enseignant a déjà une séance sur ce créneau."
+    teacher_limits = course.teacher_hours_map
+    teacher_limit = teacher_limits.get(teacher.id) if teacher_limits else None
+    if teacher_limit is not None:
+        scheduled_hours = sum(
+            session.duration_hours
+            for session in course.sessions
+            if session.teacher_id == teacher.id
+            and (ignore_session_id is None or session.id != ignore_session_id)
+        )
+        if scheduled_hours + candidate_hours > teacher_limit + 1e-6:
+            return (
+                "L'enseignant "
+                f"{teacher.name} dépasserait son quota sur ce cours "
+                f"({scheduled_hours:.1f} h / {teacher_limit:.1f} h)."
+            )
     if _has_conflict(room.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "La salle est déjà réservée sur ce créneau."
     for class_group in class_groups:
         subgroup_label: str | None = None
         if class_group_labels is not None and class_group.id is not None:
             subgroup_label = class_group_labels.get(class_group.id)
-        candidate_hours = max(int((end_dt - start_dt).total_seconds() // 3600), 0)
         if not class_group.is_available_during(
             start_dt,
             end_dt,

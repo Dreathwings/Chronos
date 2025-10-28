@@ -310,18 +310,30 @@ class PlacementDiagnostics:
         *,
         context_label: str,
         day: date,
-    ) -> None:
+    ) -> list[str]:
+        messages: list[str] = []
         if reporter is None:
-            return
+            return messages
         day_label = day.strftime("%d/%m/%Y")
+        week_start, _ = _week_bounds(day)
+        week_label = week_start.strftime("%d/%m/%Y")
+        prefix = f"{context_label} — semaine du {week_label} (jour {day_label}) : "
         for message in sorted(self.class_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
+            entry = prefix + message
+            reporter.warning(entry)
+            messages.append(entry)
         for message in sorted(self.teacher_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
+            entry = prefix + message
+            reporter.warning(entry)
+            messages.append(entry)
         for message in sorted(self.room_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
+            entry = prefix + message
+            reporter.warning(entry)
+            messages.append(entry)
         for message in sorted(self.other_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
+            entry = prefix + message
+            reporter.warning(entry)
+            messages.append(entry)
         if not any(
             (
                 self.class_reasons,
@@ -330,9 +342,12 @@ class PlacementDiagnostics:
                 self.other_reasons,
             )
         ):
-            reporter.warning(
-                f"{context_label} — {day_label} : aucune option compatible trouvée sur ce créneau."
+            fallback = (
+                prefix + "aucune option compatible trouvée sur ce créneau."
             )
+            reporter.warning(fallback)
+            messages.append(fallback)
+        return messages
 
 
 def daterange(start: date, end: date) -> Iterable[date]:
@@ -417,6 +432,14 @@ def _format_session_label(session: Session) -> str:
     return f"{session.course.name} ({start_label} → {end_label})"
 
 
+def _segment_hours(segments: Iterable[tuple[datetime, datetime]]) -> float:
+    total = 0.0
+    for segment_start, segment_end in segments:
+        delta = segment_end - segment_start
+        total += max(delta.total_seconds() / 3600.0, 0.0)
+    return total
+
+
 def _describe_teacher_unavailability(
     course: Course,
     start: datetime,
@@ -425,6 +448,9 @@ def _describe_teacher_unavailability(
     link: CourseClassLink | None = None,
     subgroup_label: str | None = None,
     segments: Optional[list[tuple[datetime, datetime]]] = None,
+    pending_sessions: Iterable[Session] = (),
+    requested_hours: float | None = None,
+    extra_reasons: Iterable[str] | None = None,
 ) -> str:
     preferred: list[Teacher] = []
     if link is not None:
@@ -444,7 +470,25 @@ def _describe_teacher_unavailability(
         return "Aucun enseignant n'est associé au cours."
 
     segments_to_check = segments or [(start, end)]
-    reasons: list[str] = []
+    requested = (
+        requested_hours
+        if requested_hours is not None
+        else _segment_hours(segments_to_check)
+    )
+    teacher_limits = course.teacher_hours_map
+    scheduled_hours: Counter[int] = Counter()
+    for session in course.sessions:
+        if session.teacher_id is None or session.course_id != course.id:
+            continue
+        scheduled_hours[session.teacher_id] += session.duration_hours
+    for session in pending_sessions:
+        if session is None or session.teacher_id is None:
+            continue
+        if session.course_id is not None and course.id is not None and session.course_id != course.id:
+            continue
+        scheduled_hours[session.teacher_id] += session.duration_hours
+
+    reasons: list[str] = list(extra_reasons or [])
     for teacher in sorted(candidates, key=lambda t: t.name.lower()):
         if not all(
             teacher.is_available_during(segment_start, segment_end)
@@ -464,6 +508,14 @@ def _describe_teacher_unavailability(
                 summary += ", …"
             reasons.append(f"{teacher.name} est déjà planifié : {summary}")
             continue
+        limit = teacher_limits.get(teacher.id) if teacher_limits else None
+        if limit is not None:
+            already = float(scheduled_hours.get(teacher.id, 0.0))
+            if requested > 0 and already + requested > limit + 1e-6:
+                reasons.append(
+                    f"{teacher.name} atteindrait son quota sur ce cours ({already:.1f} h / {limit:.1f} h)."
+                )
+                continue
     if reasons:
         return " ; ".join(reasons)
     teacher_names = ", ".join(sorted(teacher.name for teacher in candidates))
@@ -1001,6 +1053,8 @@ def find_available_teacher(
     subgroup_label: str | None = None,
     segments: Optional[list[tuple[datetime, datetime]]] = None,
     target_class_ids: Set[int] | None = None,
+    pending_sessions: Iterable[Session] = (),
+    rejection_reasons: list[str] | None = None,
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
     allowed_ids: set[int] | None = None
@@ -1057,14 +1111,26 @@ def find_available_teacher(
         _append_unique(candidates, existing_teachers)
 
     _append_unique(candidates, preferred)
-    if not candidates:
-        _append_unique(
-            candidates,
-            sorted(
-                [teacher for teacher in fallback_pool if teacher not in preferred],
-                key=lambda t: t.name.lower(),
-            ),
-        )
+    fallback_candidates = sorted(
+        [teacher for teacher in fallback_pool if teacher not in preferred],
+        key=lambda t: t.name.lower(),
+    )
+    _append_unique(candidates, fallback_candidates)
+
+    segments_to_check = segments or [(start, end)]
+    requested_hours = _segment_hours(segments_to_check)
+    teacher_limits = course.teacher_hours_map
+    scheduled_hours: Counter[int] = Counter()
+    for session in course.sessions:
+        if session.teacher_id is None or session.course_id != course.id:
+            continue
+        scheduled_hours[session.teacher_id] += session.duration_hours
+    for session in pending_sessions:
+        if session is None or session.teacher_id is None:
+            continue
+        if session.course_id is not None and course.id is not None and session.course_id != course.id:
+            continue
+        scheduled_hours[session.teacher_id] += session.duration_hours
 
     for teacher in candidates:
         segments_to_check = segments or [(start, end)]
@@ -1079,7 +1145,25 @@ def find_available_teacher(
             for segment_start, segment_end in segments_to_check
         ):
             continue
+        limit = teacher_limits.get(teacher.id) if teacher_limits else None
+        if limit is not None:
+            already = float(scheduled_hours.get(teacher.id, 0.0))
+            if requested_hours > 0 and already + requested_hours > limit + 1e-6:
+                if rejection_reasons is not None:
+                    rejection_reasons.append(
+                        f"{teacher.name} (quota {already:.1f} h / {limit:.1f} h)"
+                    )
+                continue
         return teacher
+    if rejection_reasons is not None and teacher_limits:
+        unique = []
+        seen: set[str] = set()
+        for reason in rejection_reasons:
+            if reason not in seen:
+                unique.append(reason)
+                seen.add(reason)
+        if unique:
+            rejection_reasons[:] = unique
     return None
 
 
@@ -1528,6 +1612,7 @@ def _try_full_block(
                     _describe_class_unavailability(class_group, start_dt, end_dt)
                 )
             continue
+        teacher_rejections: list[str] = []
         teacher = find_available_teacher(
             course,
             start_dt,
@@ -1535,6 +1620,8 @@ def _try_full_block(
             link=link,
             subgroup_label=subgroup_label,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
+            rejection_reasons=teacher_rejections,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1545,6 +1632,9 @@ def _try_full_block(
                         end_dt,
                         link=link,
                         subgroup_label=subgroup_label,
+                        pending_sessions=pending_sessions,
+                        requested_hours=float(desired_hours),
+                        extra_reasons=teacher_rejections,
                     )
                 )
             continue
@@ -1661,6 +1751,7 @@ def _try_split_block(
                             )
                         )
             continue
+        teacher_rejections: list[str] = []
         teacher = find_available_teacher(
             course,
             start_dt,
@@ -1669,6 +1760,8 @@ def _try_split_block(
             subgroup_label=subgroup_label,
             segments=segment_datetimes,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
+            rejection_reasons=teacher_rejections,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1680,6 +1773,9 @@ def _try_split_block(
                         link=link,
                         subgroup_label=subgroup_label,
                         segments=segment_datetimes,
+                        pending_sessions=pending_sessions,
+                        requested_hours=_segment_hours(segment_datetimes),
+                        extra_reasons=teacher_rejections,
                     )
                 )
             continue
@@ -1857,6 +1953,7 @@ def _cm_try_full_block(
                         _describe_class_unavailability(group, start_dt, end_dt)
                     )
             continue
+        teacher_rejections: list[str] = []
         teacher = find_available_teacher(
             course,
             start_dt,
@@ -1864,6 +1961,8 @@ def _cm_try_full_block(
             link=primary_link,
             subgroup_label=None,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
+            rejection_reasons=teacher_rejections,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1874,6 +1973,9 @@ def _cm_try_full_block(
                         end_dt,
                         link=primary_link,
                         subgroup_label=None,
+                        pending_sessions=pending_sessions,
+                        requested_hours=float(desired_hours),
+                        extra_reasons=teacher_rejections,
                     )
                 )
             continue
@@ -1979,6 +2081,7 @@ def _cm_try_split_block(
                         _describe_class_unavailability(group, segment_start, segment_end)
                     )
             continue
+        teacher_rejections: list[str] = []
         teacher = find_available_teacher(
             course,
             segment_datetimes[0][0],
@@ -1987,6 +2090,8 @@ def _cm_try_split_block(
             subgroup_label=None,
             segments=segment_datetimes,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
+            rejection_reasons=teacher_rejections,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1998,6 +2103,9 @@ def _cm_try_split_block(
                         link=primary_link,
                         subgroup_label=None,
                         segments=segment_datetimes,
+                        pending_sessions=pending_sessions,
+                        requested_hours=_segment_hours(segment_datetimes),
+                        extra_reasons=teacher_rejections,
                     )
                 )
             continue

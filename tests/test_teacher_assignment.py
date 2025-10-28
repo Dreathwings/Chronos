@@ -30,6 +30,7 @@ from app.scheduler import (
     has_weekly_course_conflict,
     _relocate_sessions_for_groups,
     _warn_weekly_limit,
+    find_available_teacher,
 )
 
 
@@ -186,6 +187,138 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         teachers = event["extendedProps"]["teachers"]
         self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
+
+    def test_find_available_teacher_respects_course_quota(self) -> None:
+        base_name = CourseName(name="Programmation")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO2", size=28)
+        link = CourseClassLink(class_group=class_group)
+        course.class_links.append(link)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        db.session.add_all([base_name, course, class_group, teacher_a, teacher_b])
+        db.session.commit()
+
+        for teacher in (teacher_a, teacher_b):
+            for weekday in (0, 1):
+                db.session.add(
+                    TeacherAvailability(
+                        teacher=teacher,
+                        weekday=weekday,
+                        start_time=time(8, 0),
+                        end_time=time(18, 0),
+                    )
+                )
+        db.session.commit()
+
+        link.teacher_a = teacher_a
+        link.teacher_b = teacher_b
+        course.set_teacher_hours(teacher_a, 2)
+        course.set_teacher_hours(teacher_b, 2)
+        db.session.commit()
+
+        self.assertEqual(
+            {teacher.id for teacher in link.assigned_teachers()},
+            {teacher_a.id, teacher_b.id},
+        )
+        self.assertEqual(
+            course.teacher_hours_map,
+            {teacher_a.id: 2.0, teacher_b.id: 2.0},
+        )
+
+        first_start = datetime(2024, 1, 8, 8, 0)
+        first_end = datetime(2024, 1, 8, 10, 0)
+        next_start = datetime(2024, 1, 15, 8, 0)
+        next_end = datetime(2024, 1, 15, 10, 0)
+
+        self.assertTrue(teacher_b.is_available_during(first_start, first_end))
+        self.assertTrue(teacher_b.is_available_during(next_start, next_end))
+
+        room = Room(name="B203", capacity=30)
+        db.session.add(room)
+        db.session.commit()
+        initial_session = Session(
+            course=course,
+            teacher=teacher_a,
+            room=room,
+            class_group=class_group,
+            start_time=first_start,
+            end_time=first_end,
+        )
+        initial_session.attendees = [class_group]
+        db.session.add(initial_session)
+        db.session.commit()
+
+        next_start = datetime(2024, 1, 15, 8, 0)
+        next_end = datetime(2024, 1, 15, 10, 0)
+        rejection_reasons: list[str] = []
+        selected = find_available_teacher(
+            course,
+            next_start,
+            next_end,
+            link=link,
+            subgroup_label=None,
+            target_class_ids={class_group.id},
+            rejection_reasons=rejection_reasons,
+        )
+        self.assertIsNotNone(selected, f"Rejet : {rejection_reasons}")
+        self.assertEqual(selected.id, teacher_b.id)
+
+    def test_validate_session_constraints_blocks_quota_overflow(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher = Teacher(name="Alice")
+        room = Room(name="B204", capacity=24)
+        db.session.add_all([teacher, room])
+        db.session.commit()
+
+        for weekday in (0, 1):
+            db.session.add(
+                TeacherAvailability(
+                    teacher=teacher,
+                    weekday=weekday,
+                    start_time=time(8, 0),
+                    end_time=time(18, 0),
+                )
+            )
+        db.session.commit()
+
+        link.teacher_a = teacher
+        course.set_teacher_hours(teacher, 2)
+        db.session.commit()
+
+        first_start = datetime(2024, 1, 8, 8, 0)
+        first_end = datetime(2024, 1, 8, 10, 0)
+        session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=first_start,
+            end_time=first_end,
+        )
+        session.attendees = [class_group]
+        db.session.add(session)
+        db.session.commit()
+
+        candidate_start = datetime(2024, 1, 15, 8, 0)
+        candidate_end = datetime(2024, 1, 15, 10, 0)
+        message = _validate_session_constraints(
+            course,
+            teacher,
+            room,
+            [class_group],
+            candidate_start,
+            candidate_end,
+        )
+        self.assertIsNotNone(message)
+        self.assertIn("quota", message)
 
     def test_best_teacher_duos_prefers_shared_availability(self) -> None:
         teacher_a = Teacher(name="Alice")
