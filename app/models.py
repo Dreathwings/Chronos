@@ -401,6 +401,20 @@ class Course(db.Model, TimeStampedModel):
     def allowed_week_ranges(self) -> list[tuple[date, date]]:
         return [entry.week_span for entry in self.allowed_weeks]
 
+    @property
+    def allowed_week_payload(self) -> list[tuple[date, date, int]]:
+        fallback = max(int(self.sessions_per_week or 0), 0)
+        payload: list[tuple[date, date, int]] = []
+        for entry in self.allowed_weeks:
+            payload.append(
+                (
+                    entry.week_start,
+                    entry.week_end,
+                    entry.effective_sessions(fallback),
+                )
+            )
+        return payload
+
     def subgroup_name_for(
         self, class_group: "ClassGroup" | int, subgroup_label: str | None
     ) -> str | None:
@@ -445,11 +459,12 @@ class Course(db.Model, TimeStampedModel):
             multiplier = group_total or 1
         per_week_goal = max(int(self.sessions_per_week or 0), 0)
         if self.allowed_weeks:
-            effective_week_count = len(self.allowed_weeks)
-            if per_week_goal <= 0:
+            occurrences = sum(
+                entry.effective_sessions(per_week_goal)
+                for entry in self.allowed_weeks
+            )
+            if occurrences <= 0:
                 occurrences = max(int(self.sessions_required or 0), 1)
-            else:
-                occurrences = per_week_goal * effective_week_count
         else:
             occurrences = max(
                 int(self.sessions_required or 0),
@@ -728,6 +743,7 @@ class CourseAllowedWeek(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), nullable=False)
     week_start: Mapped[date] = mapped_column(Date, nullable=False)
+    sessions_target: Mapped[Optional[int]] = mapped_column(Integer)
 
     course: Mapped["Course"] = relationship("Course", back_populates="allowed_weeks")
 
@@ -736,6 +752,10 @@ class CourseAllowedWeek(db.Model, TimeStampedModel):
             "course_id",
             "week_start",
             name="uq_course_allowed_week_unique",
+        ),
+        CheckConstraint(
+            "sessions_target IS NULL OR sessions_target >= 0",
+            name="chk_course_allowed_week_sessions_non_negative",
         ),
     )
 
@@ -746,6 +766,15 @@ class CourseAllowedWeek(db.Model, TimeStampedModel):
     @property
     def week_span(self) -> tuple[date, date]:
         return self.week_start, self.week_end
+
+    def effective_sessions(self, default: int) -> int:
+        value = self.sessions_target
+        if value is None:
+            return max(int(default or 0), 0)
+        try:
+            return max(int(value), 0)
+        except (TypeError, ValueError):
+            return max(int(default or 0), 0)
 
 
 class Equipment(db.Model):

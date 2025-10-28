@@ -110,16 +110,38 @@
               <div class="row row-cols-1 row-cols-sm-2 g-2">
                 {% for option in course_week_options %}
                 <div class="col">
-                  <div class="form-check">
-                    <input
-                      class="form-check-input"
-                      type="checkbox"
-                      name="allowed_week_starts"
-                      value="{{ option.value }}"
-                      id="allowed-week-{{ option.value }}"
-                      {% if option.value in selected_course_week_values %}checked{% endif %}
-                    >
-                    <label class="form-check-label" for="allowed-week-{{ option.value }}">{{ option.label }}</label>
+                  <div class="border rounded p-2 h-100">
+                    <div class="form-check">
+                      <input
+                        class="form-check-input"
+                        type="checkbox"
+                        name="allowed_week_starts"
+                        value="{{ option.value }}"
+                        id="allowed-week-{{ option.value }}"
+                        data-week-checkbox
+                        data-week-value="{{ option.value }}"
+                        {% if option.value in selected_course_week_values %}checked{% endif %}
+                      >
+                      <label class="form-check-label" for="allowed-week-{{ option.value }}">{{ option.label }}</label>
+                    </div>
+                    <div class="mt-2">
+                      <label class="form-label small" for="allowed-week-sessions-{{ option.value }}">
+                        Séances à générer cette semaine
+                      </label>
+                      <input
+                        type="number"
+                        class="form-control form-control-sm"
+                        id="allowed-week-sessions-{{ option.value }}"
+                        name="allowed_week_sessions_{{ option.value }}"
+                        min="0"
+                        value="{{ course_week_session_map.get(option.value, course.sessions_per_week) }}"
+                        data-week-session-input
+                        data-week-value="{{ option.value }}"
+                        data-week-default="{{ course_week_session_map.get(option.value, course.sessions_per_week) }}"
+                        {% if option.value not in selected_course_week_values %}disabled{% endif %}
+                      >
+                      <div class="form-text">Nombre de séances ciblé pour cette semaine cochée.</div>
+                    </div>
                   </div>
                 </div>
                 {% endfor %}
@@ -633,6 +655,26 @@
       };
       checkbox.addEventListener('change', updateHoursState);
       updateHoursState();
+    });
+    document.querySelectorAll('[data-week-checkbox]').forEach(function(checkbox) {
+      const weekValue = checkbox.getAttribute('data-week-value');
+      const input = document.querySelector('[data-week-session-input][data-week-value="' + weekValue + '"]');
+      const defaultValue = input ? input.getAttribute('data-week-default') : null;
+      const toggleWeekInput = function() {
+        if (!input) {
+          return;
+        }
+        if (checkbox.checked) {
+          input.disabled = false;
+        } else {
+          input.disabled = true;
+          if (defaultValue !== null && defaultValue !== undefined) {
+            input.value = defaultValue;
+          }
+        }
+      };
+      checkbox.addEventListener('change', toggleWeekInput);
+      toggleWeekInput();
     });
     const calendarEl = document.getElementById('course-calendar');
     const events = {{ events_json|safe }};

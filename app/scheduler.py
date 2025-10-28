@@ -2187,13 +2187,35 @@ def generate_schedule(
             reporter.finalise(len(created_sessions))
             raise
 
+        fallback_weekly_goal = max(int(course.sessions_per_week or 0), 0)
+        weekly_targets: dict[date, int] = {}
         normalised_weeks: list[tuple[date, date]] = []
         if allowed_weeks:
-            for week_start, week_end in allowed_weeks:
+            for entry in allowed_weeks:
+                if entry is None:
+                    continue
+                if isinstance(entry, (list, tuple)):
+                    if len(entry) < 2:
+                        continue
+                    week_start = entry[0]
+                    week_end = entry[1]
+                    weekly_goal = entry[2] if len(entry) > 2 else None
+                else:
+                    continue
                 if week_start is None or week_end is None:
                     continue
                 if week_end < week_start:
                     week_start, week_end = week_end, week_start
+                canonical_start = _week_start_for(week_start)
+                try:
+                    goal_value = (
+                        int(weekly_goal)
+                        if weekly_goal is not None
+                        else fallback_weekly_goal
+                    )
+                except (TypeError, ValueError):
+                    goal_value = fallback_weekly_goal
+                weekly_targets[canonical_start] = max(goal_value, 0)
                 normalised_weeks.append((week_start, week_end))
             normalised_weeks.sort(key=lambda span: span[0])
             truncated_weeks: list[tuple[date, date]] = []
@@ -2271,6 +2293,8 @@ def generate_schedule(
                 raise ValueError(message)
 
         available_week_count = 0
+        total_weekly_goal = 0
+        weekly_breakdown: list[tuple[date, int]] = []
         if normalised_weeks:
             candidate_days = (
                 {day for day in allowed_days if day.weekday() < 5}
@@ -2284,13 +2308,57 @@ def generate_schedule(
                     + ", ".join(week.strftime("%d/%m/%Y") for week in week_occurrences)
                 )
             available_week_count = len(week_occurrences)
-        per_week_goal = max(int(course.sessions_per_week or 0), 0)
-        base_week_count = available_week_count or len(normalised_weeks) or 1
-        if per_week_goal <= 0:
-            total_goal = max(int(course.sessions_required or 0), 1)
+            for week_start in week_occurrences:
+                weekly_goal = weekly_targets.get(week_start, fallback_weekly_goal)
+                try:
+                    weekly_goal = max(int(weekly_goal), 0)
+                except (TypeError, ValueError):
+                    weekly_goal = max(fallback_weekly_goal, 0)
+                weekly_breakdown.append((week_start, weekly_goal))
+                total_weekly_goal += weekly_goal
         else:
-            total_goal = per_week_goal * base_week_count
-        effective_occurrences = max(int(course.sessions_required or 0), total_goal, 1)
+            base_days = (
+                {day for day in allowed_days if day.weekday() < 5}
+                if allowed_days is not None
+                else {
+                    day
+                    for day in daterange(schedule_start, schedule_end)
+                    if day.weekday() < 5
+                }
+            )
+            if base_days:
+                available_week_count = len({_week_start_for(day) for day in base_days})
+
+        base_week_count = available_week_count or len(normalised_weeks) or 1
+        if total_weekly_goal <= 0 and fallback_weekly_goal > 0:
+            total_weekly_goal = fallback_weekly_goal * base_week_count
+        effective_occurrences = max(
+            int(course.sessions_required or 0),
+            total_weekly_goal,
+            1,
+        )
+
+        if weekly_breakdown:
+            breakdown = ", ".join(
+                f"{week.strftime('%d/%m/%Y')} : {goal} occurrence(s)"
+                for week, goal in weekly_breakdown
+            )
+            reporter.info(
+                "Durée cible des séances : "
+                f"{course.session_length_hours} h — {effective_occurrences} occurrence(s) au total "
+                f"(répartition hebdomadaire : {breakdown})"
+            )
+        elif fallback_weekly_goal > 0:
+            reporter.info(
+                "Durée cible des séances : "
+                f"{course.session_length_hours} h — {fallback_weekly_goal} occurrence(s) par semaine ⇒ "
+                f"{effective_occurrences} occurrence(s) par groupe"
+            )
+        else:
+            reporter.info(
+                "Durée cible des séances : "
+                f"{course.session_length_hours} h — {effective_occurrences} occurrence(s) par groupe"
+            )
 
         if not course.classes:
             message = "Associez au moins une classe au cours avant de planifier."
@@ -2298,25 +2366,6 @@ def generate_schedule(
             reporter.summary = message
             reporter.finalise(0)
             raise ValueError(message)
-
-        if per_week_goal > 0:
-            if normalised_weeks:
-                reporter.info(
-                    "Durée cible des séances : "
-                    f"{course.session_length_hours} h — {per_week_goal} occurrence(s) par semaine "
-                    f"({base_week_count} semaine(s) disponibles) ⇒ {effective_occurrences} occurrence(s) par groupe"
-                )
-            else:
-                reporter.info(
-                    "Durée cible des séances : "
-                    f"{course.session_length_hours} h — {per_week_goal} occurrence(s) par semaine ⇒ "
-                    f"{effective_occurrences} occurrence(s) par groupe"
-                )
-        else:
-            reporter.info(
-                "Durée cible des séances : "
-                f"{course.session_length_hours} h — {effective_occurrences} occurrence(s) par groupe"
-            )
 
         created_sessions = []
         slot_length_hours = max(int(course.session_length_hours), 1)

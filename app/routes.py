@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+from collections import OrderedDict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, List, MutableSequence
 
@@ -377,6 +378,31 @@ def _parse_week_selection(values: Iterable[str]) -> list[tuple[date, date]]:
     return selections
 
 
+def _collect_week_targets(
+    form_data,
+    existing_targets: dict[date, int],
+    fallback: int,
+) -> OrderedDict[date, int]:
+    targets: OrderedDict[date, int] = OrderedDict()
+    seen: set[date] = set()
+    for raw in form_data.getlist("allowed_week_starts"):
+        week_start = _parse_date(raw)
+        if week_start is None:
+            continue
+        span_start, _ = _week_bounds_for(week_start)
+        if span_start in seen:
+            continue
+        seen.add(span_start)
+        iso_key = span_start.isoformat()
+        field_name = f"allowed_week_sessions_{iso_key}"
+        default_value = existing_targets.get(span_start, fallback)
+        targets[span_start] = _parse_non_negative_int(
+            form_data.get(field_name),
+            default_value,
+        )
+    return targets
+
+
 def _unique_entities(entities: Iterable[object]) -> list[object]:
     seen_ids: set[int] = set()
     unique: list[object] = []
@@ -447,11 +473,13 @@ def _sync_course_teacher_allocations(
             allocation.target_hours = value
 
 
-def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> int:
+def _sync_course_allowed_weeks(
+    course: Course, week_targets: OrderedDict[date, int]
+) -> dict[date, int]:
     closing_spans = _closing_period_spans()
-    desired: list[date] = []
+    desired: list[tuple[date, int]] = []
     seen: set[date] = set()
-    for raw_start in week_starts:
+    for raw_start, raw_target in week_targets.items():
         if raw_start is None:
             continue
         week_start, week_end = _week_bounds_for(raw_start)
@@ -460,23 +488,32 @@ def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> i
         if _is_week_closed(week_start, week_end, closing_spans):
             continue
         seen.add(week_start)
-        desired.append(week_start)
-    desired.sort()
-    desired_set = set(desired)
+        desired.append((week_start, max(int(raw_target or 0), 0)))
+    desired.sort(key=lambda payload: payload[0])
+    desired_map = {week_start: target for week_start, target in desired}
 
     for entry in list(course.allowed_weeks):
-        if entry.week_start not in desired_set:
+        if entry.week_start not in desired_map:
             course.allowed_weeks.remove(entry)
             db.session.flush()
+        else:
+            entry.sessions_target = desired_map[entry.week_start]
 
     existing_starts = {entry.week_start for entry in course.allowed_weeks}
-    for week_start in desired:
+    for week_start, target in desired:
         if week_start in existing_starts:
             continue
-        course.allowed_weeks.append(CourseAllowedWeek(week_start=week_start))
+        course.allowed_weeks.append(
+            CourseAllowedWeek(week_start=week_start, sessions_target=target)
+        )
         db.session.flush()
         existing_starts.add(week_start)
-    return len(course.allowed_weeks)
+
+    synchronised: dict[date, int] = {}
+    for entry in course.allowed_weeks:
+        if entry.week_start in desired_map:
+            synchronised[entry.week_start] = desired_map[entry.week_start]
+    return synchronised
 
 
 def _sync_course_class_links(
@@ -2008,11 +2045,7 @@ def generation_overview():
                 allowed_ranges = course.allowed_week_ranges
                 window_start = allowed_ranges[0][0] if allowed_ranges else None
                 window_end = allowed_ranges[-1][1] if allowed_ranges else None
-                allowed_payload = (
-                    [(start, end) for start, end in allowed_ranges]
-                    if allowed_ranges
-                    else None
-                )
+                allowed_payload = course.allowed_week_payload or None
                 try:
                     created_sessions = generate_schedule(
                         course,
@@ -2349,8 +2382,14 @@ def course_detail(course_id: int):
                     request.form.get(f"teacher_hours_{teacher.id}"),
                     current_default,
                 )
-            selected_weeks = _parse_week_selection(
-                request.form.getlist("allowed_week_starts")
+            existing_week_targets = {
+                allowed.week_start: allowed.effective_sessions(session_goal)
+                for allowed in course.allowed_weeks
+            }
+            selected_week_targets = _collect_week_targets(
+                request.form,
+                existing_week_targets,
+                session_goal,
             )
 
             _sync_simple_relationship(course.equipments, selected_equipments)
@@ -2358,11 +2397,14 @@ def course_detail(course_id: int):
             _sync_course_class_links(course, class_ids, existing_links=class_links_map)
             _sync_simple_relationship(course.teachers, selected_teachers)
             _sync_course_teacher_allocations(course, teacher_hours)
-            allowed_week_count = _sync_course_allowed_weeks(
-                course, (start for start, _ in selected_weeks)
+            synchronised_targets = _sync_course_allowed_weeks(
+                course, selected_week_targets
             )
-            effective_week_count = max(allowed_week_count, 1)
-            course.sessions_required = max(session_goal * effective_week_count, 1)
+            if synchronised_targets:
+                total_sessions = sum(max(value, 0) for value in synchronised_targets.values())
+                course.sessions_required = max(total_sessions, 1)
+            else:
+                course.sessions_required = max(session_goal, 1)
             try:
                 db.session.commit()
                 flash("Cours mis à jour", "success")
@@ -2374,11 +2416,7 @@ def course_detail(course_id: int):
             allowed_ranges = course.allowed_week_ranges
             window_start = allowed_ranges[0][0] if allowed_ranges else None
             window_end = allowed_ranges[-1][1] if allowed_ranges else None
-            allowed_payload = (
-                [(start, end) for start, end in allowed_ranges]
-                if allowed_ranges
-                else None
-            )
+            allowed_payload = course.allowed_week_payload or None
             if _wants_json_response():
                 tracker = _enqueue_course_schedule(
                     course,
@@ -2590,6 +2628,11 @@ def course_detail(course_id: int):
 
     week_ranges.sort(key=lambda span: span[0])
 
+    default_week_target = max(int(course.sessions_per_week or 0), 0)
+    course_week_session_map = {
+        start.isoformat(): default_week_target for start, _ in week_ranges
+    }
+
     course_week_options = [
         {"value": start.isoformat(), "label": _week_label(start, end)}
         for start, end in week_ranges
@@ -2599,6 +2642,12 @@ def course_detail(course_id: int):
         for allowed in course.allowed_weeks
         if not _is_week_closed(allowed.week_start, allowed.week_end, closing_spans)
     ]
+    for allowed in course.allowed_weeks:
+        if _is_week_closed(allowed.week_start, allowed.week_end, closing_spans):
+            continue
+        course_week_session_map[
+            allowed.week_start.isoformat()
+        ] = allowed.effective_sessions(default_week_target)
 
     remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
     generation_display_status = _effective_generation_status(
@@ -2631,6 +2680,7 @@ def course_detail(course_id: int):
         course_week_options=course_week_options,
         selected_course_week_values=selected_course_week_values,
         selected_course_week_labels=selected_course_week_labels,
+        course_week_session_map=course_week_session_map,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
     )
@@ -2810,11 +2860,7 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 allowed_ranges = course.allowed_week_ranges
                 window_start = allowed_ranges[0][0] if allowed_ranges else None
                 window_end = allowed_ranges[-1][1] if allowed_ranges else None
-                allowed_payload = (
-                    [(start, end) for start, end in allowed_ranges]
-                    if allowed_ranges
-                    else None
-                )
+                allowed_payload = course.allowed_week_payload or None
                 slice_progress = tracker.create_slice(
                     label=f"Planification de {course.name}"
                 )
