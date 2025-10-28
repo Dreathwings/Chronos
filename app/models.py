@@ -621,6 +621,12 @@ class Session(db.Model, TimeStampedModel):
             primary_entry.get("phone") if isinstance(primary_entry, dict) else None
         )
 
+        segment_teacher_ids = [
+            entry["id"]
+            for entry in teacher_entries
+            if isinstance(entry, dict) and entry.get("id") is not None
+        ]
+
         return {
             "id": str(self.id),
             "title": title,
@@ -655,6 +661,17 @@ class Session(db.Model, TimeStampedModel):
                         "start": self.start_time.isoformat(),
                         "end": self.end_time.isoformat(),
                         "room": self.room.name,
+                        "teacher_ids": segment_teacher_ids,
+                        "teachers": [
+                            {
+                                "id": entry.get("id"),
+                                "name": entry.get("name"),
+                                "email": entry.get("email"),
+                                "phone": entry.get("phone"),
+                            }
+                            for entry in teacher_entries
+                            if isinstance(entry, dict)
+                        ],
                     }
                 ],
                 "segment_ids": [str(self.id)],

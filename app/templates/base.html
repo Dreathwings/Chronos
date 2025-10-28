@@ -157,6 +157,9 @@
       }
 
       function chronosSetField(modal, fieldName, value) {
+        if (!modal) {
+          return;
+        }
         const target = modal.querySelector(`[data-chronos-field="${fieldName}"]`);
         if (!target) {
           return;
@@ -176,12 +179,126 @@
         });
       }
 
-      function chronosDisplayEventSummary(event) {
+      function chronosNormaliseDate(value) {
+        if (!value) {
+          return null;
+        }
+        if (value instanceof Date) {
+          return Number.isNaN(value.valueOf()) ? null : value;
+        }
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.valueOf())) {
+          return null;
+        }
+        return parsed;
+      }
+
+      function chronosNormaliseTeacherEntries(entries) {
+        const normalised = [];
+        const seen = new Set();
+        if (!Array.isArray(entries)) {
+          return normalised;
+        }
+        entries.forEach(function(entry) {
+          if (!entry || typeof entry !== 'object') {
+            return;
+          }
+          const name = entry.name ? String(entry.name).trim() : '';
+          const identifier = entry.id !== undefined && entry.id !== null ? entry.id : null;
+          if (!name && identifier === null) {
+            return;
+          }
+          const key = identifier !== null ? `id-${identifier}` : `name-${name.toLowerCase()}`;
+          if (seen.has(key)) {
+            return;
+          }
+          seen.add(key);
+          normalised.push({
+            id: identifier,
+            name: name,
+            email: entry.email || '',
+            phone: entry.phone || '',
+          });
+        });
+        return normalised;
+      }
+
+      function chronosSelectEventSegment(event, segments, eventElement, jsEvent) {
+        if (!Array.isArray(segments) || segments.length === 0) {
+          return null;
+        }
+        if (segments.length === 1) {
+          return segments[0];
+        }
+        const eventStart = chronosNormaliseDate(event.start);
+        const eventEnd = chronosNormaliseDate(event.end);
+        const normalisedSegments = segments.map(function(segment) {
+          return {
+            original: segment,
+            start: chronosNormaliseDate(segment && segment.start),
+            end: chronosNormaliseDate(segment && segment.end),
+          };
+        });
+        let fallback = normalisedSegments.find(function(segment) {
+          return segment.start instanceof Date && segment.end instanceof Date;
+        }) || normalisedSegments[0];
+        if (!eventElement || !jsEvent || !(eventStart instanceof Date) || !(eventEnd instanceof Date)) {
+          return fallback.original;
+        }
+        const rect = eventElement.getBoundingClientRect();
+        if (!rect || !Number.isFinite(rect.top) || rect.height <= 0) {
+          return fallback.original;
+        }
+        const offsetY = jsEvent.clientY - rect.top;
+        const ratio = Math.min(Math.max(offsetY / rect.height, 0), 0.999999);
+        const eventDuration = eventEnd.getTime() - eventStart.getTime();
+        if (!Number.isFinite(eventDuration) || eventDuration <= 0) {
+          return fallback.original;
+        }
+        const clickedTimeValue = eventStart.getTime() + ratio * eventDuration;
+        for (let index = 0; index < normalisedSegments.length; index += 1) {
+          const segment = normalisedSegments[index];
+          if (!(segment.start instanceof Date) || !(segment.end instanceof Date)) {
+            continue;
+          }
+          const startValue = segment.start.getTime();
+          const endValue = segment.end.getTime();
+          if (clickedTimeValue >= startValue && clickedTimeValue < endValue) {
+            return segment.original;
+          }
+        }
+        let closestFuture = null;
+        let minFutureDiff = Infinity;
+        normalisedSegments.forEach(function(segment) {
+          if (!(segment.start instanceof Date)) {
+            return;
+          }
+          const diff = segment.start.getTime() - clickedTimeValue;
+          if (diff > 0 && diff < minFutureDiff) {
+            minFutureDiff = diff;
+            closestFuture = segment;
+          }
+        });
+        if (closestFuture) {
+          return closestFuture.original;
+        }
+        let lastValid = null;
+        normalisedSegments.forEach(function(segment) {
+          if (segment.end instanceof Date) {
+            lastValid = segment;
+          }
+        });
+        return (lastValid || fallback).original;
+      }
+
+      function chronosDisplayEventSummary(event, eventElement, jsEvent) {
         const modal = document.getElementById('chronos-event-modal');
         if (!modal) {
           return;
         }
         const props = event.extendedProps || {};
+        const segments = Array.isArray(props.segments) ? props.segments : [];
+        const activeSegment = chronosSelectEventSegment(event, segments, eventElement, jsEvent);
         const title = modal.querySelector('[data-chronos-field="title"]');
         if (title) {
           title.textContent = event.title || props.course || 'Séance planifiée';
@@ -191,31 +308,14 @@
           scheduleField.style.whiteSpace = '';
         }
         let scheduleText = '';
-        const segments = Array.isArray(props.segments) ? props.segments : null;
-        if (segments && segments.length > 1) {
-          const firstSegment = segments[0];
-          const firstDateCandidate = firstSegment && firstSegment.start ? new Date(firstSegment.start) : event.start;
-          const firstDateIsValid = firstDateCandidate instanceof Date && !Number.isNaN(firstDateCandidate.valueOf());
-          const dayText = firstDateIsValid
-            ? chronosCapitalize(CHRONOS_EVENT_DATE_FORMATTER.format(firstDateCandidate))
-            : '';
-          const lines = segments.map(function(segment) {
-            const segStart = segment.start ? new Date(segment.start) : null;
-            const segEnd = segment.end ? new Date(segment.end) : null;
-            if (!segStart || !segEnd) {
-              return '';
-            }
-            if (Number.isNaN(segStart.valueOf()) || Number.isNaN(segEnd.valueOf())) {
-              return '';
-            }
-            const rangeText = `${CHRONOS_EVENT_TIME_FORMATTER.format(segStart)} → ${CHRONOS_EVENT_TIME_FORMATTER.format(segEnd)}`;
-            if (segment.room) {
-              return `${rangeText} • ${segment.room}`;
-            }
-            return rangeText;
-          }).filter(function(line) { return line.length > 0; });
-          if (lines.length > 0) {
-            scheduleText = dayText ? `${dayText}\n${lines.join('\n')}` : lines.join('\n');
+        if (activeSegment) {
+          const segmentStart = chronosNormaliseDate(activeSegment.start) || chronosNormaliseDate(event.start);
+          const segmentEnd = chronosNormaliseDate(activeSegment.end) || chronosNormaliseDate(event.end);
+          if (segmentStart instanceof Date && segmentEnd instanceof Date) {
+            const dayText = chronosCapitalize(CHRONOS_EVENT_DATE_FORMATTER.format(segmentStart));
+            const rangeText = `${CHRONOS_EVENT_TIME_FORMATTER.format(segmentStart)} → ${CHRONOS_EVENT_TIME_FORMATTER.format(segmentEnd)}`;
+            const rangeWithRoom = activeSegment.room ? `${rangeText} • ${activeSegment.room}` : rangeText;
+            scheduleText = `${dayText}\n${rangeWithRoom}`;
             if (scheduleField) {
               scheduleField.style.whiteSpace = 'pre-line';
             }
@@ -230,14 +330,33 @@
         const typeLabel = props.course_type_label || CHRONOS_COURSE_TYPE_LABELS[props.course_type] || '';
         chronosSetField(modal, 'course_type', typeLabel);
         const teacherField = modal.querySelector('[data-chronos-field="teacher"]');
-        const teacherEntries = Array.isArray(props.teachers) ? props.teachers : null;
+        const baseTeacherEntries = chronosNormaliseTeacherEntries(props.teachers);
+        const segmentTeachers = activeSegment && Array.isArray(activeSegment.teachers)
+          ? chronosNormaliseTeacherEntries(activeSegment.teachers)
+          : [];
+        const segmentTeacherIds = activeSegment && Array.isArray(activeSegment.teacher_ids)
+          ? activeSegment.teacher_ids.filter(function(identifier) {
+              return identifier !== null && identifier !== undefined;
+            })
+          : [];
+        let teacherEntries = segmentTeachers.slice();
+        if (!teacherEntries.length && segmentTeacherIds.length && baseTeacherEntries.length) {
+          teacherEntries = baseTeacherEntries.filter(function(entry) {
+            return segmentTeacherIds.indexOf(entry.id) !== -1;
+          });
+        }
+        if (!teacherEntries.length) {
+          teacherEntries = baseTeacherEntries;
+        }
         let teacherText = '';
-        if (teacherEntries && teacherEntries.length > 0) {
+        if (teacherEntries.length > 0) {
           const teacherLines = teacherEntries.map(function(entry) {
             if (!entry || !entry.name) {
               return '';
             }
-            const contact = [entry.email, entry.phone].filter(Boolean).join(' • ');
+            const contact = [entry.email, entry.phone]
+              .filter(function(value) { return value && String(value).trim().length > 0; })
+              .join(' • ');
             return contact ? `${entry.name} (${contact})` : entry.name;
           }).filter(function(line) { return line.length > 0; });
           teacherText = teacherLines.join('\n');
@@ -245,7 +364,9 @@
             teacherField.style.whiteSpace = teacherText.indexOf('\n') !== -1 ? 'pre-line' : '';
           }
         } else {
-          const teacherContact = [props.teacher_email, props.teacher_phone].filter(Boolean).join(' • ');
+          const teacherContact = [props.teacher_email, props.teacher_phone]
+            .filter(function(value) { return value && String(value).trim().length > 0; })
+            .join(' • ');
           teacherText = props.teacher || '';
           if (teacherContact) {
             teacherText = teacherText ? `${teacherText} (${teacherContact})` : teacherContact;
@@ -265,7 +386,8 @@
         });
         const subgroupText = props.subgroup_name || (props.subgroup ? `Groupe ${props.subgroup}` : '');
         chronosSetField(modal, 'subgroup', subgroupText);
-        chronosSetField(modal, 'room', props.room || '');
+        const roomLabel = activeSegment && activeSegment.room ? activeSegment.room : (props.room || '');
+        chronosSetField(modal, 'room', roomLabel);
         let computersText = '';
         if (props.requires_computers) {
           const normaliseCount = (value) => {
@@ -407,7 +529,7 @@
             if (info.jsEvent) {
               info.jsEvent.preventDefault();
             }
-            chronosDisplayEventSummary(info.event);
+            chronosDisplayEventSummary(info.event, info.el, info.jsEvent);
           },
           eventDidMount: function(info) {
             if (!info.el || info.el.dataset.chronosContextMenuBound === '1') {

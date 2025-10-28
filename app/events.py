@@ -43,25 +43,61 @@ def _build_event_from_group(group: List[Session]) -> dict[str, object]:
     first = group[0]
     event = first.as_event()
     ordered_rooms: list[str] = []
-    segments: list[dict[str, str]] = []
+    segments: list[dict[str, object]] = []
     extended = event.setdefault("extendedProps", {})
     required_softwares = set(extended.get("course_softwares") or [])
     available_softwares = set(extended.get("room_softwares") or [])
     missing_softwares = set(extended.get("missing_softwares") or [])
     room_computer_counts: list[int | None] = []
     class_names: set[str] = set()
+    teacher_entries: dict[tuple[object, object], dict[str, object]] = {}
+
+    def record_teacher_entries(entries: Iterable[dict[str, object]] | None) -> None:
+        if not entries:
+            return
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            identifier = entry.get("id")
+            key: tuple[object, object]
+            if identifier is not None:
+                key = ("id", identifier)
+            else:
+                name = entry.get("name")
+                if not name:
+                    continue
+                key = ("name", name)
+            teacher_entries[key] = {
+                "id": entry.get("id"),
+                "name": entry.get("name"),
+                "email": entry.get("email"),
+                "phone": entry.get("phone"),
+            }
+
+    record_teacher_entries(extended.get("teachers"))
     for session in group:
-        room_name = session.room.name
-        if room_name not in ordered_rooms:
-            ordered_rooms.append(room_name)
-        segments.append(
-            {
+        session_event = session.as_event()
+        session_props = session_event.get("extendedProps", {})
+        segment_payloads = session_props.get("segments") or []
+        segment_template: dict[str, object] | None = None
+        if segment_payloads:
+            first_segment = segment_payloads[0]
+            if isinstance(first_segment, dict):
+                segment_template = {
+                    key: first_segment.get(key)
+                    for key in first_segment.keys()
+                }
+        if segment_template is None:
+            segment_template = {
                 "id": str(session.id),
                 "start": session.start_time.isoformat(),
                 "end": session.end_time.isoformat(),
-                "room": room_name,
+                "room": session.room.name,
             }
-        )
+        room_name = session.room.name
+        if room_name not in ordered_rooms:
+            ordered_rooms.append(room_name)
+        segments.append(segment_template)
         required_softwares.update(software.name for software in session.course.softwares)
         available_softwares.update(software.name for software in session.room.softwares)
         room_software_ids = {software.id for software in session.room.softwares}
@@ -72,6 +108,7 @@ def _build_event_from_group(group: List[Session]) -> dict[str, object]:
         )
         room_computer_counts.append(session.room.computers)
         class_names.update(session.attendee_names())
+        record_teacher_entries(session_props.get("teachers"))
     event["start"] = group[0].start_time.isoformat()
     event["end"] = group[-1].end_time.isoformat()
     room_label = ", ".join(ordered_rooms) or first.room.name
@@ -81,6 +118,8 @@ def _build_event_from_group(group: List[Session]) -> dict[str, object]:
     extended["segments"] = segments
     extended["segment_ids"] = [segment["id"] for segment in segments]
     extended["is_grouped"] = len(group) > 1
+    if teacher_entries:
+        extended["teachers"] = list(teacher_entries.values())
     extended["course_softwares"] = sorted(required_softwares)
     extended["room_softwares"] = sorted(available_softwares)
     extended["missing_softwares"] = sorted(missing_softwares)

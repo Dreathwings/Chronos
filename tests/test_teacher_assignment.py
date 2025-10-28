@@ -26,6 +26,7 @@ from app.models import (
     best_teacher_duos,
     recommend_teacher_duos_for_classes,
 )
+from app.events import sessions_to_grouped_events
 from sqlalchemy import text
 from app.routes import _validate_session_constraints
 from app.scheduler import (
@@ -114,6 +115,56 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         teachers = event["extendedProps"]["teachers"]
         self.assertEqual({entry["id"] for entry in teachers}, {teacher_b.id})
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
+
+    def test_grouped_event_segments_retain_teacher_information(self) -> None:
+        course, _, class_group = self._create_tp_course()
+        teacher = Teacher(name="Alice")
+        room = Room(name="B202", capacity=24)
+        db.session.add_all([teacher, room])
+        db.session.commit()
+
+        course.teachers.append(teacher)
+        db.session.commit()
+
+        first_start = datetime(2024, 1, 10, 8, 0, 0)
+        first_end = datetime(2024, 1, 10, 10, 0, 0)
+        second_start = datetime(2024, 1, 10, 10, 0, 0)
+        second_end = datetime(2024, 1, 10, 12, 0, 0)
+
+        session_a = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            subgroup_label="A",
+            start_time=first_start,
+            end_time=first_end,
+        )
+        session_a.attendees = [class_group]
+        session_b = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            subgroup_label="A",
+            start_time=second_start,
+            end_time=second_end,
+        )
+        session_b.attendees = [class_group]
+        db.session.add_all([session_a, session_b])
+        db.session.commit()
+
+        events = sessions_to_grouped_events([session_a, session_b])
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        props = event["extendedProps"]
+        segments = props["segments"]
+        self.assertEqual(len(segments), 2)
+        for segment in segments:
+            self.assertEqual(segment["teacher_ids"], [teacher.id])
+            self.assertEqual([entry["id"] for entry in segment["teachers"]], [teacher.id])
+        teacher_entries = props["teachers"]
+        self.assertEqual({entry["id"] for entry in teacher_entries}, {teacher.id})
 
     def test_best_teacher_duos_prefers_shared_availability(self) -> None:
         teacher_a = Teacher(name="Alice")
