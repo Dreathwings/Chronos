@@ -1,4 +1,3 @@
-import click
 from collections import defaultdict
 from typing import Optional
 from flask import Flask, current_app
@@ -15,46 +14,6 @@ from config import Config, _normalise_prefix
 
 db = SQLAlchemy()
 migrate = Migrate()
-
-
-def _realign_tp_session_teachers() -> int:
-    """Realign TP sessions with the teacher assigned to their subgroup."""
-
-    from .models import Course, Session
-
-    updated = 0
-    sessions = (
-        Session.query.options(
-            selectinload(Session.course).selectinload(Course.class_links),
-            selectinload(Session.class_group),
-            selectinload(Session.teacher),
-        )
-        .filter(Session.subgroup_label.isnot(None))
-        .all()
-    )
-    for session in sessions:
-        course = session.course
-        class_group = session.class_group
-        if course is None or class_group is None:
-            continue
-        link = next(
-            (
-                link
-                for link in course.class_links
-                if link.class_group_id == class_group.id
-            ),
-            None,
-        )
-        if link is None or link.group_count != 2:
-            continue
-        assigned = link.teacher_for_label(session.subgroup_label)
-        if assigned is None or session.teacher_id == assigned.id:
-            continue
-        session.teacher = assigned
-        updated += 1
-    if updated:
-        db.session.commit()
-    return updated
 
 
 def create_app(config_class: type[Config] = Config) -> Flask:
@@ -93,18 +52,11 @@ def create_app(config_class: type[Config] = Config) -> Flask:
         _ensure_session_subgroup_uniqueness_constraint()
         _ensure_course_class_group_count_column()
         _ensure_course_class_subgroup_name_columns()
-        _ensure_course_class_teacher_columns()
         _ensure_course_type_column()
         _ensure_course_semester_column()
         _ensure_course_course_name_column()
         _ensure_student_profile_columns()
         _ensure_session_attendance_backfill()
-        updated_sessions = _realign_tp_session_teachers()
-        if updated_sessions:
-            app.logger.info(
-                "Realigned %s TP session(s) with their subgroup teacher.",
-                updated_sessions,
-            )
 
     from .routes import bp as main_bp
 
@@ -118,13 +70,6 @@ def create_app(config_class: type[Config] = Config) -> Flask:
 
         seed_data()
         print("Database seeded with sample data.")
-
-    @app.cli.command("clean-session-teachers")
-    @with_appcontext
-    def clean_session_teachers() -> None:
-        """Realign TP sessions with their subgroup teachers."""
-        updated = _realign_tp_session_teachers()
-        click.echo(f"{updated} séance(s) corrigée(s).")
 
     return app
 
@@ -447,31 +392,6 @@ def _rebuild_sqlite_session_table(engine) -> None:
             raise
         finally:
             connection.execute(text("PRAGMA foreign_keys=ON"))
-
-def _ensure_course_class_teacher_columns() -> None:
-    engine = db.engine
-    inspector = inspect(engine)
-    if "course_class" not in inspector.get_table_names():
-        return
-
-    existing_columns = {column["name"] for column in inspector.get_columns("course_class")}
-    statements: list[str] = []
-    if "teacher_a_id" not in existing_columns:
-        statements.append("ALTER TABLE course_class ADD COLUMN teacher_a_id INTEGER")
-    if "teacher_b_id" not in existing_columns:
-        statements.append("ALTER TABLE course_class ADD COLUMN teacher_b_id INTEGER")
-
-    if not statements:
-        return
-
-    try:
-        with engine.begin() as connection:
-            for statement in statements:
-                connection.execute(text(statement))
-    except SQLAlchemyError as exc:  # pragma: no cover
-        current_app.logger.warning("Unable to add teacher columns to course_class: %s", exc)
-
-
 def _ensure_course_class_subgroup_name_columns() -> None:
     engine = db.engine
     inspector = inspect(engine)

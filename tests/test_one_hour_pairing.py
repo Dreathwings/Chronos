@@ -55,7 +55,6 @@ class OneHourPlacementTestCase(DatabaseTestCase):
             semester="S1",
         )
         link = CourseClassLink(class_group=self.class_group)
-        link.teacher_a = self.teacher
         course.class_links.append(link)
         course.teachers.append(self.teacher)
         db.session.add(course)
@@ -175,9 +174,7 @@ class OneHourPlacementTestCase(DatabaseTestCase):
             semester="S1",
         )
         link_primary = CourseClassLink(class_group=self.class_group)
-        link_primary.teacher_a = self.teacher
         link_secondary = CourseClassLink(class_group=second_group)
-        link_secondary.teacher_a = self.teacher
         course.class_links.extend([link_primary, link_secondary])
         course.teachers.append(self.teacher)
         db.session.add(course)

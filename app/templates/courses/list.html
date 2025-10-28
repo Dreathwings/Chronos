@@ -178,24 +178,6 @@
                       <span class="badge bg-info text-dark ms-1">Demi-groupes</span>
                       {% endif %}
                       <ul class="list-unstyled ms-3 mb-0 small text-muted">
-                        {% if course.course_type == 'SAE' %}
-                        <li>
-                          Enseignant 1
-                          {% if link.teacher_a %}
-                          — {{ link.teacher_a.name }}
-                          {% else %}
-                          — Aucun enseignant
-                          {% endif %}
-                        </li>
-                        <li>
-                          Enseignant 2
-                          {% if link.teacher_b %}
-                          — {{ link.teacher_b.name }}
-                          {% else %}
-                          — Aucun enseignant
-                          {% endif %}
-                        </li>
-                        {% else %}
                         {% for label, teacher in link.teacher_labels() %}
                         <li>
                           {% if label %}
@@ -210,7 +192,6 @@
                           {% endif %}
                         </li>
                         {% endfor %}
-                        {% endif %}
                       </ul>
                     </div>
                     {% endfor %}

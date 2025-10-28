@@ -1245,15 +1245,11 @@ class CourseClassLink(db.Model):
     course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), primary_key=True)
     class_group_id: Mapped[int] = mapped_column(ForeignKey("class_group.id"), primary_key=True)
     group_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    teacher_a_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teacher.id"))
-    teacher_b_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teacher.id"))
     subgroup_a_course_name_id: Mapped[Optional[int]] = mapped_column(ForeignKey("course_name.id"))
     subgroup_b_course_name_id: Mapped[Optional[int]] = mapped_column(ForeignKey("course_name.id"))
 
     course: Mapped[Course] = relationship(back_populates="class_links")
     class_group: Mapped[ClassGroup] = relationship(back_populates="course_links")
-    teacher_a: Mapped[Optional[Teacher]] = relationship("Teacher", foreign_keys=[teacher_a_id])
-    teacher_b: Mapped[Optional[Teacher]] = relationship("Teacher", foreign_keys=[teacher_b_id])
     subgroup_a_course_name: Mapped[Optional[CourseName]] = relationship(
         "CourseName",
         foreign_keys=[subgroup_a_course_name_id],
@@ -1312,69 +1308,43 @@ class CourseClassLink(db.Model):
         return bool(self.subgroup_a_course_name and self.subgroup_b_course_name)
 
     def assigned_teachers(self) -> list[Teacher]:
-        teachers: list[Teacher] = []
-        for teacher in (self.teacher_a, self.teacher_b):
-            if teacher is None:
-                continue
-            if teacher not in teachers:
-                teachers.append(teacher)
-        return teachers
+        course = getattr(self, "course", None)
+        if course is None:
+            return []
+        return [teacher for teacher in course.teachers]
 
     def preferred_teachers(self, subgroup_label: str | None = None) -> list[Teacher]:
-        teachers = self.assigned_teachers()
         course = getattr(self, "course", None)
-        course_type = getattr(course, "course_type", None)
-        if course_type == "SAE":
-            return teachers
-        if self.group_count == 2:
-            label = (subgroup_label or "").strip().upper()
-            ordered: list[Teacher] = []
-            if label == "A":
-                if self.teacher_a:
-                    ordered.append(self.teacher_a)
-                if not ordered and self.teacher_b:
-                    ordered.append(self.teacher_b)
-            elif label == "B":
-                if self.teacher_b:
-                    ordered.append(self.teacher_b)
-                if not ordered and self.teacher_a:
-                    ordered.append(self.teacher_a)
-            else:
-                if self.teacher_a:
-                    ordered.append(self.teacher_a)
-                if self.teacher_b and self.teacher_b not in ordered:
-                    ordered.append(self.teacher_b)
-            if (
-                label in {"A", "B"}
-                and self.teacher_a
-                and self.teacher_b
-                and self.teacher_a.id != self.teacher_b.id
-            ):
-                return ordered[:1]
-            return ordered
-        if teachers:
-            return teachers[:1]
-        return []
+        if course is None:
+            return []
+        if course.course_type == "SAE":
+            return list(course.teachers)
+        teachers = list(course.teachers)
+        if not teachers:
+            return []
+        return teachers[:1]
 
     def teacher_for_label(self, subgroup_label: str | None) -> Optional[Teacher]:
-        teachers = self.preferred_teachers(subgroup_label)
-        return teachers[0] if teachers else None
+        preferred = self.preferred_teachers(subgroup_label)
+        return preferred[0] if preferred else None
 
     def teacher_labels(self) -> list[tuple[str, Optional[Teacher]]]:
         course = getattr(self, "course", None)
         course_type = getattr(course, "course_type", None)
         if course_type == "SAE":
+            teachers = list(course.teachers) if course else []
             return [
-                ("Enseignant 1", self.teacher_a),
-                ("Enseignant 2", self.teacher_b),
+                ("Enseignant 1", teachers[0] if len(teachers) > 0 else None),
+                ("Enseignant 2", teachers[1] if len(teachers) > 1 else None),
             ]
-        teacher = self.teacher_a or self.teacher_b
+        teachers = list(course.teachers) if course else []
+        primary = teachers[0] if teachers else None
         if self.group_count == 2:
             return [
-                (self.subgroup_name_for("A"), self.teacher_for_label("A")),
-                (self.subgroup_name_for("B"), self.teacher_for_label("B")),
+                (self.subgroup_name_for("A"), primary),
+                (self.subgroup_name_for("B"), primary),
             ]
-        return [("", teacher)]
+        return [("", primary)]
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return (

@@ -455,15 +455,7 @@
             <select class="form-select" name="class_group_choice">
               {% if course.is_cm %}
                 {% set class_names = course.class_links | map(attribute='class_group.name') | join(', ') %}
-                {% set cm_teacher = None %}
-                {% for link in course.class_links %}
-                  {% if cm_teacher is none and (link.teacher_a or link.teacher_b) %}
-                    {% set cm_teacher = link.teacher_a or link.teacher_b %}
-                  {% endif %}
-                {% endfor %}
-                {% if cm_teacher is none and course.teachers %}
-                  {% set cm_teacher = course.teachers[0] %}
-                {% endif %}
+                {% set cm_teacher = course.teachers[0] if course.teachers else None %}
                 <option value="ALL">
                   Toutes les classes
                   {% if class_names %}— {{ class_names }}{% endif %}

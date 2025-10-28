@@ -4,7 +4,9 @@ from datetime import date, datetime, time, timedelta
 from itertools import combinations
 from unittest.mock import MagicMock, patch
 
-from app import (create_app, db, _realign_tp_session_teachers,
+from app import (
+    create_app,
+    db,
     _ensure_session_subgroup_uniqueness_constraint,
 )
 from config import TestConfig
@@ -64,96 +66,20 @@ class DatabaseTestCase(unittest.TestCase):
 
 
 class TeacherAssignmentTestCase(DatabaseTestCase):
-    def test_preferred_teachers_follow_subgroup_assignment(self) -> None:
+    def test_preferred_teachers_use_course_teachers(self) -> None:
         course, link, _ = self._create_tp_course()
         teacher_a = Teacher(name="Alice")
         teacher_b = Teacher(name="Bruno")
         db.session.add_all([teacher_a, teacher_b])
         db.session.commit()
 
-        link.teacher_a = teacher_a
-        link.teacher_b = teacher_b
+        course.teachers.extend([teacher_a, teacher_b])
         db.session.commit()
 
         self.assertEqual(link.teacher_for_label("A"), teacher_a)
-        self.assertEqual(link.teacher_for_label("B"), teacher_b)
+        self.assertEqual(link.teacher_for_label("B"), teacher_a)
         self.assertEqual([t.id for t in link.preferred_teachers("A")], [teacher_a.id])
-        self.assertEqual([t.id for t in link.preferred_teachers("B")], [teacher_b.id])
-
-        # If a subgroup lacks a dedicated teacher we gracefully fall back to the available one.
-        link.teacher_b = None
-        db.session.commit()
         self.assertEqual([t.id for t in link.preferred_teachers("B")], [teacher_a.id])
-
-    def test_cleanup_command_realigns_existing_sessions(self) -> None:
-        course, link, class_group = self._create_tp_course()
-        teacher_a = Teacher(name="Alice")
-        teacher_b = Teacher(name="Bruno")
-        room = Room(name="B201", capacity=24)
-        db.session.add_all([teacher_a, teacher_b, room])
-        db.session.commit()
-
-        link.teacher_a = teacher_a
-        link.teacher_b = teacher_b
-        db.session.commit()
-
-        start = datetime(2024, 1, 8, 8, 0, 0)
-        end = datetime(2024, 1, 8, 10, 0, 0)
-        session = Session(
-            course=course,
-            teacher=teacher_a,
-            room=room,
-            class_group=class_group,
-            subgroup_label="B",
-            start_time=start,
-            end_time=end,
-        )
-        session.attendees = [class_group]
-        db.session.add(session)
-        db.session.commit()
-
-        runner = self.app.test_cli_runner()
-        result = runner.invoke(args=["clean-session-teachers"])
-        self.assertEqual(result.exit_code, 0)
-        self.assertIn("1 séance(s) corrigée(s).", result.output)
-
-        updated = db.session.get(Session, session.id)
-        self.assertIsNotNone(updated)
-        self.assertEqual(updated.teacher_id, teacher_b.id)
-
-    def test_realign_helper_updates_sessions(self) -> None:
-        course, link, class_group = self._create_tp_course()
-        teacher_a = Teacher(name="Alice")
-        teacher_b = Teacher(name="Bruno")
-        room = Room(name="B201", capacity=24)
-        db.session.add_all([teacher_a, teacher_b, room])
-        db.session.commit()
-
-        link.teacher_a = teacher_a
-        link.teacher_b = teacher_b
-        db.session.commit()
-
-        start = datetime(2024, 1, 9, 8, 0, 0)
-        end = datetime(2024, 1, 9, 10, 0, 0)
-        session = Session(
-            course=course,
-            teacher=teacher_a,
-            room=room,
-            class_group=class_group,
-            subgroup_label="B",
-            start_time=start,
-            end_time=end,
-        )
-        session.attendees = [class_group]
-        db.session.add(session)
-        db.session.commit()
-
-        updated = _realign_tp_session_teachers()
-        self.assertEqual(updated, 1)
-
-        refreshed = db.session.get(Session, session.id)
-        self.assertIsNotNone(refreshed)
-        self.assertEqual(refreshed.teacher_id, teacher_b.id)
 
     def test_session_event_lists_only_relevant_subgroup_teacher(self) -> None:
         course, link, class_group = self._create_tp_course()
@@ -163,8 +89,7 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         db.session.add_all([teacher_a, teacher_b, room])
         db.session.commit()
 
-        link.teacher_a = teacher_a
-        link.teacher_b = teacher_b
+        course.teachers.extend([teacher_a, teacher_b])
         db.session.commit()
 
         start = datetime(2024, 1, 10, 8, 0, 0)
@@ -184,7 +109,10 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
 
         event = session.as_event()
         teachers = event["extendedProps"]["teachers"]
-        self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
+        self.assertEqual(
+            {entry["id"] for entry in teachers},
+            {teacher_a.id, teacher_b.id},
+        )
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
 
     def test_best_teacher_duos_prefers_shared_availability(self) -> None:
@@ -770,8 +698,7 @@ class SubgroupParallelismTestCase(DatabaseTestCase):
         db.session.add_all([teacher_a, teacher_b, room_a, room_b])
         db.session.commit()
 
-        link.teacher_a = teacher_a
-        link.teacher_b = teacher_b
+        course.teachers.extend([teacher_a, teacher_b])
         db.session.commit()
 
         _ensure_session_subgroup_uniqueness_constraint()
@@ -1505,7 +1432,6 @@ class ScheduleGenerationFailureTestCase(DatabaseTestCase):
         db.session.add(availability)
         db.session.commit()
 
-        link.teacher_a = teacher
         course.teachers.append(teacher)
         db.session.commit()
 

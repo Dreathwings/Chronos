@@ -486,25 +486,12 @@ def _sync_course_class_links(
         group_count = 2 if course.is_tp else 1
         link = current_links.get(class_id)
         preserved = existing_links.get(class_id)
-        preserved_teacher_a = preserved.teacher_a if preserved else None
-        preserved_teacher_b = preserved.teacher_b if preserved else None
         preserved_name_a = preserved.subgroup_a_course_name if preserved else None
         preserved_name_b = preserved.subgroup_b_course_name if preserved else None
         if link is None:
-            if course.is_tp:
-                base_teacher = preserved_teacher_a or preserved_teacher_b
-                teacher_b = base_teacher if base_teacher else None
-            elif course.is_sae:
-                base_teacher = preserved_teacher_a
-                teacher_b = preserved_teacher_b
-            else:
-                base_teacher = preserved_teacher_a or preserved_teacher_b
-                teacher_b = None
             link = CourseClassLink(
                 class_group=class_group,
                 group_count=group_count,
-                teacher_a=base_teacher,
-                teacher_b=teacher_b,
                 subgroup_a_course_name=preserved_name_a,
                 subgroup_b_course_name=preserved_name_b,
             )
@@ -512,19 +499,11 @@ def _sync_course_class_links(
             current_links[class_id] = link
 
         link.group_count = group_count
-        if course.is_tp:
-            base_teacher = link.teacher_a or link.teacher_b
-            if base_teacher and link.teacher_b is None:
-                link.teacher_b = base_teacher
         if link.subgroup_a_course_name is None:
             link.subgroup_a_course_name = preserved_name_a
             if link.subgroup_b_course_name is None:
                 link.subgroup_b_course_name = preserved_name_b
-        elif course.is_sae:
-            # Deux enseignants obligatoires sont gérés lors de la mise à jour dédiée.
-            pass
         else:
-            link.teacher_b = None
             link.subgroup_a_course_name = None
             link.subgroup_b_course_name = None
         db.session.flush([link])
@@ -710,21 +689,6 @@ def _class_unavailability_backgrounds(class_group: ClassGroup) -> list[dict[str,
             }
         )
     return backgrounds
-
-
-def _parse_teacher_selection(
-    raw_value: str | None, *, allowed_ids: set[int] | None = None
-) -> Teacher | None:
-    if not raw_value:
-        return None
-    try:
-        teacher_id = int(raw_value)
-    except (TypeError, ValueError):
-        return None
-    if allowed_ids is not None and teacher_id not in allowed_ids:
-        return None
-    return Teacher.query.get(teacher_id)
-
 def _parse_class_group_choice(raw_value: str | None) -> tuple[int, str | None] | None:
     if not raw_value:
         return None
@@ -860,9 +824,7 @@ def dashboard():
         course_types[course.id] = course.course_type
         if course.is_cm:
             class_names = ", ".join(link.class_group.name for link in links)
-            teacher = next((link.teacher_a or link.teacher_b for link in links if link.teacher_a or link.teacher_b), None)
-            if teacher is None and course.teachers:
-                teacher = course.teachers[0]
+            teacher = course.teachers[0] if course.teachers else None
             if teacher:
                 option_label = f"Toutes les classes ({teacher.name})"
             else:
@@ -880,19 +842,12 @@ def dashboard():
                         if subgroup_label
                         else f"{link.class_group.name} — classe entière"
                     )
-                    if course.is_sae:
-                        assigned = link.assigned_teachers()
-                        if assigned:
-                            teacher_names = " & ".join(teacher.name for teacher in assigned)
-                            option_label = f"{base_label} ({teacher_names})"
-                        else:
-                            option_label = f"{base_label} (Aucun enseignant)"
+                    preferred = link.preferred_teachers(subgroup_label)
+                    if preferred:
+                        teacher_names = " & ".join(teacher.name for teacher in preferred)
+                        option_label = f"{base_label} ({teacher_names})"
                     else:
-                        teacher = link.teacher_for_label(subgroup_label)
-                        if teacher:
-                            option_label = f"{base_label} ({teacher.name})"
-                        else:
-                            option_label = f"{base_label} (Aucun enseignant)"
+                        option_label = f"{base_label} (Aucun enseignant)"
                     options.append({"value": option_value, "label": option_label})
                     if subgroup_label:
                         has_subgroups = True
@@ -1722,8 +1677,6 @@ def class_detail(class_id: int):
         Course.query.order_by(COURSE_TYPE_ORDER_EXPRESSION, Course.name.asc()).all()
     )
     assignable_courses = [course for course in courses if class_group not in course.classes]
-    teachers = Teacher.query.order_by(Teacher.name).all()
-
     if request.method == "POST":
         form_name = request.form.get("form")
         if form_name == "update":
@@ -1745,13 +1698,10 @@ def class_detail(class_id: int):
             course = Course.query.get_or_404(course_id)
             if class_group not in course.classes:
                 group_count = 2 if course.is_tp else 1
-                teacher = _parse_teacher_selection(request.form.get("teacher"))
                 course.class_links.append(
                     CourseClassLink(
                         class_group=class_group,
                         group_count=group_count,
-                        teacher_a=teacher,
-                        teacher_b=teacher if group_count == 2 else None,
                     )
                 )
                 db.session.commit()
@@ -1810,7 +1760,6 @@ def class_detail(class_id: int):
         class_group=class_group,
         courses=courses,
         assignable_courses=assignable_courses,
-        teachers=teachers,
         events_json=json.dumps(events, ensure_ascii=False),
         unavailability_backgrounds_json=json.dumps(unavailability_backgrounds, ensure_ascii=False),
     )

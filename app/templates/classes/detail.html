@@ -120,18 +120,6 @@
             <div class="form-text">Tous les cours disponibles sont déjà associés.</div>
             {% endif %}
           </div>
-          {% if teachers %}
-          <div>
-            <label class="form-label text-muted mb-1 small">Enseignant</label>
-            <select class="form-select" name="teacher" {% if not assignable_courses %}disabled{% endif %}>
-              <option value="">— Non défini —</option>
-              {% for teacher in teachers %}
-              <option value="{{ teacher.id }}">{{ teacher.name }}</option>
-              {% endfor %}
-            </select>
-            <div class="form-text">L'affectation détaillée se fait depuis la fiche du cours (groupes, double enseignants...).</div>
-          </div>
-          {% endif %}
           <button type="submit" class="btn btn-outline-primary" {% if not assignable_courses %}disabled{% endif %}>Associer</button>
         </form>
       </div>
@@ -145,34 +133,8 @@
           <form method="post" class="d-flex justify-content-between align-items-center">
             <div>
               <span class="fw-semibold">{{ link.course.name }}</span>
-              {% if link.course.course_type == 'TP' %}
-              <span class="badge bg-info text-dark ms-1">Travaux pratiques</span>
-              {% elif link.course.course_type == 'SAE' %}
-              <span class="badge bg-warning text-dark ms-1">SAE</span>
-              {% elif link.course.course_type == 'CM' %}
-              <span class="badge bg-secondary ms-1">Cours magistral</span>
-              {% else %}
-              <span class="badge bg-secondary ms-1">Classe entière</span>
-              {% endif %}
+              <span class="badge bg-secondary ms-1">{{ link.course.course_type }}</span>
               <ul class="list-unstyled ms-3 mb-0 small text-muted">
-                {% if link.course.course_type == 'SAE' %}
-                <li>
-                  Enseignant 1
-                  {% if link.teacher_a %}
-                  — {{ link.teacher_a.name }}
-                  {% else %}
-                  — Aucun enseignant
-                  {% endif %}
-                </li>
-                <li>
-                  Enseignant 2
-                  {% if link.teacher_b %}
-                  — {{ link.teacher_b.name }}
-                  {% else %}
-                  — Aucun enseignant
-                  {% endif %}
-                </li>
-                {% else %}
                 {% for label, teacher in link.teacher_labels() %}
                 <li>
                   {% if label %}
@@ -187,7 +149,6 @@
                   {% endif %}
                 </li>
                 {% endfor %}
-                {% endif %}
               </ul>
             </div>
             <div>
