@@ -30,6 +30,7 @@ from .models import (
     Course,
     CourseAllowedWeek,
     CourseClassLink,
+    CourseTeacherAssignment,
     CourseScheduleLog,
     CourseName,
     Equipment,
@@ -40,14 +41,12 @@ from .models import (
     Teacher,
     TeacherAvailability,
     SEMESTER_CHOICES,
-    recommend_teacher_duos_for_classes,
     semester_date_window,
 )
 from .progress import progress_registry, ScheduleProgressTracker
 from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
-    fits_in_windows,
     format_class_label,
     generate_schedule,
     has_weekly_course_conflict,
@@ -426,6 +425,34 @@ def _sync_simple_relationship(collection: MutableSequence, desired: Iterable[obj
             existing_ids.add(entity_id)
 
 
+def _sync_course_teacher_hours(course: Course, teacher_hours: dict[int, int]) -> None:
+    existing = {
+        assignment.teacher_id: assignment
+        for assignment in list(course.teacher_assignments)
+        if assignment.teacher_id is not None
+    }
+    to_keep: set[int] = set()
+    for teacher_id, hours in teacher_hours.items():
+        if hours <= 0:
+            continue
+        teacher = Teacher.query.get(teacher_id)
+        if teacher is None:
+            continue
+        assignment = existing.get(teacher_id)
+        if assignment is None:
+            assignment = CourseTeacherAssignment(teacher=teacher, planned_hours=hours)
+            course.teacher_assignments.append(assignment)
+        else:
+            assignment.planned_hours = hours
+        to_keep.add(teacher_id)
+    for assignment in list(course.teacher_assignments):
+        if assignment.teacher_id is None:
+            continue
+        if assignment.teacher_id not in to_keep:
+            course.teacher_assignments.remove(assignment)
+            db.session.flush()
+
+
 def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> None:
     closing_spans = _closing_period_spans()
     desired: list[date] = []
@@ -710,9 +737,7 @@ def _validate_session_constraints(
         return "Les séances doivent être planifiées du lundi au vendredi."
     if ClosingPeriod.overlaps(start_dt.date(), end_dt.date()):
         return "L'établissement est fermé sur la période sélectionnée."
-    if not fits_in_windows(start_dt.time(), end_dt.time()):
-        return "Le créneau choisi dépasse les fenêtres horaires autorisées."
-    if not teacher.is_available_during(start_dt, end_dt):
+    if teacher.availabilities and not teacher.is_available_during(start_dt, end_dt):
         return "L'enseignant n'est pas disponible sur ce créneau."
     if _has_conflict(teacher.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "L'enseignant a déjà une séance sur ce créneau."
@@ -1356,6 +1381,52 @@ def teacher_detail(teacher_id: int):
 
     backgrounds = _teacher_unavailability_backgrounds(teacher)
 
+    course_hours_map: dict[int, int] = {}
+    for session in teacher.sessions:
+        course_id = session.course_id
+        if course_id is None:
+            continue
+        course_hours_map[course_id] = course_hours_map.get(course_id, 0) + session.duration_hours
+
+    course_summaries: list[dict[str, object]] = []
+    seen_course_ids: set[int] = set()
+    for assignment in sorted(
+        teacher.course_assignments,
+        key=lambda entry: (entry.course.name if entry.course else ""),
+    ):
+        course = assignment.course
+        if course is None or course.id is None:
+            continue
+        scheduled = course_hours_map.get(course.id, 0)
+        course_summaries.append(
+            {
+                "course": course,
+                "planned": assignment.planned_hours,
+                "scheduled": scheduled,
+                "remaining": max(assignment.planned_hours - scheduled, 0),
+            }
+        )
+        seen_course_ids.add(course.id)
+    for session in teacher.sessions:
+        course = session.course
+        if course is None or course.id is None:
+            continue
+        if course.id in seen_course_ids:
+            continue
+        scheduled = course_hours_map.get(course.id, 0)
+        course_summaries.append(
+            {
+                "course": course,
+                "planned": 0,
+                "scheduled": scheduled,
+                "remaining": 0,
+            }
+        )
+        seen_course_ids.add(course.id)
+
+    total_planned = sum(entry["planned"] for entry in course_summaries)
+    total_scheduled = sum(entry["scheduled"] for entry in course_summaries)
+
     return render_template(
         "teachers/detail.html",
         teacher=teacher,
@@ -1368,6 +1439,9 @@ def teacher_detail(teacher_id: int):
         unavailability_ranges=ranges_as_payload(
             parse_unavailability_ranges(teacher.unavailable_dates)
         ),
+        course_summaries=course_summaries,
+        total_planned_hours=total_planned,
+        total_scheduled_hours=total_scheduled,
     )
 
 
@@ -2262,6 +2336,8 @@ def course_detail(course_id: int):
                 base_label,
                 course.semester,
             )
+            raw_color = (request.form.get("color") or "").strip()
+            course.color = raw_color if raw_color else None
             course.requires_computers = bool(request.form.get("requires_computers"))
             course.computers_required = _parse_non_negative_int(
                 request.form.get("computers_required"), course.computers_required
@@ -2281,13 +2357,16 @@ def course_detail(course_id: int):
                 if software is not None
             ]
             class_ids = {int(cid) for cid in request.form.getlist("classes")}
-            selected_teachers = [
-                teacher
-                for teacher in (
-                    Teacher.query.get(int(tid)) for tid in request.form.getlist("teachers")
-                )
-                if teacher is not None
-            ]
+            teacher_hours: dict[int, int] = {}
+            for teacher in teachers:
+                field_name = f"teacher_hours_{teacher.id}"
+                raw_hours = request.form.get(field_name)
+                if raw_hours is None:
+                    continue
+                hours = _parse_non_negative_int(raw_hours, 0)
+                if hours <= 0:
+                    continue
+                teacher_hours[teacher.id] = hours
             selected_weeks = _parse_week_selection(
                 request.form.getlist("allowed_week_starts")
             )
@@ -2295,7 +2374,7 @@ def course_detail(course_id: int):
             _sync_simple_relationship(course.equipments, selected_equipments)
             _sync_simple_relationship(course.softwares, selected_softwares)
             _sync_course_class_links(course, class_ids, existing_links=class_links_map)
-            _sync_simple_relationship(course.teachers, selected_teachers)
+            _sync_course_teacher_hours(course, teacher_hours)
             _sync_course_allowed_weeks(course, (start for start, _ in selected_weeks))
             try:
                 db.session.commit()
@@ -2344,81 +2423,6 @@ def course_detail(course_id: int):
             except ValueError as exc:
                 db.session.commit()
                 flash(str(exc), "danger")
-        elif form_name == "update-class-teachers":
-            allowed_teacher_ids = {teacher.id for teacher in course.teachers if teacher.id}
-            if course.is_cm:
-                teacher = _parse_teacher_selection(
-                    request.form.get("course_teacher_all"),
-                    allowed_ids=allowed_teacher_ids,
-                )
-                for link in course.class_links:
-                    link.teacher_a = teacher
-                    link.teacher_b = None
-            elif course.is_sae:
-                assignments: list[tuple[CourseClassLink, Teacher, Teacher]] = []
-                for link in course.class_links:
-                    teacher_a = _parse_teacher_selection(
-                        request.form.get(
-                            f"class_link_teacher_a_{link.class_group_id}"
-                        ),
-                        allowed_ids=allowed_teacher_ids,
-                    )
-                    teacher_b = _parse_teacher_selection(
-                        request.form.get(
-                            f"class_link_teacher_b_{link.class_group_id}"
-                        ),
-                        allowed_ids=allowed_teacher_ids,
-                    )
-                    if teacher_a is None or teacher_b is None:
-                        db.session.rollback()
-                        flash(
-                            "Pour les SAE, deux enseignants doivent être attribués à chaque classe.",
-                            "danger",
-                        )
-                        return redirect(
-                            url_for("main.course_detail", course_id=course_id)
-                        )
-                    if teacher_a.id == teacher_b.id:
-                        db.session.rollback()
-                        flash(
-                            "Pour les SAE, les deux enseignants doivent être distincts.",
-                            "danger",
-                        )
-                        return redirect(
-                            url_for("main.course_detail", course_id=course_id)
-                        )
-                    assignments.append((link, teacher_a, teacher_b))
-                for link, teacher_a, teacher_b in assignments:
-                    link.teacher_a = teacher_a
-                    link.teacher_b = teacher_b
-            else:
-                for link in course.class_links:
-                    if link.group_count == 2:
-                        teacher_a = _parse_teacher_selection(
-                            request.form.get(
-                                f"class_link_teacher_{link.class_group_id}_A"
-                            ),
-                            allowed_ids=allowed_teacher_ids,
-                        )
-                        teacher_b = _parse_teacher_selection(
-                            request.form.get(
-                                f"class_link_teacher_{link.class_group_id}_B"
-                            ),
-                            allowed_ids=allowed_teacher_ids,
-                        )
-                        link.teacher_a = teacher_a
-                        link.teacher_b = teacher_b
-                    else:
-                        teacher = _parse_teacher_selection(
-                            request.form.get(
-                                f"class_link_teacher_{link.class_group_id}"
-                            ),
-                            allowed_ids=allowed_teacher_ids,
-                        )
-                        link.teacher_a = teacher
-                        link.teacher_b = None
-            db.session.commit()
-            flash("Enseignants par classe mis à jour", "success")
         elif form_name == "manual-session":
             teacher_id = int(request.form["teacher_id"])
             room_id = int(request.form["room_id"])
@@ -2502,21 +2506,44 @@ def course_detail(course_id: int):
         .first()
     )
 
-    available_teachers = sorted(
-        course.teachers,
-        key=lambda teacher: (teacher.name or "").lower(),
-    )
-
-    teacher_duos_by_class: dict[int, tuple[Teacher, Teacher, float]] = {}
-    teacher_duos_average_hours: float | None = None
-    if course.course_type == "TP" and available_teachers:
-        teacher_duos_by_class = recommend_teacher_duos_for_classes(
-            course.class_links,
-            available_teachers,
+    teacher_hours_map = course.teacher_hour_targets
+    scheduled_hours_map = course.scheduled_hours_by_teacher
+    teacher_summaries: list[dict[str, object]] = []
+    seen_teacher_ids: set[int] = set()
+    for assignment in sorted(
+        course.teacher_assignments,
+        key=lambda item: (item.teacher.name or "").lower() if item.teacher else "",
+    ):
+        teacher = assignment.teacher
+        if teacher is None or teacher.id is None:
+            continue
+        scheduled = scheduled_hours_map.get(teacher.id, 0)
+        teacher_summaries.append(
+            {
+                "teacher": teacher,
+                "planned": assignment.planned_hours,
+                "scheduled": scheduled,
+                "remaining": max(assignment.planned_hours - scheduled, 0),
+            }
         )
-        if teacher_duos_by_class:
-            total_overlap = sum(pair[2] for pair in teacher_duos_by_class.values())
-            teacher_duos_average_hours = total_overlap / len(teacher_duos_by_class)
+        seen_teacher_ids.add(teacher.id)
+    for teacher_id, scheduled in sorted(scheduled_hours_map.items(), key=lambda item: item[0]):
+        if teacher_id in seen_teacher_ids:
+            continue
+        teacher = next(
+            (session.teacher for session in course.sessions if session.teacher_id == teacher_id),
+            None,
+        )
+        if teacher is None:
+            continue
+        teacher_summaries.append(
+            {
+                "teacher": teacher,
+                "planned": teacher_hours_map.get(teacher_id, 0),
+                "scheduled": scheduled,
+                "remaining": max(teacher_hours_map.get(teacher_id, 0) - scheduled, 0),
+            }
+        )
 
     closing_spans = _closing_period_spans()
 
@@ -2567,7 +2594,6 @@ def course_detail(course_id: int):
         course_names=course_names,
         semester_choices=SEMESTER_CHOICES,
         default_semester=DEFAULT_SEMESTER,
-        available_teachers=available_teachers,
         events_json=json.dumps(events, ensure_ascii=False),
         start_times=START_TIMES,
         latest_generation_log=latest_generation_log,
@@ -2579,8 +2605,9 @@ def course_detail(course_id: int):
         selected_course_week_labels=selected_course_week_labels,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
-        teacher_duos_by_class=teacher_duos_by_class,
-        teacher_duos_average_hours=teacher_duos_average_hours,
+        teacher_hours_map=teacher_hours_map,
+        scheduled_hours_map=scheduled_hours_map,
+        teacher_summaries=teacher_summaries,
     )
 
 
@@ -2644,6 +2671,130 @@ def move_session(session_id: int):
     session.end_time = end_dt
     db.session.commit()
     return {"event": session.as_event()}
+
+
+@bp.route("/sessions/<int:session_id>/modifier", methods=["GET", "POST"])
+def session_edit(session_id: int):
+    session = (
+        Session.query.options(
+            selectinload(Session.course),
+            selectinload(Session.teacher),
+            selectinload(Session.room),
+            selectinload(Session.attendees),
+            selectinload(Session.class_group),
+        )
+        .get_or_404(session_id)
+    )
+    course = session.course
+    if course is None:
+        flash("Cette séance n'est associée à aucun cours.", "danger")
+        return redirect(url_for("main.dashboard"))
+
+    teacher_options = sorted(
+        course.teachers,
+        key=lambda teacher: (teacher.name or "").lower(),
+    )
+    rooms = Room.query.order_by(Room.name).all()
+
+    form_data = {
+        "date": session.start_time.date().isoformat() if session.start_time else "",
+        "start_time": session.start_time.strftime("%H:%M") if session.start_time else "08:00",
+        "duration": session.duration_hours or course.session_length_hours,
+        "teacher_id": session.teacher_id or "",
+        "room_id": session.room_id or "",
+    }
+
+    attendee_groups = list(session.attendees) if session.attendees else []
+    if session.class_group and session.class_group not in attendee_groups:
+        attendee_groups.append(session.class_group)
+    class_group_labels: dict[int, str | None] = {}
+    if session.class_group_id:
+        class_group_labels[session.class_group_id] = session.subgroup_label
+    for attendee in attendee_groups:
+        if attendee.id is not None and attendee.id not in class_group_labels:
+            class_group_labels[attendee.id] = None
+
+    if request.method == "POST":
+        form_data["date"] = request.form.get("date") or ""
+        form_data["start_time"] = request.form.get("start_time") or ""
+        form_data["duration"] = _parse_non_negative_int(
+            request.form.get("duration"), form_data["duration"] or course.session_length_hours
+        )
+        form_data["teacher_id"] = request.form.get("teacher_id") or ""
+        form_data["room_id"] = request.form.get("room_id") or ""
+
+        if not form_data["date"] or not form_data["start_time"]:
+            flash("Renseignez la date et l'heure de début.", "danger")
+        else:
+            try:
+                start_dt = _parse_datetime(form_data["date"], form_data["start_time"])
+            except ValueError:
+                start_dt = None
+            if start_dt is None:
+                flash("Format de date ou d'heure invalide.", "danger")
+            else:
+                duration_hours = max(int(form_data["duration"] or course.session_length_hours), 1)
+                end_dt = start_dt + timedelta(hours=duration_hours)
+                if not teacher_options:
+                    flash("Associez au préalable un enseignant au cours.", "danger")
+                else:
+                    try:
+                        teacher_id = int(form_data["teacher_id"])
+                    except (TypeError, ValueError):
+                        teacher_id = None
+                    teacher = (
+                        next((t for t in teacher_options if t.id == teacher_id), None)
+                        if teacher_id is not None
+                        else None
+                    )
+                    if teacher is None:
+                        flash("Sélectionnez un enseignant associé au cours.", "danger")
+                    else:
+                        try:
+                            room_id = int(form_data["room_id"])
+                        except (TypeError, ValueError):
+                            room_id = None
+                        room = Room.query.get(room_id) if room_id else None
+                        if room is None:
+                            flash("Sélectionnez une salle valide.", "danger")
+                        else:
+                            class_groups = attendee_groups or ([session.class_group] if session.class_group else [])
+                            error_message = _validate_session_constraints(
+                                course,
+                                teacher,
+                                room,
+                                class_groups,
+                                start_dt,
+                                end_dt,
+                                ignore_session_id=session.id,
+                                class_group_labels=class_group_labels or None,
+                            )
+                            if error_message:
+                                flash(error_message, "danger")
+                            else:
+                                session.teacher = teacher
+                                session.room = room
+                                session.start_time = start_dt
+                                session.end_time = end_dt
+                                db.session.commit()
+                                flash("Séance mise à jour", "success")
+                                return redirect(url_for("main.course_detail", course_id=course.id))
+
+    attendee_labels = session.attendee_names()
+    if not attendee_labels and session.class_group:
+        attendee_labels = [session.class_group.name]
+
+    return render_template(
+        "sessions/edit.html",
+        session=session,
+        course=course,
+        form_data=form_data,
+        teacher_options=teacher_options,
+        rooms=rooms,
+        attendee_labels=attendee_labels,
+        subgroup_label=session.subgroup_display_name() or session.subgroup_label,
+        start_times=START_TIMES,
+    )
 
 
 @bp.route("/sessions/<int:session_id>", methods=["DELETE"])

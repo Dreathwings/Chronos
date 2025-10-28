@@ -903,24 +903,7 @@ def has_weekly_course_conflict(
     ignore_session_id: int | None = None,
     additional_hours: int | None = None,
 ) -> bool:
-    target_day = start.date() if isinstance(start, datetime) else start
-    week_start, week_end = _week_bounds(target_day)
-    weekly_limit = max(int(course.session_length_hours), 0)
-    if weekly_limit == 0:
-        return False
-    scheduled_hours = _course_class_hours_in_week(
-        course,
-        class_group,
-        week_start,
-        week_end,
-        pending_sessions,
-        subgroup_label=subgroup_label,
-        ignore_session_id=ignore_session_id,
-    )
-    extra_hours = (
-        weekly_limit if additional_hours is None else max(int(additional_hours), 0)
-    )
-    return scheduled_hours + extra_hours > weekly_limit
+    return False
 
 
 def _warn_weekly_limit(
@@ -1001,6 +984,7 @@ def find_available_teacher(
     subgroup_label: str | None = None,
     segments: Optional[list[tuple[datetime, datetime]]] = None,
     target_class_ids: Set[int] | None = None,
+    pending_sessions: Iterable[Session] = (),
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
     allowed_ids: set[int] | None = None
@@ -1011,7 +995,12 @@ def find_available_teacher(
 
     if link is not None:
         fallback_pool = link.assigned_teachers()
-        allowed_ids = {teacher.id for teacher in fallback_pool if teacher.id is not None}
+        if fallback_pool:
+            allowed_ids = {teacher.id for teacher in fallback_pool if teacher.id is not None}
+        else:
+            allowed_ids = None
+            if course.teachers:
+                fallback_pool = list(course.teachers)
     elif course.teachers:
         fallback_pool = list(course.teachers)
     else:
@@ -1066,18 +1055,31 @@ def find_available_teacher(
             ),
         )
 
+    segments_to_check = segments or [(start, end)]
+    additional_hours = 0
+    for seg_start, seg_end in segments_to_check:
+        delta = seg_end - seg_start
+        additional_hours += max(int(delta.total_seconds() // 3600), 0)
+
     for teacher in candidates:
-        segments_to_check = segments or [(start, end)]
-        if not all(
-            teacher.is_available_during(segment_start, segment_end)
-            for segment_start, segment_end in segments_to_check
-        ):
-            continue
+        if teacher.availabilities:
+            if not all(
+                teacher.is_available_during(segment_start, segment_end)
+                for segment_start, segment_end in segments_to_check
+            ):
+                continue
         if any(
             overlaps(s.start_time, s.end_time, segment_start, segment_end)
             for s in teacher.sessions
             for segment_start, segment_end in segments_to_check
         ):
+            continue
+        remaining = course.remaining_hours_for_teacher(
+            teacher,
+            pending_sessions=pending_sessions,
+            additional_hours=additional_hours,
+        )
+        if remaining < 0:
             continue
         return teacher
     return None
@@ -1535,6 +1537,7 @@ def _try_full_block(
             link=link,
             subgroup_label=subgroup_label,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1669,6 +1672,7 @@ def _try_split_block(
             subgroup_label=subgroup_label,
             segments=segment_datetimes,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1864,6 +1868,7 @@ def _cm_try_full_block(
             link=primary_link,
             subgroup_label=None,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1987,6 +1992,7 @@ def _cm_try_split_block(
             subgroup_label=None,
             segments=segment_datetimes,
             target_class_ids=target_class_ids or None,
+            pending_sessions=pending_sessions,
         )
         if not teacher:
             if diagnostics is not None:

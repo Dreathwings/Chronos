@@ -178,42 +178,30 @@
                       <span class="badge bg-info text-dark ms-1">Demi-groupes</span>
                       {% endif %}
                       <ul class="list-unstyled ms-3 mb-0 small text-muted">
-                        {% if course.course_type == 'SAE' %}
-                        <li>
-                          Enseignant 1
-                          {% if link.teacher_a %}
-                          — {{ link.teacher_a.name }}
-                          {% else %}
-                          — Aucun enseignant
-                          {% endif %}
-                        </li>
-                        <li>
-                          Enseignant 2
-                          {% if link.teacher_b %}
-                          — {{ link.teacher_b.name }}
-                          {% else %}
-                          — Aucun enseignant
-                          {% endif %}
-                        </li>
+                        {% if course.course_type == 'TP' %}
+                        <li>Planifié en deux sous-groupes selon la configuration générale.</li>
+                        {% elif course.course_type == 'SAE' %}
+                        <li>Chaque séance nécessite deux enseignants.</li>
                         {% else %}
-                        {% for label, teacher in link.teacher_labels() %}
-                        <li>
-                          {% if label %}
-                            {{ label }}
-                          {% else %}
-                            Classe entière
-                          {% endif %}
-                          {% if teacher %}
-                          — {{ teacher.name }}
-                          {% else %}
-                          — Aucun enseignant
-                          {% endif %}
-                        </li>
-                        {% endfor %}
+                        <li>Classe entière.</li>
                         {% endif %}
                       </ul>
                     </div>
                     {% endfor %}
+                  </div>
+                  <div class="mt-3">
+                    <span class="fw-semibold">Enseignants</span>
+                    <ul class="list-unstyled small text-muted ms-3 mb-0">
+                      {% if course.teacher_assignments %}
+                      {% for assignment in course.teacher_assignments %}
+                      {% if assignment.teacher %}
+                      <li>{{ assignment.teacher.name }} — {{ assignment.planned_hours }} h</li>
+                      {% endif %}
+                      {% endfor %}
+                      {% else %}
+                      <li>Aucun enseignant configuré.</li>
+                      {% endif %}
+                    </ul>
                   </div>
                   {% else %}
                   —

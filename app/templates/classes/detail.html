@@ -155,40 +155,28 @@
               <span class="badge bg-secondary ms-1">Classe entière</span>
               {% endif %}
               <ul class="list-unstyled ms-3 mb-0 small text-muted">
-                {% if link.course.course_type == 'SAE' %}
-                <li>
-                  Enseignant 1
-                  {% if link.teacher_a %}
-                  — {{ link.teacher_a.name }}
-                  {% else %}
-                  — Aucun enseignant
-                  {% endif %}
-                </li>
-                <li>
-                  Enseignant 2
-                  {% if link.teacher_b %}
-                  — {{ link.teacher_b.name }}
-                  {% else %}
-                  — Aucun enseignant
-                  {% endif %}
-                </li>
+                {% if link.course.course_type == 'TP' %}
+                <li>Planifié en sous-groupes selon la configuration du cours.</li>
+                {% elif link.course.course_type == 'SAE' %}
+                <li>Chaque séance mobilise deux enseignants.</li>
                 {% else %}
-                {% for label, teacher in link.teacher_labels() %}
-                <li>
-                  {% if label %}
-                    {% if label == 'A/B' %}Groupes A et B{% else %}{{ label }}{% endif %}
-                  {% else %}
-                  Classe entière
-                  {% endif %}
-                  {% if teacher %}
-                  — {{ teacher.name }}
-                  {% else %}
-                  — Aucun enseignant
-                  {% endif %}
-                </li>
-                {% endfor %}
+                <li>Travail sur la classe entière.</li>
                 {% endif %}
               </ul>
+              <div class="ms-3 mt-2">
+                <span class="fw-semibold">Enseignants</span>
+                <ul class="list-unstyled small text-muted mb-0">
+                  {% if link.course.teacher_assignments %}
+                  {% for assignment in link.course.teacher_assignments %}
+                  {% if assignment.teacher %}
+                  <li>{{ assignment.teacher.name }} — {{ assignment.planned_hours }} h</li>
+                  {% endif %}
+                  {% endfor %}
+                  {% else %}
+                  <li>Aucun enseignant configuré.</li>
+                  {% endif %}
+                </ul>
+              </div>
             </div>
             <div>
               <input type="hidden" name="form" value="remove-course">

@@ -51,6 +51,21 @@
   padding-right: 0.5rem;
 }
 
+.course-detail-layout .teacher-hours-row {
+  background-color: #fff;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.course-detail-layout .teacher-hours-row.is-selected {
+  border-color: rgba(13, 110, 253, 0.45) !important;
+  box-shadow: 0 0.25rem 0.75rem rgba(13, 110, 253, 0.08);
+}
+
+.course-detail-layout .teacher-hours-input .form-control {
+  min-width: 5rem;
+}
+
 .course-detail-layout #course-classes-list .border {
   border-color: rgba(15, 23, 42, 0.1) !important;
   border-radius: 0.75rem;

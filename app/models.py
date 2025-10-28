@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, time, timedelta
 from math import ceil
+from collections import defaultdict
 from itertools import combinations
 from typing import Iterable, List, Optional, Set
 
@@ -11,6 +12,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    event,
     ForeignKey,
     Integer,
     String,
@@ -53,14 +55,6 @@ room_software = Table(
     Column("room_id", ForeignKey("room.id"), primary_key=True),
     Column("software_id", ForeignKey("software.id"), primary_key=True),
 )
-
-course_teacher = Table(
-    "course_teacher",
-    db.Model.metadata,
-    Column("course_id", ForeignKey("course.id"), primary_key=True),
-    Column("teacher_id", ForeignKey("teacher.id"), primary_key=True),
-)
-
 
 course_name_preferred_room = Table(
     "course_name_preferred_room",
@@ -139,8 +133,15 @@ class Teacher(db.Model, TimeStampedModel):
     sessions: Mapped[List["Session"]] = relationship(
         back_populates="teacher", cascade="all, delete-orphan"
     )
-    courses: Mapped[List["Course"]] = relationship(
-        secondary=course_teacher, back_populates="teachers"
+    course_assignments: Mapped[List["CourseTeacherAssignment"]] = relationship(
+        "CourseTeacherAssignment",
+        back_populates="teacher",
+        cascade="all, delete-orphan",
+    )
+    courses = association_proxy(
+        "course_assignments",
+        "course",
+        creator=lambda course: CourseTeacherAssignment(course=course),
     )
     availabilities: Mapped[List["TeacherAvailability"]] = relationship(
         back_populates="teacher",
@@ -259,6 +260,7 @@ class Course(db.Model, TimeStampedModel):
     course_name_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("course_name.id"), nullable=True
     )
+    color: Mapped[Optional[str]] = mapped_column(String(7))
 
     requires_computers: Mapped[bool] = mapped_column(db.Boolean, default=False)
     computers_required: Mapped[int] = mapped_column(Integer, default=0)
@@ -266,7 +268,17 @@ class Course(db.Model, TimeStampedModel):
     configured_name: Mapped[Optional["CourseName"]] = relationship(
         "CourseName", back_populates="courses"
     )
-    teachers: Mapped[List[Teacher]] = relationship(secondary=course_teacher, back_populates="courses")
+    teacher_assignments: Mapped[List["CourseTeacherAssignment"]] = relationship(
+        "CourseTeacherAssignment",
+        back_populates="course",
+        cascade="all, delete-orphan",
+        order_by="CourseTeacherAssignment.teacher_id",
+    )
+    teachers = association_proxy(
+        "teacher_assignments",
+        "teacher",
+        creator=lambda teacher: CourseTeacherAssignment(teacher=teacher),
+    )
     softwares: Mapped[List["Software"]] = relationship(secondary=course_software, back_populates="courses")
     equipments: Mapped[List["Equipment"]] = relationship(secondary=course_equipment, back_populates="courses")
     class_links: Mapped[List["CourseClassLink"]] = relationship(
@@ -429,6 +441,51 @@ class Course(db.Model, TimeStampedModel):
         return sum(session.duration_hours for session in self.sessions)
 
     @property
+    def teacher_hour_targets(self) -> dict[int, int]:
+        return {
+            assignment.teacher_id: assignment.planned_hours
+            for assignment in self.teacher_assignments
+            if assignment.teacher_id is not None
+        }
+
+    @property
+    def scheduled_hours_by_teacher(self) -> dict[int, int]:
+        totals: dict[int, int] = defaultdict(int)
+        for session in self.sessions:
+            if session.teacher_id is None:
+                continue
+            totals[session.teacher_id] += session.duration_hours
+        return totals
+
+    def remaining_hours_for_teacher(
+        self,
+        teacher: "Teacher | int",
+        *,
+        pending_sessions: Iterable["Session"] = (),
+        additional_hours: int = 0,
+    ) -> int:
+        teacher_id = teacher if isinstance(teacher, int) else getattr(teacher, "id", None)
+        if teacher_id is None:
+            return 0
+        targets = self.teacher_hour_targets
+        if not targets:
+            return 10**9
+        if teacher_id not in targets:
+            return -additional_hours
+        target_hours = targets[teacher_id]
+        if target_hours is None or target_hours <= 0:
+            return 10**9
+        scheduled = self.scheduled_hours_by_teacher.get(teacher_id, 0)
+        for session in pending_sessions:
+            if getattr(session, "course_id", None) != self.id:
+                continue
+            if getattr(session, "teacher_id", None) != teacher_id:
+                continue
+            scheduled += session.duration_hours
+        remaining = target_hours - scheduled - max(additional_hours, 0)
+        return remaining
+
+    @property
     def total_required_hours(self) -> int:
         group_total = sum(link.group_count for link in self.class_links)
         if self.is_cm:
@@ -444,6 +501,51 @@ class Course(db.Model, TimeStampedModel):
     @property
     def latest_generation_log(self) -> "CourseScheduleLog | None":
         return self.generation_logs[0] if self.generation_logs else None
+
+
+class CourseTeacherAssignment(db.Model, TimeStampedModel):
+    __tablename__ = "course_teacher"
+
+    course_id: Mapped[int] = mapped_column(
+        ForeignKey("course.id"), primary_key=True, nullable=False
+    )
+    teacher_id: Mapped[int] = mapped_column(
+        ForeignKey("teacher.id"), primary_key=True, nullable=False
+    )
+    planned_hours: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    course: Mapped[Course] = relationship("Course", back_populates="teacher_assignments")
+    teacher: Mapped[Teacher] = relationship("Teacher", back_populates="course_assignments")
+
+    __table_args__ = (
+        CheckConstraint(
+            "planned_hours >= 0", name="chk_course_teacher_hours_non_negative"
+        ),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Ensure detached association instances are persisted even when created
+        # directly (e.g. ``CourseTeacherAssignment(course=course, teacher=t)``)
+        # which mirrors the behaviour of the historical association table.
+        if self.course is not None or self.course_id is not None:
+            db.session.add(self)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"CourseTeacherAssignment<Course {self.course_id} / Teacher {self.teacher_id}"
+            f" hours={self.planned_hours}>"
+        )
+
+
+@event.listens_for(Course.teacher_assignments, "append", propagate=True)
+def _ensure_assignment_persistence(
+    course: Course, assignment: CourseTeacherAssignment, _initiator: object
+) -> None:
+    if assignment is None:
+        return
+    if assignment not in db.session:
+        db.session.add(assignment)
 
 
 class Session(db.Model, TimeStampedModel):
@@ -548,31 +650,20 @@ class Session(db.Model, TimeStampedModel):
                     self.subgroup_label if attendee.id == self.class_group_id else None,
                 )
 
-        if self.course is not None and related_class_ids:
-            for link in self.course.class_links:
-                if link.class_group_id not in related_class_ids:
+        if self.course is not None:
+            for assignment in self.course.teacher_assignments:
+                teacher = assignment.teacher
+                if teacher is None or teacher.id in seen_teacher_ids:
                     continue
-                if self.course.is_sae:
-                    candidate_teachers = link.assigned_teachers()
-                else:
-                    subgroup_label = related_class_labels.get(link.class_group_id)
-                    preferred_teacher = link.teacher_for_label(subgroup_label)
-                    if preferred_teacher is not None:
-                        candidate_teachers = [preferred_teacher]
-                    else:
-                        candidate_teachers = link.assigned_teachers()
-                for teacher in candidate_teachers:
-                    if teacher is None or teacher.id in seen_teacher_ids:
-                        continue
-                    seen_teacher_ids.add(teacher.id)
-                    teacher_entries.append(
-                        {
-                            "id": teacher.id,
-                            "name": teacher.name,
-                            "email": teacher.email,
-                            "phone": teacher.phone,
-                        }
-                    )
+                seen_teacher_ids.add(teacher.id)
+                teacher_entries.append(
+                    {
+                        "id": teacher.id,
+                        "name": teacher.name,
+                        "email": teacher.email,
+                        "phone": teacher.phone,
+                    }
+                )
 
         primary_entry: dict[str, object] | None = teacher_entries[0] if teacher_entries else None
         primary_name = (
@@ -590,6 +681,8 @@ class Session(db.Model, TimeStampedModel):
             "title": title,
             "start": self.start_time.isoformat(),
             "end": self.end_time.isoformat(),
+            "backgroundColor": self.course.color or "#0d6efd",
+            "borderColor": self.course.color or "#0d6efd",
             "extendedProps": {
                 "teacher": primary_name,
                 "teacher_email": primary_email,
@@ -1325,20 +1418,7 @@ class CourseClassLink(db.Model):
         return teachers[0] if teachers else None
 
     def teacher_labels(self) -> list[tuple[str, Optional[Teacher]]]:
-        course = getattr(self, "course", None)
-        course_type = getattr(course, "course_type", None)
-        if course_type == "SAE":
-            return [
-                ("Enseignant 1", self.teacher_a),
-                ("Enseignant 2", self.teacher_b),
-            ]
-        teacher = self.teacher_a or self.teacher_b
-        if self.group_count == 2:
-            return [
-                (self.subgroup_name_for("A"), self.teacher_for_label("A")),
-                (self.subgroup_name_for("B"), self.teacher_for_label("B")),
-            ]
-        return [("", teacher)]
+        return []
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return (

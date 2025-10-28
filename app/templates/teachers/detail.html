@@ -112,9 +112,59 @@
   </div>
   <div class="col-xl-8">
     <div class="card shadow-sm">
-      <div class="card-header bg-secondary text-white">Calendrier de {{ teacher.name }}</div>
+      <div class="card-header bg-secondary text-white">Suivi de {{ teacher.name }}</div>
       <div class="card-body">
-        <div id="teacher-calendar"></div>
+        <ul class="nav nav-tabs mb-3" id="teacherTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="teacher-calendar-tab" data-bs-toggle="tab" data-bs-target="#teacher-calendar-pane" type="button" role="tab" aria-controls="teacher-calendar-pane" aria-selected="true">Calendrier</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="teacher-summary-tab" data-bs-toggle="tab" data-bs-target="#teacher-summary-pane" type="button" role="tab" aria-controls="teacher-summary-pane" aria-selected="false">Récapitulatif des heures</button>
+          </li>
+        </ul>
+        <div class="tab-content" id="teacherTabsContent">
+          <div class="tab-pane fade show active" id="teacher-calendar-pane" role="tabpanel" aria-labelledby="teacher-calendar-tab">
+            <div id="teacher-calendar"></div>
+          </div>
+          <div class="tab-pane fade" id="teacher-summary-pane" role="tabpanel" aria-labelledby="teacher-summary-tab">
+            {% if course_summaries %}
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th scope="col">Cours</th>
+                    <th scope="col" class="text-center">Heures à générer</th>
+                    <th scope="col" class="text-center">Heures planifiées</th>
+                    <th scope="col" class="text-center">Reste</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for entry in course_summaries %}
+                  <tr>
+                    <th scope="row">
+                      <a href="{{ url_for('main.course_detail', course_id=entry.course.id) }}">{{ entry.course.name }}</a>
+                    </th>
+                    <td class="text-center">{{ entry.planned }} h</td>
+                    <td class="text-center">{{ entry.scheduled }} h</td>
+                    <td class="text-center">{{ entry.remaining }} h</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+                <tfoot>
+                  <tr class="fw-semibold">
+                    <td>Total</td>
+                    <td class="text-center">{{ total_planned_hours }} h</td>
+                    <td class="text-center">{{ total_scheduled_hours }} h</td>
+                    <td class="text-center">{{ (total_planned_hours - total_scheduled_hours) if total_planned_hours > total_scheduled_hours else 0 }} h</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            {% else %}
+            <p class="text-muted mb-0">Aucun cours n'est encore associé à cet enseignant.</p>
+            {% endif %}
+          </div>
+        </div>
       </div>
     </div>
   </div>

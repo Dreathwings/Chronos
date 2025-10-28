@@ -183,6 +183,19 @@
         }
         const props = event.extendedProps || {};
         const title = modal.querySelector('[data-chronos-field="title"]');
+        const segmentIds = Array.isArray(props.segment_ids) && props.segment_ids.length
+          ? props.segment_ids
+          : [event.id];
+        const editButton = modal.querySelector('[data-chronos-action="edit"]');
+        if (editButton) {
+          if (segmentIds.length === 1) {
+            editButton.classList.remove('d-none');
+            editButton.href = `/sessions/${segmentIds[0]}/modifier`;
+          } else {
+            editButton.classList.add('d-none');
+            editButton.removeAttribute('href');
+          }
+        }
         if (title) {
           title.textContent = event.title || props.course || 'Séance planifiée';
         }
@@ -530,6 +543,10 @@
               <h6 class="fw-semibold">Description</h6>
               <p class="mb-0" data-chronos-field="description"></p>
             </div>
+          </div>
+          <div class="modal-footer justify-content-between">
+            <a class="btn btn-outline-primary d-none" data-chronos-action="edit" href="#">Modifier la séance</a>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
           </div>
         </div>
       </div>
