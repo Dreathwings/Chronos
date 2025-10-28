@@ -2284,7 +2284,7 @@ def generate_schedule(
         else:
             effective_occurrences = course.sessions_required
 
-        effective_occurrences = max(int(effective_occurrences), 1) * max(int(course.sessions_per_week or 1), 1)
+        effective_occurrences = max(int(effective_occurrences), 1)
 
         if not course.classes:
             message = "Associez au moins une classe au cours avant de planifier."

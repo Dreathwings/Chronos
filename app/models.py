@@ -447,8 +447,7 @@ class Course(db.Model, TimeStampedModel):
             occurrences = len(self.allowed_weeks)
         else:
             occurrences = self.sessions_required
-        weekly_multiplier = max(self.sessions_per_week, 1)
-        occurrences *= weekly_multiplier
+        occurrences = max(int(occurrences), 1)
         return occurrences * self.session_length_hours * multiplier
 
     @property

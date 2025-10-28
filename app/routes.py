@@ -478,7 +478,13 @@ def _sync_course_allowed_weeks(course: Course, week_starts: Iterable[date]) -> N
         existing_starts.add(week_start)
 
     occurrence_goal = len(course.allowed_weeks)
-    course.sessions_required = max(occurrence_goal, 1)
+    if occurrence_goal > 0:
+        course.sessions_per_week = occurrence_goal
+        course.sessions_required = occurrence_goal
+    else:
+        fallback_goal = max(int(course.sessions_per_week or 0), 1)
+        course.sessions_per_week = fallback_goal
+        course.sessions_required = fallback_goal
 
 
 def _sync_course_class_links(
