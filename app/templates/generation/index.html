@@ -127,7 +127,7 @@
               <th>Heures planifiées</th>
               <th>Statut</th>
               <th>Dernière génération</th>
-              <th>Erreurs détectées</th>
+              <th>Nombre d'erreurs</th>
               <th>Pistes de résolution</th>
             </tr>
           </thead>
@@ -173,12 +173,10 @@
                 {% endif %}
               </td>
               <td>
-                {% if row.errors %}
-                <ul class="mb-0 ps-3 small">
-                  {% for error in row.errors %}
-                  <li>{{ error }}</li>
-                  {% endfor %}
-                </ul>
+                {% set error_count = row.error_count or (row.errors | length) %}
+                {% if error_count %}
+                <div class="fw-semibold">{{ error_count }}</div>
+                <div class="text-muted small">erreur{% if error_count > 1 %}s{% endif %}</div>
                 {% else %}
                 <span class="text-muted small">Aucune erreur enregistrée.</span>
                 {% endif %}
