@@ -373,31 +373,86 @@ class PlacementDiagnostics:
         self,
         reporter: ScheduleReporter | None,
         *,
+        course: Course,
         context_label: str,
         day: date,
-    ) -> None:
+    ) -> list[str]:
+        formatted: list[str] = []
         if reporter is None:
-            return
+            return formatted
+
+        week_start, week_end = _week_bounds(day)
+        week_start_label = week_start.strftime("%d/%m/%Y")
+        week_end_label = week_end.strftime("%d/%m/%Y")
         day_label = day.strftime("%d/%m/%Y")
-        for message in sorted(self.class_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
-        for message in sorted(self.teacher_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
-        for message in sorted(self.room_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
-        for message in sorted(self.other_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
-        if not any(
-            (
-                self.class_reasons,
-                self.teacher_reasons,
-                self.room_reasons,
-                self.other_reasons,
+        course_name = (course.name or "Cours sans nom").strip() or "Cours sans nom"
+        base_label = f"Cours {course_name}"
+        context = context_label.strip()
+        if context:
+            base_label += f" — {context}"
+        base_label += f" — semaine du {week_start_label} au {week_end_label}"
+
+        def _log(kind: str, message: str) -> None:
+            reason = message.strip()
+            if not reason:
+                return
+            full_message = (
+                f"{base_label} — {kind} — jour {day_label} : {reason}"
             )
-        ):
-            reporter.warning(
-                f"{context_label} — {day_label} : aucune option compatible trouvée sur ce créneau."
+            reporter.warning(full_message)
+            formatted.append(full_message)
+
+        if self.class_reasons and self.teacher_reasons:
+            class_detail = "; ".join(sorted(self.class_reasons))
+            teacher_detail = "; ".join(sorted(self.teacher_reasons))
+            combined_parts = []
+            if class_detail:
+                combined_parts.append(f"classe : {class_detail}")
+            if teacher_detail:
+                combined_parts.append(f"enseignant : {teacher_detail}")
+            if combined_parts:
+                combined_message = " / ".join(combined_parts)
+                _log("Aucun créneau commun classe/enseignant", combined_message)
+
+        if self.class_reasons:
+            class_detail = "; ".join(sorted(self.class_reasons))
+            _log("Classe indisponible", class_detail)
+
+        if self.teacher_reasons:
+            teacher_detail = "; ".join(sorted(self.teacher_reasons))
+            _log("Enseignant indisponible cette semaine", teacher_detail)
+
+        equipment_messages: list[str] = []
+        room_messages: list[str] = []
+        for message in self.room_reasons:
+            lowered = message.lower()
+            if any(
+                keyword in lowered
+                for keyword in ("équipement", "equipement", "logiciel", "poste")
+            ):
+                equipment_messages.append(message)
+            else:
+                room_messages.append(message)
+
+        if equipment_messages:
+            equipment_detail = "; ".join(sorted(equipment_messages))
+            _log("Équipement indisponible", equipment_detail)
+
+        if room_messages:
+            room_detail = "; ".join(sorted(room_messages))
+            _log("Salle indisponible", room_detail)
+
+        if self.other_reasons:
+            other_detail = "; ".join(sorted(self.other_reasons))
+            _log("Autre raison", other_detail)
+
+        if not formatted:
+            _log(
+                "Autre raison",
+                "aucune option compatible trouvée sur ce créneau.",
             )
+
+        return formatted
 
 
 def daterange(start: date, end: date) -> Iterable[date]:
@@ -1552,6 +1607,7 @@ def _schedule_block_for_day(
     if desired_hours <= 1:
         diagnostics.emit(
             reporter,
+            course=course,
             context_label=context,
             day=day,
         )
@@ -1571,6 +1627,7 @@ def _schedule_block_for_day(
         return placement
     diagnostics.emit(
         reporter,
+        course=course,
         context_label=context,
         day=day,
     )
@@ -1876,6 +1933,7 @@ def _cm_schedule_block_for_day(
     if desired_hours <= 1:
         diagnostics.emit(
             reporter,
+            course=course,
             context_label=context,
             day=day,
         )
@@ -1894,6 +1952,7 @@ def _cm_schedule_block_for_day(
         return placement
     diagnostics.emit(
         reporter,
+        course=course,
         context_label=context,
         day=day,
     )
