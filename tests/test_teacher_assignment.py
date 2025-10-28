@@ -1,3 +1,4 @@
+import json
 import unittest
 from collections import Counter
 from datetime import date, datetime, time, timedelta
@@ -16,6 +17,7 @@ from app.models import (
     CourseClassLink,
     CourseName,
     CourseScheduleLog,
+    CourseTeacherHour,
     Equipment,
     Room,
     Session,
@@ -199,6 +201,76 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         self.assertEqual(len(pairs), 1)
         self.assertEqual({pairs[0][0].id, pairs[0][1].id}, {teacher_a.id, teacher_b.id})
         self.assertAlmostEqual(pairs[0][2], 0.0)
+
+    def test_generate_schedule_respects_teacher_hour_allocations(self) -> None:
+        base_name = CourseName(name="Algorithmique")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=3,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=24)
+        link = CourseClassLink(class_group=class_group, group_count=1)
+        course.class_links.append(link)
+        room = Room(name="B204", capacity=30)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            ),
+        ] + [
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                class_group,
+                link,
+                room,
+                teacher_a,
+                teacher_b,
+                *availabilities,
+            ]
+        )
+        db.session.commit()
+
+        course.teachers.extend([teacher_a, teacher_b])
+        course.teacher_hour_allocations.extend(
+            [
+                CourseTeacherHour(course=course, teacher=teacher_a, hours=2),
+                CourseTeacherHour(course=course, teacher=teacher_b, hours=4),
+            ]
+        )
+        db.session.commit()
+
+        created = generate_schedule(course)
+        self.assertEqual(len(created), 3)
+
+        sessions = Session.query.filter_by(course=course).all()
+        hours_by_teacher: dict[str, int] = {}
+        for session in sessions:
+            if session.teacher is None:
+                continue
+            hours_by_teacher[session.teacher.name] = (
+                hours_by_teacher.get(session.teacher.name, 0) + session.duration_hours
+            )
+
+        self.assertEqual(hours_by_teacher.get("Alice", 0), 2)
+        self.assertEqual(hours_by_teacher.get("Bruno", 0), 4)
 
     def test_recommended_duos_avoid_teacher_duplicates(self) -> None:
         course, link_a, _ = self._create_tp_course()
@@ -1318,7 +1390,12 @@ class SchedulerFormattingTestCase(DatabaseTestCase):
         _warn_weekly_limit(reporter, {"Synthèse": weeks})
 
         self.assertEqual(reporter.status, "warning")
-        self.assertEqual(len(reporter.entries), 0)
+        self.assertEqual(len(reporter.entries), 1)
+        entry = reporter.entries[0]
+        self.assertEqual(entry.get("level"), "warning")
+        message = entry.get("message", "")
+        self.assertIn("Synthèse", message)
+        self.assertIn("semaines du", message)
 
 
 class SchedulerRelocationTestCase(DatabaseTestCase):
@@ -1442,6 +1519,73 @@ class ScheduleGenerationFailureTestCase(DatabaseTestCase):
             "Impossible de générer automatiquement toutes les séances",
             str(context.exception),
         )
+
+    def test_generation_log_mentions_teacher_hour_limit(self) -> None:
+        base_name = CourseName(name="Synthèse avancée")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=3,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO3", size=28)
+        link = CourseClassLink(class_group=class_group, group_count=1)
+        course.class_links.append(link)
+        room = Room(name="C101", capacity=40)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        availability = TeacherAvailability(
+            teacher=teacher_a,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(12, 0),
+        )
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                class_group,
+                link,
+                room,
+                teacher_a,
+                teacher_b,
+                availability,
+            ]
+        )
+        db.session.commit()
+
+        course.teachers.extend([teacher_a, teacher_b])
+        course.teacher_hour_allocations.extend(
+            [
+                CourseTeacherHour(course=course, teacher=teacher_a, hours=2),
+                CourseTeacherHour(course=course, teacher=teacher_b, hours=4),
+            ]
+        )
+        db.session.commit()
+
+        with self.assertRaises(ValueError):
+            generate_schedule(course)
+
+        log = (
+            CourseScheduleLog.query.filter_by(course=course)
+            .order_by(CourseScheduleLog.id.desc())
+            .first()
+        )
+        self.assertIsNotNone(log)
+        entries = json.loads(log.messages)
+        warning_messages = [
+            entry.get("message", "") for entry in entries if entry.get("level") == "warning"
+        ]
+        combined = " \n".join(warning_messages)
+        self.assertIn("semaine du", combined.lower())
+        self.assertIn("alice", combined.lower())
+        self.assertIn("limite", combined.lower())
+        summary_text = (log.summary or "").lower()
+        self.assertIn("impossible de planifier", summary_text)
+        self.assertIn("alice", summary_text)
+        self.assertIn("semaine", summary_text)
 
 
 if __name__ == "__main__":

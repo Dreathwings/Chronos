@@ -237,9 +237,9 @@ class ScheduleReporter:
         text = message.strip()
         if not text:
             return
-        if level == "error":
+        if level in {"error", "warning"}:
             entry: dict[str, object] = {"level": level, "message": text}
-            if suggestions:
+            if level == "error" and suggestions:
                 unique_suggestions: list[str] = []
                 for suggestion in suggestions:
                     cleaned = str(suggestion).strip()
@@ -310,18 +310,34 @@ class PlacementDiagnostics:
         *,
         context_label: str,
         day: date,
-    ) -> None:
-        if reporter is None:
-            return
+    ) -> list[str]:
+        emitted: list[str] = []
         day_label = day.strftime("%d/%m/%Y")
+        week_start, _ = _week_bounds(day)
+        week_label = week_start.strftime("%d/%m/%Y")
+        prefix = (
+            f"{context_label} — semaine du {week_label} (jour {day_label})"
+        )
         for message in sorted(self.class_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
+            text = f"{prefix} : {message}"
+            emitted.append(text)
+            if reporter is not None:
+                reporter.warning(text)
         for message in sorted(self.teacher_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
+            text = f"{prefix} : {message}"
+            emitted.append(text)
+            if reporter is not None:
+                reporter.warning(text)
         for message in sorted(self.room_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
+            text = f"{prefix} : {message}"
+            emitted.append(text)
+            if reporter is not None:
+                reporter.warning(text)
         for message in sorted(self.other_reasons):
-            reporter.warning(f"{context_label} — {day_label} : {message}")
+            text = f"{prefix} : {message}"
+            emitted.append(text)
+            if reporter is not None:
+                reporter.warning(text)
         if not any(
             (
                 self.class_reasons,
@@ -330,9 +346,100 @@ class PlacementDiagnostics:
                 self.other_reasons,
             )
         ):
-            reporter.warning(
-                f"{context_label} — {day_label} : aucune option compatible trouvée sur ce créneau."
-            )
+            text = f"{prefix} : aucune option compatible trouvée sur ce créneau."
+            emitted.append(text)
+            if reporter is not None:
+                reporter.warning(text)
+        return emitted
+
+
+def _summarise_failure_details(
+    details: Iterable[str], *, limit: int = 5
+) -> str | None:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for detail in details:
+        text = (detail or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        unique.append(text)
+    if not unique:
+        return None
+    head = unique[:limit]
+    summary = " ; ".join(head)
+    if len(unique) > limit:
+        summary += f" ; … (+{len(unique) - limit} autre(s))"
+    return summary
+
+
+class TeacherHourTracker:
+    def __init__(self, course: Course) -> None:
+        self.course = course
+        self._allocations: dict[int, int] = {
+            allocation.teacher_id: max(int(allocation.hours or 0), 0)
+            for allocation in course.teacher_hour_allocations
+            if allocation.teacher_id is not None
+        }
+        self.enabled = bool(self._allocations)
+        self._remaining: dict[int, int] = dict(self._allocations)
+        if not self.enabled:
+            return
+        for session in course.sessions:
+            teacher_id = session.teacher_id
+            if teacher_id is None:
+                continue
+            self._remaining[teacher_id] = self._remaining.get(teacher_id, 0) - session.duration_hours
+
+    def allocation_for(self, teacher: Teacher | None) -> int | None:
+        if teacher is None or teacher.id is None:
+            return None
+        return self._allocations.get(teacher.id)
+
+    def remaining_hours_for(self, teacher: Teacher | None) -> int | None:
+        if not self.enabled or teacher is None or teacher.id is None:
+            return None
+        return self._remaining.get(teacher.id, 0)
+
+    def can_assign(self, teacher: Teacher | None, hours: int) -> bool:
+        if not self.enabled or teacher is None or teacher.id is None:
+            return True
+        if hours <= 0:
+            return True
+        remaining = self._remaining.get(teacher.id, 0)
+        return remaining >= hours
+
+    def record(self, teacher: Teacher | None, hours: int) -> None:
+        if not self.enabled or teacher is None or teacher.id is None:
+            return
+        if hours <= 0:
+            return
+        teacher_id = teacher.id
+        self._remaining[teacher_id] = self._remaining.get(teacher_id, 0) - hours
+
+    def release(self, teacher: Teacher | None, hours: int) -> None:
+        if not self.enabled or teacher is None or teacher.id is None:
+            return
+        if hours <= 0:
+            return
+        teacher_id = teacher.id
+        self._remaining[teacher_id] = self._remaining.get(teacher_id, 0) + hours
+
+
+def _record_session_hours(
+    session: Session, hour_tracker: "TeacherHourTracker | None"
+) -> None:
+    if hour_tracker is None:
+        return
+    hour_tracker.record(session.teacher, session.duration_hours)
+
+
+def _release_session_hours(
+    session: Session, hour_tracker: "TeacherHourTracker | None"
+) -> None:
+    if hour_tracker is None:
+        return
+    hour_tracker.release(session.teacher, session.duration_hours)
 
 
 def daterange(start: date, end: date) -> Iterable[date]:
@@ -425,6 +532,8 @@ def _describe_teacher_unavailability(
     link: CourseClassLink | None = None,
     subgroup_label: str | None = None,
     segments: Optional[list[tuple[datetime, datetime]]] = None,
+    hour_tracker: "TeacherHourTracker | None" = None,
+    required_hours: int | None = None,
 ) -> str:
     preferred: list[Teacher] = []
     if link is not None:
@@ -446,6 +555,25 @@ def _describe_teacher_unavailability(
     segments_to_check = segments or [(start, end)]
     reasons: list[str] = []
     for teacher in sorted(candidates, key=lambda t: t.name.lower()):
+        if (
+            hour_tracker is not None
+            and hour_tracker.enabled
+            and required_hours is not None
+            and not hour_tracker.can_assign(teacher, required_hours)
+        ):
+            allocation = hour_tracker.allocation_for(teacher)
+            remaining = hour_tracker.remaining_hours_for(teacher)
+            total_label = f"{allocation}" if allocation is not None else "0"
+            remaining_value = remaining if remaining is not None else 0
+            if remaining_value <= 0:
+                reasons.append(
+                    f"{teacher.name} a atteint sa limite de {total_label} h pour ce cours."
+                )
+            else:
+                reasons.append(
+                    f"{teacher.name} n'a plus que {remaining_value} h disponibles sur {total_label} h (besoin de {required_hours} h)."
+                )
+            continue
         if not all(
             teacher.is_available_during(segment_start, segment_end)
             for segment_start, segment_end in segments_to_check
@@ -1001,6 +1129,8 @@ def find_available_teacher(
     subgroup_label: str | None = None,
     segments: Optional[list[tuple[datetime, datetime]]] = None,
     target_class_ids: Set[int] | None = None,
+    hour_tracker: "TeacherHourTracker | None" = None,
+    required_hours: int | None = None,
 ) -> Optional[Teacher]:
     preferred: list[Teacher] = []
     allowed_ids: set[int] | None = None
@@ -1009,13 +1139,26 @@ def find_available_teacher(
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
 
+    allocation_teachers: list[Teacher] = []
+    allocation_ids: set[int] = set()
+    for allocation in getattr(course, "teacher_hour_allocations", []) or []:
+        teacher = allocation.teacher
+        if teacher is None or teacher.id is None:
+            continue
+        allocation_teachers.append(teacher)
+        allocation_ids.add(teacher.id)
+
     if link is not None:
         fallback_pool = link.assigned_teachers()
         allowed_ids = {teacher.id for teacher in fallback_pool if teacher.id is not None}
+        allowed_ids.update(allocation_ids)
     elif course.teachers:
         fallback_pool = list(course.teachers)
     else:
         fallback_pool = Teacher.query.all()
+
+    if allowed_ids is None and allocation_ids:
+        allowed_ids = set(allocation_ids)
 
     def _append_unique(target: list[Teacher], items: Iterable[Teacher]) -> None:
         seen = {teacher.id for teacher in target if teacher.id is not None}
@@ -1032,7 +1175,7 @@ def find_available_teacher(
             if teacher_id is not None:
                 seen.add(teacher_id)
 
-    candidates: list[Teacher] = []
+    primary_candidates: list[Teacher] = []
     if target_class_ids:
         target_label = _normalise_label(subgroup_label)
         existing_teachers: list[Teacher] = []
@@ -1054,33 +1197,53 @@ def find_available_teacher(
                 continue
             existing_teachers.append(teacher)
             seen_existing.add(teacher.id)
-        _append_unique(candidates, existing_teachers)
+        _append_unique(primary_candidates, existing_teachers)
 
-    _append_unique(candidates, preferred)
-    if not candidates:
-        _append_unique(
-            candidates,
-            sorted(
-                [teacher for teacher in fallback_pool if teacher not in preferred],
-                key=lambda t: t.name.lower(),
-            ),
-        )
+    _append_unique(primary_candidates, preferred)
+    _append_unique(primary_candidates, allocation_teachers)
 
-    for teacher in candidates:
-        segments_to_check = segments or [(start, end)]
-        if not all(
-            teacher.is_available_during(segment_start, segment_end)
-            for segment_start, segment_end in segments_to_check
-        ):
-            continue
-        if any(
-            overlaps(s.start_time, s.end_time, segment_start, segment_end)
-            for s in teacher.sessions
-            for segment_start, segment_end in segments_to_check
-        ):
-            continue
+    secondary_candidates: list[Teacher] = []
+    _append_unique(
+        secondary_candidates,
+        sorted(
+            [
+                teacher
+                for teacher in list(fallback_pool) + allocation_teachers
+                if teacher not in primary_candidates
+            ],
+            key=lambda t: t.name.lower(),
+        ),
+    )
+
+    def _find_match(candidates: list[Teacher]) -> Optional[Teacher]:
+        for teacher in candidates:
+            segments_to_check = segments or [(start, end)]
+            if (
+                hour_tracker is not None
+                and hour_tracker.enabled
+                and required_hours is not None
+                and not hour_tracker.can_assign(teacher, required_hours)
+            ):
+                continue
+            if not all(
+                teacher.is_available_during(segment_start, segment_end)
+                for segment_start, segment_end in segments_to_check
+            ):
+                continue
+            if any(
+                overlaps(s.start_time, s.end_time, segment_start, segment_end)
+                for s in teacher.sessions
+                for segment_start, segment_end in segments_to_check
+            ):
+                continue
+            return teacher
+        return None
+
+    teacher = _find_match(primary_candidates)
+    if teacher is not None:
         return teacher
-    return None
+
+    return _find_match(secondary_candidates)
 
 
 def _normalise_label(label: str | None) -> str:
@@ -1249,6 +1412,7 @@ def _relocate_sessions_for_groups(
     subgroup_label: str | None = None,
     context_label: str | None = None,
     require_exact_attendees: bool = False,
+    hour_tracker: "TeacherHourTracker | None" = None,
 ) -> int:
     matches = _matching_sessions_for_groups(
         course,
@@ -1278,6 +1442,7 @@ def _relocate_sessions_for_groups(
             total_hours += session.duration_hours
             if session in created_sessions:
                 created_sessions.remove(session)
+            _release_session_hours(session, hour_tracker)
             session_day = session.start_time.date()
             if session_day in per_day_hours:
                 per_day_hours[session_day] = max(
@@ -1450,7 +1615,9 @@ def _schedule_block_for_day(
     desired_hours: int,
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
+    hour_tracker: "TeacherHourTracker | None" = None,
     reporter: ScheduleReporter | None = None,
+    failure_reasons: list[str] | None = None,
 ) -> list[Session] | None:
     diagnostics = PlacementDiagnostics()
     context = class_group.name
@@ -1465,16 +1632,19 @@ def _schedule_block_for_day(
         desired_hours=desired_hours,
         base_offset=base_offset,
         pending_sessions=pending_sessions,
+        hour_tracker=hour_tracker,
         diagnostics=diagnostics,
     )
     if placement:
         return placement
     if desired_hours <= 1:
-        diagnostics.emit(
+        details = diagnostics.emit(
             reporter,
             context_label=context,
             day=day,
         )
+        if failure_reasons is not None:
+            failure_reasons.extend(details)
         return None
     placement = _try_split_block(
         course=course,
@@ -1485,15 +1655,18 @@ def _schedule_block_for_day(
         desired_hours=desired_hours,
         base_offset=base_offset,
         pending_sessions=pending_sessions,
+        hour_tracker=hour_tracker,
         diagnostics=diagnostics,
     )
     if placement:
         return placement
-    diagnostics.emit(
+    details = diagnostics.emit(
         reporter,
         context_label=context,
         day=day,
     )
+    if failure_reasons is not None:
+        failure_reasons.extend(details)
     return None
 
 
@@ -1507,6 +1680,7 @@ def _try_full_block(
     desired_hours: int,
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
+    hour_tracker: "TeacherHourTracker | None" = None,
     diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     required_capacity = course.capacity_needed_for(class_group)
@@ -1535,6 +1709,8 @@ def _try_full_block(
             link=link,
             subgroup_label=subgroup_label,
             target_class_ids=target_class_ids or None,
+            hour_tracker=hour_tracker,
+            required_hours=desired_hours,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1545,6 +1721,8 @@ def _try_full_block(
                         end_dt,
                         link=link,
                         subgroup_label=subgroup_label,
+                        hour_tracker=hour_tracker,
+                        required_hours=desired_hours,
                     )
                 )
             continue
@@ -1594,6 +1772,7 @@ def _try_full_block(
         # message.  En vidant la session SQLAlchemy dès la création, chaque
         # séance est insérée individuellement et on évite le chemin fautif.
         db.session.flush()
+        _record_session_hours(session, hour_tracker)
         return [session]
     return None
 
@@ -1608,6 +1787,7 @@ def _try_split_block(
     desired_hours: int,
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
+    hour_tracker: "TeacherHourTracker | None" = None,
     diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     segment_lengths = [2, 2] if desired_hours == 4 else [1] * desired_hours
@@ -1669,6 +1849,8 @@ def _try_split_block(
             subgroup_label=subgroup_label,
             segments=segment_datetimes,
             target_class_ids=target_class_ids or None,
+            hour_tracker=hour_tracker,
+            required_hours=desired_hours,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1680,6 +1862,8 @@ def _try_split_block(
                         link=link,
                         subgroup_label=subgroup_label,
                         segments=segment_datetimes,
+                        hour_tracker=hour_tracker,
+                        required_hours=desired_hours,
                     )
                 )
             continue
@@ -1744,6 +1928,7 @@ def _try_split_block(
             session.attendees = [class_group]
             db.session.add(session)
             db.session.flush()
+            _record_session_hours(session, hour_tracker)
             sessions.append(session)
         return sessions
     return None
@@ -1777,7 +1962,9 @@ def _cm_schedule_block_for_day(
     desired_hours: int,
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
+    hour_tracker: "TeacherHourTracker | None" = None,
     reporter: ScheduleReporter | None = None,
+    failure_reasons: list[str] | None = None,
 ) -> list[Session] | None:
     diagnostics = PlacementDiagnostics()
     context = ", ".join(group.name for group in class_groups) or course.name
@@ -1789,16 +1976,19 @@ def _cm_schedule_block_for_day(
         desired_hours=desired_hours,
         base_offset=base_offset,
         pending_sessions=pending_sessions,
+        hour_tracker=hour_tracker,
         diagnostics=diagnostics,
     )
     if placement:
         return placement
     if desired_hours <= 1:
-        diagnostics.emit(
+        details = diagnostics.emit(
             reporter,
             context_label=context,
             day=day,
         )
+        if failure_reasons is not None:
+            failure_reasons.extend(details)
         return None
     placement = _cm_try_split_block(
         course=course,
@@ -1808,15 +1998,18 @@ def _cm_schedule_block_for_day(
         desired_hours=desired_hours,
         base_offset=base_offset,
         pending_sessions=pending_sessions,
+        hour_tracker=hour_tracker,
         diagnostics=diagnostics,
     )
     if placement:
         return placement
-    diagnostics.emit(
+    details = diagnostics.emit(
         reporter,
         context_label=context,
         day=day,
     )
+    if failure_reasons is not None:
+        failure_reasons.extend(details)
     return None
 
 
@@ -1829,6 +2022,7 @@ def _cm_try_full_block(
     desired_hours: int,
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
+    hour_tracker: "TeacherHourTracker | None" = None,
     diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     if not class_groups:
@@ -1864,6 +2058,8 @@ def _cm_try_full_block(
             link=primary_link,
             subgroup_label=None,
             target_class_ids=target_class_ids or None,
+            hour_tracker=hour_tracker,
+            required_hours=desired_hours,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1874,6 +2070,8 @@ def _cm_try_full_block(
                         end_dt,
                         link=primary_link,
                         subgroup_label=None,
+                        hour_tracker=hour_tracker,
+                        required_hours=desired_hours,
                     )
                 )
             continue
@@ -1923,6 +2121,7 @@ def _cm_try_full_block(
         session.attendees = list(class_groups)
         db.session.add(session)
         db.session.flush()
+        _record_session_hours(session, hour_tracker)
         return [session]
     return None
 
@@ -1936,6 +2135,7 @@ def _cm_try_split_block(
     desired_hours: int,
     base_offset: int,
     pending_sessions: Iterable[Session] = (),
+    hour_tracker: "TeacherHourTracker | None" = None,
     diagnostics: PlacementDiagnostics | None = None,
 ) -> list[Session] | None:
     if not class_groups:
@@ -1987,6 +2187,8 @@ def _cm_try_split_block(
             subgroup_label=None,
             segments=segment_datetimes,
             target_class_ids=target_class_ids or None,
+            hour_tracker=hour_tracker,
+            required_hours=desired_hours,
         )
         if not teacher:
             if diagnostics is not None:
@@ -1998,6 +2200,8 @@ def _cm_try_split_block(
                         link=primary_link,
                         subgroup_label=None,
                         segments=segment_datetimes,
+                        hour_tracker=hour_tracker,
+                        required_hours=desired_hours,
                     )
                 )
             continue
@@ -2067,6 +2271,7 @@ def _cm_try_split_block(
             session.attendees = list(class_groups)
             db.session.add(session)
             db.session.flush()
+            _record_session_hours(session, hour_tracker)
             sessions.append(session)
         return sessions
     return None
@@ -2110,6 +2315,29 @@ def generate_schedule(
     reporter = ScheduleReporter(course)
     created_sessions: list[Session] = []
     placement_failures: list[str] = []
+    hour_tracker = TeacherHourTracker(course)
+    if hour_tracker.enabled:
+        allocation_entries: list[str] = []
+        sorted_allocations = sorted(
+            course.teacher_hour_allocations,
+            key=lambda allocation: (
+                (allocation.teacher.name or "") if allocation.teacher else "",
+                allocation.teacher_id or 0,
+            ),
+        )
+        for allocation in sorted_allocations:
+            teacher_name = (
+                allocation.teacher.name
+                if allocation.teacher is not None and allocation.teacher.name
+                else f"Enseignant {allocation.teacher_id}"
+            )
+            allocation_entries.append(
+                f"{teacher_name} : {max(int(allocation.hours or 0), 0)} h"
+            )
+        if allocation_entries:
+            reporter.info(
+                "Limites horaires par enseignant : " + ", ".join(allocation_entries)
+            )
 
     try:
         schedule_start, schedule_end = _resolve_schedule_window(
@@ -2298,6 +2526,7 @@ def generate_schedule(
             link_lookup = {
                 link.class_group_id: link for link in links if link.class_group_id is not None
             }
+            cm_failure_details: list[str] = []
             while hours_remaining > 0:
                 blocks_total = max(
                     (hours_remaining + slot_length_hours - 1) // slot_length_hours,
@@ -2436,7 +2665,9 @@ def generate_schedule(
                             desired_hours=desired_hours,
                             base_offset=base_offset,
                             pending_sessions=created_sessions,
+                            hour_tracker=hour_tracker,
                             reporter=reporter,
+                            failure_reasons=cm_failure_details,
                         )
                         if not block_sessions:
                             continue
@@ -2491,6 +2722,7 @@ def generate_schedule(
                                     context_label=", ".join(
                                         group.name for group in class_groups
                                     ),
+                                    hour_tracker=None,
                                 )
                                 if not relocated:
                                     return False
@@ -2502,6 +2734,7 @@ def generate_schedule(
                                     desired_hours=desired_hours,
                                     base_offset=base_offset,
                                     pending_sessions=created_sessions,
+                                    hour_tracker=None,
                                     reporter=None,
                                 )
                                 return bool(placement)
@@ -2524,6 +2757,7 @@ def generate_schedule(
                                 attempted_weeks=relocation_weeks,
                                 require_exact_attendees=True,
                                 context_label=", ".join(group.name for group in class_groups),
+                                hour_tracker=hour_tracker,
                             )
                             if relocated_hours:
                                 hours_remaining += relocated_hours
@@ -2542,6 +2776,9 @@ def generate_schedule(
                     "Impossible de planifier "
                     f"{hours_remaining} heure(s) supplémentaire(s) (cours magistral)"
                 )
+                detail_summary = _summarise_failure_details(cm_failure_details)
+                if detail_summary:
+                    message += f" — détails : {detail_summary}"
                 reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
                 placement_failures.append(message)
         if not placement_failures:
@@ -2631,6 +2868,7 @@ def generate_schedule(
             block_index = 0
             hours_remaining = hours_needed
             relocation_weeks: set[date] = set()
+            class_failure_details: list[str] = []
 
             while hours_remaining > 0:
                 blocks_total = max(
@@ -2803,7 +3041,9 @@ def generate_schedule(
                             desired_hours=desired_hours,
                             base_offset=base_offset,
                             pending_sessions=created_sessions,
+                            hour_tracker=hour_tracker,
                             reporter=reporter,
+                            failure_reasons=class_failure_details,
                         )
                         if not block_sessions:
                             continue
@@ -2870,6 +3110,7 @@ def generate_schedule(
                                         subgroup_label=subgroup_label,
                                     ),
                                     require_exact_attendees=require_exact,
+                                    hour_tracker=None,
                                 )
                                 if not relocated:
                                     return False
@@ -2897,6 +3138,7 @@ def generate_schedule(
                                             desired_hours=desired_hours,
                                             base_offset=base_offset,
                                             pending_sessions=created_sessions,
+                                            hour_tracker=None,
                                             reporter=None,
                                         )
                                         if placement:
@@ -2937,6 +3179,7 @@ def generate_schedule(
                                 class_group, link=link, subgroup_label=subgroup_label
                             ),
                             require_exact_attendees=require_exact,
+                            hour_tracker=hour_tracker,
                         )
                         if relocated_hours:
                             hours_remaining += relocated_hours
@@ -2950,7 +3193,9 @@ def generate_schedule(
                                 desired_hours=desired_hours,
                                 base_offset=base_offset,
                                 pending_sessions=created_sessions,
+                                hour_tracker=hour_tracker,
                                 reporter=reporter,
+                                failure_reasons=class_failure_details,
                             )
                             if block_sessions:
                                 created_sessions.extend(block_sessions)
@@ -2983,6 +3228,9 @@ def generate_schedule(
                 message = (
                     f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
                 )
+                detail_summary = _summarise_failure_details(class_failure_details)
+                if detail_summary:
+                    message += f" — détails : {detail_summary}"
                 reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
                 placement_failures.append(message)
     if not placement_failures:

@@ -727,6 +727,7 @@ def _validate_session_constraints(
     ignore_session_id: int | None = None,
     class_group_labels: dict[int, str | None] | None = None,
 ) -> str | None:
+    candidate_hours = max(int((end_dt - start_dt).total_seconds() // 3600), 0)
     if start_dt.weekday() >= 5:
         return "Les séances doivent être planifiées du lundi au vendredi."
     if ClosingPeriod.overlaps(start_dt.date(), end_dt.date()):
@@ -737,13 +738,37 @@ def _validate_session_constraints(
         return "L'enseignant n'est pas disponible sur ce créneau."
     if _has_conflict(teacher.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "L'enseignant a déjà une séance sur ce créneau."
+    allocations = {
+        allocation.teacher_id: max(int(allocation.hours or 0), 0)
+        for allocation in course.teacher_hour_allocations
+        if allocation.teacher_id is not None
+    }
+    if allocations and teacher.id is not None:
+        allowed = allocations.get(teacher.id, 0)
+        if candidate_hours > 0:
+            scheduled_hours = sum(
+                session.duration_hours
+                for session in course.sessions
+                if session.teacher_id == teacher.id
+                and (ignore_session_id is None or session.id != ignore_session_id)
+            )
+            if scheduled_hours + candidate_hours > allowed:
+                remaining = max(allowed - scheduled_hours, 0)
+                if remaining <= 0:
+                    return (
+                        f"L'enseignant {teacher.name} a atteint sa limite de "
+                        f"{allowed} h pour ce cours."
+                    )
+                return (
+                    f"L'enseignant {teacher.name} ne dispose plus que de {remaining} h "
+                    f"sur {allowed} h pour ce cours."
+                )
     if _has_conflict(room.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "La salle est déjà réservée sur ce créneau."
     for class_group in class_groups:
         subgroup_label: str | None = None
         if class_group_labels is not None and class_group.id is not None:
             subgroup_label = class_group_labels.get(class_group.id)
-        candidate_hours = max(int((end_dt - start_dt).total_seconds() // 3600), 0)
         if not class_group.is_available_during(
             start_dt,
             end_dt,
