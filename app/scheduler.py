@@ -313,7 +313,7 @@ class ScheduleReporter:
         text = message.strip()
         if not text:
             return
-        should_record = record and level in {"warning", "error"}
+        should_record = record and level == "error"
         if should_record:
             entry: dict[str, object] = {"level": level, "message": text}
             if suggestions:
@@ -411,7 +411,7 @@ class PlacementDiagnostics:
             full_message = (
                 f"{base_label} — {kind} — jour {day_label} : {reason}"
             )
-            reporter.warning(full_message, record=True)
+            reporter.error(full_message)
             formatted.append(full_message)
 
         if self.class_reasons and self.teacher_reasons:
