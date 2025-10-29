@@ -10,13 +10,96 @@
   <div class="col-xl-4">
     <div class="accordion" id="courseDetailsAccordion">
       <div class="accordion-item shadow-sm">
+        <h2 class="accordion-header" id="headingQuickActions">
+          <button
+            class="accordion-button collapsed bg-light"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#collapseQuickActions"
+            aria-expanded="false"
+            aria-controls="collapseQuickActions"
+          >
+            Actions rapides
+          </button>
+        </h2>
+        <div
+          id="collapseQuickActions"
+          class="accordion-collapse collapse"
+          aria-labelledby="headingQuickActions"
+          data-bs-parent="#courseDetailsAccordion"
+        >
+          <div class="accordion-body">
+            <div class="d-grid gap-2">
+              <form
+                method="post"
+                class="vstack gap-2"
+                data-chronos-progress
+                data-chronos-progress-async="true"
+                data-chronos-progress-hours="{{ course_remaining_hours }}"
+                data-chronos-progress-label="{{ course.name }} — {{ course_remaining_hours }} heure(s) restante(s)."
+              >
+                <input type="hidden" name="form" value="auto-schedule">
+                <div class="small text-muted">
+                  <div class="text-uppercase fw-semibold mb-1">Semaines de planification</div>
+                  {% if selected_course_week_labels %}
+                  <ul class="mb-2 ps-3">
+                    {% for label in selected_course_week_labels %}
+                    <li>{{ label }}</li>
+                    {% endfor %}
+                  </ul>
+                  {% else %}
+                  <div class="mb-2">Aucune semaine spécifique : toute la période du semestre sera utilisée.</div>
+                  {% endif %}
+                  <div>Modifiez cette sélection dans l'onglet « Contraintes du cours ».</div>
+                </div>
+                <button class="btn btn-success" type="submit">Générer automatiquement</button>
+              </form>
+              <form method="post">
+                <input type="hidden" name="form" value="clear-sessions">
+                <button class="btn btn-outline-danger" type="submit" {% if not course.sessions %}disabled{% endif %}>
+                  Supprimer toutes les séances planifiées
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-8">
+    <div class="accordion" id="courseSummaryAccordion">
+      <div class="accordion-item shadow-sm">
+        <h2 class="accordion-header" id="headingCourseCalendar">
+          <button
+            class="accordion-button bg-secondary text-white"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#collapseCourseCalendar"
+            aria-expanded="true"
+            aria-controls="collapseCourseCalendar"
+          >
+            Calendrier des séances
+          </button>
+        </h2>
+        <div
+          id="collapseCourseCalendar"
+          class="accordion-collapse collapse show"
+          aria-labelledby="headingCourseCalendar"
+          data-bs-parent="#courseSummaryAccordion"
+        >
+          <div class="accordion-body">
+        <div id="course-calendar"></div>
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item shadow-sm">
         <h2 class="accordion-header" id="headingCourseConstraints">
           <button
-            class="accordion-button bg-primary text-white"
+            class="accordion-button collapsed bg-primary text-white"
             type="button"
             data-bs-toggle="collapse"
             data-bs-target="#collapseCourseConstraints"
-            aria-expanded="true"
+            aria-expanded="false"
             aria-controls="collapseCourseConstraints"
           >
             Contraintes du cours
@@ -24,9 +107,9 @@
         </h2>
         <div
           id="collapseCourseConstraints"
-          class="accordion-collapse collapse show"
+          class="accordion-collapse collapse"
           aria-labelledby="headingCourseConstraints"
-          data-bs-parent="#courseDetailsAccordion"
+          data-bs-parent="#courseSummaryAccordion"
         >
           <div class="accordion-body">
             <form method="post" class="vstack gap-3">
@@ -273,89 +356,6 @@
           </div>
           <button type="submit" class="btn btn-primary">Enregistrer</button>
         </form>
-          </div>
-        </div>
-      </div>
-      <div class="accordion-item shadow-sm">
-        <h2 class="accordion-header" id="headingQuickActions">
-          <button
-            class="accordion-button collapsed bg-light"
-            type="button"
-            data-bs-toggle="collapse"
-            data-bs-target="#collapseQuickActions"
-            aria-expanded="false"
-            aria-controls="collapseQuickActions"
-          >
-            Actions rapides
-          </button>
-        </h2>
-        <div
-          id="collapseQuickActions"
-          class="accordion-collapse collapse"
-          aria-labelledby="headingQuickActions"
-          data-bs-parent="#courseDetailsAccordion"
-        >
-          <div class="accordion-body">
-            <div class="d-grid gap-2">
-              <form
-                method="post"
-                class="vstack gap-2"
-                data-chronos-progress
-                data-chronos-progress-async="true"
-                data-chronos-progress-hours="{{ course_remaining_hours }}"
-                data-chronos-progress-label="{{ course.name }} — {{ course_remaining_hours }} heure(s) restante(s)."
-              >
-                <input type="hidden" name="form" value="auto-schedule">
-                <div class="small text-muted">
-                  <div class="text-uppercase fw-semibold mb-1">Semaines de planification</div>
-                  {% if selected_course_week_labels %}
-                  <ul class="mb-2 ps-3">
-                    {% for label in selected_course_week_labels %}
-                    <li>{{ label }}</li>
-                    {% endfor %}
-                  </ul>
-                  {% else %}
-                  <div class="mb-2">Aucune semaine spécifique : toute la période du semestre sera utilisée.</div>
-                  {% endif %}
-                  <div>Modifiez cette sélection dans l'onglet « Contraintes du cours ».</div>
-                </div>
-                <button class="btn btn-success" type="submit">Générer automatiquement</button>
-              </form>
-              <form method="post">
-                <input type="hidden" name="form" value="clear-sessions">
-                <button class="btn btn-outline-danger" type="submit" {% if not course.sessions %}disabled{% endif %}>
-                  Supprimer toutes les séances planifiées
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="col-xl-8">
-    <div class="accordion" id="courseSummaryAccordion">
-      <div class="accordion-item shadow-sm">
-        <h2 class="accordion-header" id="headingCourseCalendar">
-          <button
-            class="accordion-button bg-secondary text-white"
-            type="button"
-            data-bs-toggle="collapse"
-            data-bs-target="#collapseCourseCalendar"
-            aria-expanded="true"
-            aria-controls="collapseCourseCalendar"
-          >
-            Calendrier des séances
-          </button>
-        </h2>
-        <div
-          id="collapseCourseCalendar"
-          class="accordion-collapse collapse show"
-          aria-labelledby="headingCourseCalendar"
-          data-bs-parent="#courseSummaryAccordion"
-        >
-          <div class="accordion-body">
-        <div id="course-calendar"></div>
           </div>
         </div>
       </div>
