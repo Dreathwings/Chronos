@@ -26,6 +26,10 @@
             <input type="hidden" name="form" value="generate">
             <button type="submit" class="btn btn-primary">Générer les cours</button>
           </form>
+          <form method="post">
+            <input type="hidden" name="form" value="evaluate">
+            <button type="submit" class="btn btn-outline-primary">Évaluer la qualité</button>
+          </form>
           <form method="post" onsubmit="return confirm('Supprimer toutes les séances générées ?');">
             <input type="hidden" name="form" value="clear">
             <button type="submit" class="btn btn-outline-danger">Supprimer toutes les séances</button>

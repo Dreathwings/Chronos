@@ -17,6 +17,7 @@ from flask import (
     request,
     url_for,
 )
+from markupsafe import Markup, escape
 from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -160,6 +161,145 @@ def _clear_course_schedule(course: Course) -> tuple[int, int]:
         db.session.delete(log)
 
     return removed_sessions, removed_logs
+
+
+def _course_allows_day(course: Course, day: date) -> bool:
+    semester_window = course.semester_window
+    if semester_window is not None:
+        if day < semester_window[0] or day > semester_window[1]:
+            return False
+    if course.allowed_weeks:
+        for span_start, span_end in course.allowed_week_ranges:
+            if span_start <= day <= span_end:
+                break
+        else:
+            return False
+    return day.weekday() < 5
+
+
+def _evaluate_generation_quality() -> dict[str, object]:
+    sessions = (
+        Session.query.options(
+            selectinload(Session.course)
+            .selectinload(Course.class_links)
+            .selectinload(CourseClassLink.class_group),
+            selectinload(Session.teacher),
+            selectinload(Session.room),
+            selectinload(Session.attendees),
+            selectinload(Session.class_group),
+        )
+        .order_by(Session.start_time.asc())
+        .all()
+    )
+
+    total_sessions = len(sessions)
+    issues: list[dict[str, object]] = []
+
+    for session in sessions:
+        course = session.course
+        teacher = session.teacher
+        room = session.room
+
+        if course is None:
+            issues.append(
+                {
+                    "session_id": session.id,
+                    "message": "Séance sans cours associé.",
+                }
+            )
+            continue
+
+        class_groups = list(session.attendees)
+        if not class_groups and session.class_group is not None:
+            class_groups = [session.class_group]
+
+        if not class_groups:
+            issues.append(
+                {
+                    "session_id": session.id,
+                    "message": f"{course.name} : aucune classe associée.",
+                }
+            )
+            continue
+
+        if teacher is None:
+            issues.append(
+                {
+                    "session_id": session.id,
+                    "message": f"{course.name} : aucun enseignant planifié.",
+                }
+            )
+            continue
+
+        if room is None:
+            issues.append(
+                {
+                    "session_id": session.id,
+                    "message": f"{course.name} : aucune salle attribuée.",
+                }
+            )
+            continue
+
+        start_time = session.start_time
+        end_time = session.end_time
+        if start_time is None or end_time is None:
+            issues.append(
+                {
+                    "session_id": session.id,
+                    "message": f"{course.name} : horaire incomplet.",
+                }
+            )
+            continue
+
+        if not _course_allows_day(course, start_time.date()):
+            issues.append(
+                {
+                    "session_id": session.id,
+                    "message": (
+                        f"{course.name} : séance positionnée hors de la période autorisée."
+                    ),
+                }
+            )
+            continue
+
+        labels: dict[int, str | None] = {}
+        if session.class_group_id and session.subgroup_label:
+            labels[session.class_group_id] = session.subgroup_label
+        for attendee in session.attendees or []:
+            if attendee.id is None:
+                continue
+            labels.setdefault(attendee.id, None)
+
+        error_message = _validate_session_constraints(
+            course,
+            teacher,
+            room,
+            class_groups,
+            start_time,
+            end_time,
+            ignore_session_id=session.id,
+            class_group_labels=labels or None,
+        )
+        if error_message:
+            class_names = ", ".join(
+                sorted(group.name for group in class_groups if group is not None)
+            )
+            timestamp = start_time.strftime("%d/%m/%Y %H:%M")
+            issues.append(
+                {
+                    "session_id": session.id,
+                    "message": (
+                        f"{course.name} — {timestamp} ({class_names}) : {error_message}"
+                    ),
+                }
+            )
+
+    return {
+        "total_sessions": total_sessions,
+        "error_count": len(issues),
+        "issues": issues,
+        "compliant_count": max(total_sessions - len(issues), 0),
+    }
 
 
 def _build_default_backgrounds() -> list[dict[str, object]]:
@@ -2072,6 +2212,42 @@ def generation_overview():
                 flash(
                     f"{failures} cours n'ont pas pu être planifiés. Consultez les recommandations ci-dessous.",
                     "warning",
+                )
+        elif action == "evaluate":
+            evaluation = _evaluate_generation_quality()
+            if _wants_json_response():
+                return jsonify(evaluation), 200
+
+            total_sessions = evaluation["total_sessions"]
+            error_count = evaluation["error_count"]
+            issues = evaluation["issues"]
+
+            if total_sessions == 0:
+                flash(
+                    "Aucune séance n'est planifiée pour le moment.",
+                    "info",
+                )
+            elif error_count:
+                summary = (
+                    f"{error_count} séance(s) ne respectent pas les règles de génération."
+                )
+                preview_entries = [
+                    escape(str(issue.get("message", ""))) for issue in issues[:5]
+                ]
+                if preview_entries:
+                    if len(issues) > 5:
+                        preview_entries.append("…")
+                    preview = "<br>".join(preview_entries)
+                    flash(
+                        Markup(f"{summary}<br><small>{preview}</small>"),
+                        "danger",
+                    )
+                else:
+                    flash(summary, "danger")
+            else:
+                flash(
+                    f"Toutes les {total_sessions} séance(s) respectent les règles de génération.",
+                    "success",
                 )
         elif action == "clear":
             courses = _load_courses_for_generation()

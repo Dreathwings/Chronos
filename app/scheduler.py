@@ -70,6 +70,39 @@ COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
 }
 
 
+class RelocationResult:
+    __slots__ = ("recovered_hours", "freed_slot")
+
+    def __init__(self, recovered_hours: int = 0, freed_slot: bool = False) -> None:
+        self.recovered_hours = int(recovered_hours)
+        self.freed_slot = bool(freed_slot)
+
+    def __bool__(self) -> bool:
+        return bool(self.recovered_hours) or self.freed_slot
+
+    def __int__(self) -> int:
+        return self.recovered_hours
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, RelocationResult):
+            return (
+                self.recovered_hours == other.recovered_hours
+                and self.freed_slot == other.freed_slot
+            )
+        if isinstance(other, int):
+            return self.recovered_hours == other
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return (
+            f"RelocationResult(recovered_hours={self.recovered_hours}, "
+            f"freed_slot={self.freed_slot})"
+        )
+
+
+NO_RELOCATION = RelocationResult(0, False)
+
+
 class TeacherAllocationState:
     def __init__(self, course: Course) -> None:
         self.course = course
@@ -1382,6 +1415,225 @@ def _matching_sessions_for_groups(
     return matches
 
 
+def _course_permits_day(course: Course, day: date) -> bool:
+    semester_window = course.semester_window
+    if semester_window is not None:
+        if day < semester_window[0] or day > semester_window[1]:
+            return False
+    if course.allowed_weeks:
+        for span_start, span_end in course.allowed_week_ranges:
+            if span_start <= day <= span_end:
+                break
+        else:
+            return False
+    return day.weekday() < 5
+
+
+def _session_can_move(
+    session: Session,
+    class_groups: list[ClassGroup],
+    start_dt: datetime,
+    end_dt: datetime,
+    *,
+    label_map: dict[int, str | None],
+) -> bool:
+    course = session.course
+    if course is None:
+        return False
+    teacher = session.teacher
+    room = session.room
+    if teacher is None or room is None:
+        return False
+    if start_dt >= end_dt:
+        return False
+    if start_dt.weekday() >= 5:
+        return False
+    if ClosingPeriod.overlaps(start_dt.date(), end_dt.date()):
+        return False
+    if not fits_in_windows(start_dt.time(), end_dt.time()):
+        return False
+    if not _course_permits_day(course, start_dt.date()):
+        return False
+    if not teacher.is_available_during(start_dt, end_dt):
+        return False
+    for existing in teacher.sessions:
+        if existing.id == session.id:
+            continue
+        if overlaps(existing.start_time, existing.end_time, start_dt, end_dt):
+            return False
+    for existing in room.sessions:
+        if existing.id == session.id:
+            continue
+        if overlaps(existing.start_time, existing.end_time, start_dt, end_dt):
+            return False
+
+    duration_hours = session.duration_hours
+    for group in class_groups:
+        if group is None:
+            continue
+        subgroup_label = label_map.get(group.id)
+        if not group.is_available_during(
+            start_dt,
+            end_dt,
+            ignore_session_id=session.id,
+            subgroup_label=subgroup_label,
+        ):
+            return False
+        if has_weekly_course_conflict(
+            course,
+            group,
+            start_dt,
+            subgroup_label=subgroup_label,
+            ignore_session_id=session.id,
+            additional_hours=duration_hours,
+        ):
+            return False
+        if not respects_weekly_chronology(
+            course,
+            group,
+            start_dt,
+            subgroup_label=subgroup_label,
+            ignore_session_id=session.id,
+        ):
+            return False
+    return True
+
+
+def _relocate_single_foreign_session(
+    session: Session,
+    week_start: date,
+) -> bool:
+    course = session.course
+    if course is None:
+        return False
+
+    class_groups = [group for group in (session.attendees or []) if group is not None]
+    if not class_groups:
+        if session.class_group is None:
+            return False
+        class_groups = [session.class_group]
+
+    duration_hours = session.duration_hours
+    if duration_hours <= 0:
+        return False
+
+    original_day = session.start_time.date()
+    try:
+        base_slot_index = START_TIMES.index(session.start_time.time())
+    except ValueError:
+        base_slot_index = None
+
+    candidate_days: list[date] = []
+    for offset in range(5):
+        candidate = week_start + timedelta(days=offset)
+        if candidate.weekday() >= 5:
+            continue
+        candidate_days.append(candidate)
+
+    candidate_days.sort(
+        key=lambda day: (
+            abs((day - original_day).days),
+            0 if day >= original_day else 1,
+            day.weekday(),
+        )
+    )
+
+    slot_indices = list(range(len(SCHEDULE_SLOTS)))
+    if base_slot_index is not None:
+        slot_indices.sort(key=lambda index: (abs(index - base_slot_index), index))
+
+    label_map: dict[int, str | None] = {}
+    if session.class_group_id is not None:
+        label_map[session.class_group_id] = session.subgroup_label
+    for attendee in session.attendees or []:
+        if attendee.id is not None:
+            label_map.setdefault(attendee.id, None)
+
+    for candidate_day in candidate_days:
+        if not _course_permits_day(course, candidate_day):
+            continue
+        for slot_index in slot_indices:
+            contiguous = _collect_contiguous_slots(slot_index, duration_hours)
+            if not contiguous:
+                continue
+            start_time = contiguous[0][0]
+            end_time = contiguous[-1][1]
+            start_dt = datetime.combine(candidate_day, start_time)
+            end_dt = datetime.combine(candidate_day, end_time)
+            if start_dt == session.start_time and end_dt == session.end_time:
+                continue
+            if not _session_can_move(
+                session,
+                class_groups,
+                start_dt,
+                end_dt,
+                label_map=label_map,
+            ):
+                continue
+            session.start_time = start_dt
+            session.end_time = end_dt
+            db.session.flush()
+            return True
+    return False
+
+
+def _relocate_foreign_sessions_for_groups(
+    *,
+    course: Course,
+    class_groups: Iterable[ClassGroup],
+    reporter: ScheduleReporter | None,
+    attempted_weeks: set[date],
+    subgroup_label: str | None = None,
+    context_label: str | None = None,
+) -> bool:
+    groups = [group for group in class_groups if group is not None]
+    if not groups:
+        return False
+
+    target_label = (
+        _normalise_label(subgroup_label) if subgroup_label is not None else None
+    )
+
+    sessions_by_week: dict[date, list[Session]] = defaultdict(list)
+    seen_ids: set[int] = set()
+    for group in groups:
+        for session in group.sessions + group.attending_sessions:
+            if session.id in seen_ids:
+                continue
+            seen_ids.add(session.id)
+            if session.course_id == course.id:
+                continue
+            if target_label is not None:
+                session_label = _normalise_label(session.subgroup_label)
+                if session_label and session_label != target_label:
+                    continue
+            sessions_by_week[_week_start_for(session.start_time.date())].append(
+                session
+            )
+
+    for week_start in sorted(sessions_by_week.keys(), reverse=True):
+        if week_start in attempted_weeks:
+            continue
+        targeted = sessions_by_week[week_start]
+        if not targeted:
+            continue
+        attempted_weeks.add(week_start)
+        for session in sorted(
+            targeted, key=lambda s: (s.start_time, s.id or 0)
+        ):
+            if _relocate_single_foreign_session(session, week_start):
+                if reporter is not None:
+                    context = context_label or course.name
+                    reporter.info(
+                        "Déplacement d'une séance de "
+                        f"{session.course.name} la semaine du "
+                        f"{week_start.strftime('%d/%m/%Y')} pour libérer un créneau "
+                        f"pour {context}."
+                    )
+                return True
+    return False
+
+
 def _relocate_sessions_for_groups(
     *,
     course: Course,
@@ -1394,7 +1646,8 @@ def _relocate_sessions_for_groups(
     subgroup_label: str | None = None,
     context_label: str | None = None,
     require_exact_attendees: bool = False,
-) -> int:
+    allow_external: bool = False,
+) -> RelocationResult:
     matches = _matching_sessions_for_groups(
         course,
         class_groups,
@@ -1402,8 +1655,18 @@ def _relocate_sessions_for_groups(
         subgroup_label=subgroup_label,
         require_exact_attendees=require_exact_attendees,
     )
-    if not matches:
-        return 0
+    if not matches and allow_external:
+        if _relocate_foreign_sessions_for_groups(
+            course=course,
+            class_groups=class_groups,
+            reporter=reporter,
+            attempted_weeks=attempted_weeks,
+            subgroup_label=subgroup_label,
+            context_label=context_label,
+        ):
+            return RelocationResult(0, True)
+    elif not matches:
+        return NO_RELOCATION
 
     sessions_by_week: dict[date, list[Session]] = defaultdict(list)
     for session in matches:
@@ -1443,8 +1706,17 @@ def _relocate_sessions_for_groups(
                 "Replanification des séances de la semaine du "
                 f"{week_start.strftime('%d/%m/%Y')} pour {context}."
             )
-        return total_hours
-    return 0
+        return RelocationResult(total_hours, False)
+    if allow_external and _relocate_foreign_sessions_for_groups(
+        course=course,
+        class_groups=class_groups,
+        reporter=reporter,
+        attempted_weeks=attempted_weeks,
+        subgroup_label=subgroup_label,
+        context_label=context_label,
+    ):
+        return RelocationResult(0, True)
+    return NO_RELOCATION
 
 
 def _latest_session_for_groups(
@@ -2718,7 +2990,10 @@ def generate_schedule(
                                             group.name for group in class_groups
                                         ),
                                     )
-                                    if not relocated:
+                                    if (
+                                        relocated.recovered_hours == 0
+                                        and not relocated.freed_slot
+                                    ):
                                         return False
                                     for base_offset in _candidate_base_offsets(day):
                                         placement = _cm_schedule_block_for_day(
@@ -2743,7 +3018,7 @@ def generate_schedule(
                                     weekday_frequencies.update(backup_weekdays)
 
                             if _simulate_cm_relocation():
-                                relocated_hours = _relocate_sessions_for_groups(
+                                relocation_result = _relocate_sessions_for_groups(
                                     course=course,
                                     class_groups=class_groups,
                                     created_sessions=created_sessions,
@@ -2754,8 +3029,11 @@ def generate_schedule(
                                     require_exact_attendees=True,
                                     context_label=", ".join(group.name for group in class_groups),
                                 )
-                                if relocated_hours:
-                                    hours_remaining += relocated_hours
+                                if relocation_result.recovered_hours:
+                                    hours_remaining += relocation_result.recovered_hours
+                                    block_index = max(block_index - 1, 0)
+                                    continue
+                                if relocation_result.freed_slot:
                                     block_index = max(block_index - 1, 0)
                                     continue
                             _warn_weekly_limit(reporter, weekly_limit_weeks)
@@ -3101,8 +3379,12 @@ def generate_schedule(
                                             subgroup_label=subgroup_label,
                                         ),
                                         require_exact_attendees=require_exact,
+                                        allow_external=course.course_type in {"TD", "TP"},
                                     )
-                                    if not relocated:
+                                    if (
+                                        relocated.recovered_hours == 0
+                                        and not relocated.freed_slot
+                                    ):
                                         return False
                                     candidate_days: list[date] = []
                                     if (
@@ -3155,7 +3437,7 @@ def generate_schedule(
                             require_exact, candidate_day, base_offset = (
                                 successful_relocation_plan
                             )
-                            relocated_hours = _relocate_sessions_for_groups(
+                            relocation_result = _relocate_sessions_for_groups(
                                 course=course,
                                 class_groups=[class_group],
                                 created_sessions=created_sessions,
@@ -3168,9 +3450,10 @@ def generate_schedule(
                                     class_group, link=link, subgroup_label=subgroup_label
                                 ),
                                 require_exact_attendees=require_exact,
+                                allow_external=course.course_type in {"TD", "TP"},
                             )
-                            if relocated_hours:
-                                hours_remaining += relocated_hours
+                            if relocation_result.recovered_hours:
+                                hours_remaining += relocation_result.recovered_hours
                                 block_index = max(block_index - 1, 0)
                                 block_sessions = _schedule_block_for_day(
                                     course=course,
@@ -3204,6 +3487,9 @@ def generate_schedule(
                                     hours_remaining = max(hours_remaining - block_hours, 0)
                                     block_index += 1
                                     continue
+                            if relocation_result.freed_slot:
+                                block_index = max(block_index - 1, 0)
+                                continue
                         _warn_weekly_limit(reporter, weekly_limit_weeks)
                         for week_start in sorted(chronology_weeks):
                             reporter.warning(
