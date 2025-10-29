@@ -589,7 +589,11 @@ class Session(db.Model, TimeStampedModel):
                     self.subgroup_label if attendee.id == self.class_group_id else None,
                 )
 
-        if self.course is not None and related_class_ids:
+        if (
+            primary_teacher is None
+            and self.course is not None
+            and related_class_ids
+        ):
             for link in self.course.class_links:
                 if link.class_group_id not in related_class_ids:
                     continue

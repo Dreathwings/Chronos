@@ -188,6 +188,60 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
 
+    def test_session_event_with_multiple_classes_lists_only_primary_teacher(self) -> None:
+        base_name = CourseName(name="Algorithmique")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_a = ClassGroup(name="INFO1", size=28)
+        class_b = ClassGroup(name="INFO2", size=26)
+        link_a = CourseClassLink(class_group=class_a)
+        link_b = CourseClassLink(class_group=class_b)
+        course.class_links.extend([link_a, link_b])
+        teacher_main = Teacher(name="Enseignant Principal")
+        teacher_other = Teacher(name="Enseignant Secondaire")
+        room = Room(name="TD-101", capacity=60)
+        db.session.add_all([
+            course,
+            class_a,
+            class_b,
+            base_name,
+            link_a,
+            link_b,
+            teacher_main,
+            teacher_other,
+            room,
+        ])
+        db.session.commit()
+
+        link_a.teacher_a = teacher_main
+        link_b.teacher_a = teacher_other
+        db.session.commit()
+
+        start = datetime(2025, 1, 13, 8, 0, 0)
+        end = datetime(2025, 1, 13, 10, 0, 0)
+        session = Session(
+            course=course,
+            teacher=teacher_main,
+            room=room,
+            class_group=class_a,
+            start_time=start,
+            end_time=end,
+        )
+        session.attendees = [class_a, class_b]
+        db.session.add(session)
+        db.session.commit()
+
+        event = session.as_event()
+        teacher_entries = event["extendedProps"].get("teachers") or []
+        self.assertEqual([entry["id"] for entry in teacher_entries], [teacher_main.id])
+        self.assertEqual(event["extendedProps"].get("teacher"), teacher_main.name)
+
     def test_best_teacher_duos_prefers_shared_availability(self) -> None:
         teacher_a = Teacher(name="Alice")
         teacher_b = Teacher(name="Bruno")
