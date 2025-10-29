@@ -2612,6 +2612,57 @@ def course_detail(course_id: int):
         key=lambda session: (session.start_time, session.id or 0),
     )
 
+    teacher_scheduled_hours: dict[int, int] = {}
+    for session in course_sessions:
+        if session.teacher_id is None:
+            continue
+        teacher_scheduled_hours[session.teacher_id] = (
+            teacher_scheduled_hours.get(session.teacher_id, 0)
+            + session.duration_hours
+        )
+
+    teacher_lookup = {teacher.id: teacher for teacher in teachers if teacher.id is not None}
+    teacher_hour_summary: list[dict[str, object]] = []
+    for teacher in available_teachers:
+        target_hours = int(teacher_hours_map.get(teacher.id, 0))
+        scheduled_hours = int(teacher_scheduled_hours.get(teacher.id or 0, 0))
+        teacher_hour_summary.append(
+            {
+                "teacher": teacher,
+                "target_hours": target_hours,
+                "scheduled_hours": scheduled_hours,
+                "remaining_hours": max(target_hours - scheduled_hours, 0),
+            }
+        )
+
+    known_teacher_ids = {entry["teacher"].id for entry in teacher_hour_summary if entry["teacher"].id is not None}
+    for teacher_id, scheduled_hours in teacher_scheduled_hours.items():
+        if teacher_id in known_teacher_ids:
+            continue
+        teacher = teacher_lookup.get(teacher_id)
+        if teacher is None:
+            continue
+        teacher_hour_summary.append(
+            {
+                "teacher": teacher,
+                "target_hours": 0,
+                "scheduled_hours": int(scheduled_hours),
+                "remaining_hours": 0,
+            }
+        )
+
+    teacher_hour_summary.sort(
+        key=lambda entry: ((entry["teacher"].name or "").lower(), entry["teacher"].id or 0)
+    )
+
+    total_target_hours = sum(entry["target_hours"] for entry in teacher_hour_summary)
+    total_scheduled_hours = sum(entry["scheduled_hours"] for entry in teacher_hour_summary)
+    teacher_hour_totals = {
+        "target_hours": total_target_hours,
+        "scheduled_hours": total_scheduled_hours,
+        "remaining_hours": max(total_target_hours - total_scheduled_hours, 0),
+    }
+
     closing_spans = _closing_period_spans()
 
     week_ranges = _semester_week_ranges(course.semester)
@@ -2687,6 +2738,8 @@ def course_detail(course_id: int):
         course_week_session_map=course_week_session_map,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
+        teacher_hour_summary=teacher_hour_summary,
+        teacher_hour_totals=teacher_hour_totals,
     )
 
 

@@ -29,7 +29,46 @@
           data-bs-parent="#courseSummaryAccordion"
         >
           <div class="accordion-body">
-        <div id="course-calendar"></div>
+            <div id="course-calendar"></div>
+            <div class="mt-4">
+              <h3 class="h6 text-uppercase text-muted mb-3">Répartition des heures</h3>
+              {% if teacher_hour_summary %}
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th scope="col">Enseignant</th>
+                      <th scope="col" class="text-end">Objectif</th>
+                      <th scope="col" class="text-end">Planifié</th>
+                      <th scope="col" class="text-end">Restant</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for entry in teacher_hour_summary %}
+                    <tr>
+                      <th scope="row">{{ entry.teacher.name }}</th>
+                      <td class="text-end">{{ entry.target_hours }} h</td>
+                      <td class="text-end">{{ entry.scheduled_hours }} h</td>
+                      <td class="text-end">{{ entry.remaining_hours }} h</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                  <tfoot class="table-light">
+                    <tr>
+                      <th scope="row">Total</th>
+                      <td class="text-end">{{ teacher_hour_totals['target_hours'] }} h</td>
+                      <td class="text-end">{{ teacher_hour_totals['scheduled_hours'] }} h</td>
+                      <td class="text-end">{{ teacher_hour_totals['remaining_hours'] }} h</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              {% else %}
+              <p class="text-muted small mb-0">
+                Associez des enseignants au cours pour suivre le volume planifié.
+              </p>
+              {% endif %}
+            </div>
           </div>
         </div>
       </div>

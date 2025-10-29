@@ -122,6 +122,58 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         self.assertIsNotNone(updated)
         self.assertEqual(updated.teacher_id, teacher_b.id)
 
+    def test_course_detail_displays_teacher_hour_summary(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        room = Room(name="B201", capacity=24)
+        db.session.add_all([teacher_a, teacher_b, room])
+        db.session.commit()
+
+        course.teachers.extend([teacher_a, teacher_b])
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, course=course, target_hours=6),
+                CourseTeacherAllocation(teacher=teacher_b, course=course, target_hours=4),
+            ]
+        )
+
+        first_start = datetime(2024, 1, 8, 8, 0, 0)
+        second_start = datetime(2024, 1, 9, 10, 0, 0)
+        session_a = Session(
+            course=course,
+            teacher=teacher_a,
+            room=room,
+            class_group=class_group,
+            start_time=first_start,
+            end_time=first_start + timedelta(hours=2),
+        )
+        session_b = Session(
+            course=course,
+            teacher=teacher_b,
+            room=room,
+            class_group=class_group,
+            start_time=second_start,
+            end_time=second_start + timedelta(hours=2),
+        )
+        session_a.attendees = [class_group]
+        session_b.attendees = [class_group]
+        db.session.add_all([session_a, session_b])
+        db.session.commit()
+
+        client = self.app.test_client()
+        base_path = self.app.config.get("URL_PREFIX", "") or ""
+        response = client.get(f"{base_path}/matiere/{course.id}")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("Répartition des heures", html)
+        self.assertIn("Alice", html)
+        self.assertIn("Bruno", html)
+        self.assertIn("6 h", html)
+        self.assertIn("4 h", html)
+        self.assertIn("2 h", html)
+
     def test_realign_helper_updates_sessions(self) -> None:
         course, link, class_group = self._create_tp_course()
         teacher_a = Teacher(name="Alice")
