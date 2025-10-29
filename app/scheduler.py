@@ -408,11 +408,9 @@ class PlacementDiagnostics:
             reason = message.strip()
             if not reason:
                 return
-            full_message = (
-                f"{base_label} — {kind} — jour {day_label} : {reason}"
-            )
-            reporter.error(full_message)
-            formatted.append(full_message)
+            base_message = f"{base_label} — {kind} — jour {day_label}"
+            reporter.error(base_message)
+            formatted.append(base_message)
 
         if self.class_reasons and self.teacher_reasons:
             class_detail = "; ".join(sorted(self.class_reasons))
