@@ -915,11 +915,18 @@ def _validate_session_constraints(
         return "L'enseignant a déjà une séance sur ce créneau."
     if _has_conflict(room.sessions, start_dt, end_dt, ignore_session_id=ignore_session_id):
         return "La salle est déjà réservée sur ce créneau."
+    max_duration = max(int(course.session_length_hours or 0), 0)
+    candidate_hours = max(int((end_dt - start_dt).total_seconds() // 3600), 0)
+    if max_duration and candidate_hours > max_duration:
+        return (
+            "La durée maximale d'une séance pour ce cours est de "
+            f"{max_duration} heure(s)."
+        )
+
     for class_group in class_groups:
         subgroup_label: str | None = None
         if class_group_labels is not None and class_group.id is not None:
             subgroup_label = class_group_labels.get(class_group.id)
-        candidate_hours = max(int((end_dt - start_dt).total_seconds() // 3600), 0)
         if not class_group.is_available_during(
             start_dt,
             end_dt,

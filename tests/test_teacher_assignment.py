@@ -1299,8 +1299,11 @@ class WeeklyLimitTestCase(DatabaseTestCase):
         course, class_group, room = self._create_course()
         teacher = self._create_teacher()
 
+        course.sessions_per_week = 2
+        db.session.commit()
+
         first_start = datetime(2024, 1, 8, 8, 0, 0)
-        first_end = datetime(2024, 1, 8, 9, 0, 0)
+        first_end = datetime(2024, 1, 8, 10, 0, 0)
         first_session = Session(
             course=course,
             teacher=teacher,
@@ -1314,7 +1317,7 @@ class WeeklyLimitTestCase(DatabaseTestCase):
         db.session.commit()
 
         second_start = datetime(2024, 1, 10, 8, 0, 0)
-        second_end = datetime(2024, 1, 10, 9, 0, 0)
+        second_end = datetime(2024, 1, 10, 10, 0, 0)
         self.assertIsNone(
             _validate_session_constraints(
                 course,
@@ -1338,8 +1341,8 @@ class WeeklyLimitTestCase(DatabaseTestCase):
         db.session.add(second_session)
         db.session.commit()
 
-        third_start = datetime(2024, 1, 10, 13, 30, 0)
-        third_end = datetime(2024, 1, 10, 14, 30, 0)
+        third_start = datetime(2024, 1, 8, 13, 30, 0)
+        third_end = datetime(2024, 1, 8, 15, 30, 0)
         error = _validate_session_constraints(
             course,
             teacher,
@@ -1348,7 +1351,8 @@ class WeeklyLimitTestCase(DatabaseTestCase):
             third_start,
             third_end,
         )
-        self.assertIsNone(error)
+        self.assertIsNotNone(error)
+        self.assertIn("durée hebdomadaire", error)
 
         next_week_start = third_start + timedelta(days=7)
         next_week_end = third_end + timedelta(days=7)
@@ -1369,9 +1373,31 @@ class WeeklyLimitTestCase(DatabaseTestCase):
                 class_group,
                 third_start,
                 ignore_session_id=first_session.id,
-                additional_hours=1,
+                additional_hours=2,
             )
         )
+
+    def test_validation_blocks_session_exceeding_max_duration(self) -> None:
+        course, class_group, room = self._create_course()
+        teacher = self._create_teacher()
+
+        course.session_length_hours = 1
+        db.session.commit()
+
+        start_dt = datetime(2024, 1, 8, 8, 0, 0)
+        end_dt = datetime(2024, 1, 8, 10, 0, 0)
+
+        error = _validate_session_constraints(
+            course,
+            teacher,
+            room,
+            [class_group],
+            start_dt,
+            end_dt,
+        )
+
+        self.assertIsNotNone(error)
+        self.assertIn("durée maximale", error)
 
     def test_weekly_limit_independent_between_course_classes(self) -> None:
         course, primary_class, room = self._create_course()
@@ -1471,6 +1497,7 @@ class WeeklyLimitTestCase(DatabaseTestCase):
                 class_group,
                 overlap_start,
                 subgroup_label="A",
+                ignore_session_id=first_session.id,
                 additional_hours=1,
             )
         )

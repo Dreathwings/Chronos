@@ -1075,6 +1075,29 @@ def _course_class_hours_in_week(
     )
 
 
+def _weekly_session_target(course: Course, week_start: date) -> tuple[int, bool]:
+    fallback = max(int(course.sessions_per_week or 0), 0)
+    explicit = False
+    target: int | None = None
+    canonical_week = _week_start_for(week_start)
+    for entry in course.allowed_weeks:
+        entry_week = _week_start_for(entry.week_start)
+        if entry_week != canonical_week:
+            continue
+        if entry.sessions_target is not None:
+            explicit = True
+            try:
+                target = max(int(entry.sessions_target), 0)
+            except (TypeError, ValueError):
+                target = 0
+        else:
+            target = fallback
+        break
+    if target is None:
+        target = fallback
+    return target, explicit
+
+
 def has_weekly_course_conflict(
     course: Course,
     class_group: ClassGroup,
@@ -1085,7 +1108,44 @@ def has_weekly_course_conflict(
     ignore_session_id: int | None = None,
     additional_hours: int | None = None,
 ) -> bool:
-    return False
+    if isinstance(start, datetime):
+        target_day = start.date()
+    else:
+        target_day = start
+    week_start, week_end = _week_bounds(target_day)
+
+    weekly_limit, explicit = _weekly_session_target(course, week_start)
+
+    sessions = list(
+        _course_class_sessions_in_week(
+            course,
+            class_group,
+            week_start,
+            week_end,
+            pending_sessions,
+            subgroup_label=subgroup_label,
+            ignore_session_id=ignore_session_id,
+        )
+    )
+    occurrence_count = len(sessions)
+
+    if weekly_limit <= 0:
+        if explicit:
+            # Semaine explicitement bloquée.
+            return bool(additional_hours or occurrence_count)
+        return False
+
+    if occurrence_count >= weekly_limit:
+        return True
+
+    candidate_hours = max(int(additional_hours or 0), 0)
+    if occurrence_count + (1 if candidate_hours else 0) > weekly_limit:
+        return True
+
+    session_length = max(int(course.session_length_hours or 0), 0) or 1
+    total_hours = sum(session.duration_hours for session in sessions) + candidate_hours
+    allowed_hours = weekly_limit * session_length
+    return total_hours > allowed_hours
 
 
 def _warn_weekly_limit(
