@@ -2586,6 +2586,7 @@ def generate_schedule(
     window_end: date | None = None,
     allowed_weeks: Iterable[tuple[date, date]] | None = None,
     progress: ScheduleProgress | None = None,
+    max_new_hours: int | None = None,
 ) -> list[Session]:
     progress = progress or NullScheduleProgress()
     reporter = ScheduleReporter(course)
@@ -2594,6 +2595,14 @@ def generate_schedule(
     allocation_state = TeacherAllocationState(course)
     _set_allocation_state(course, allocation_state)
     try:
+        quota_remaining: int | None
+        if max_new_hours is None:
+            quota_remaining = None
+        else:
+            try:
+                quota_remaining = max(int(max_new_hours), 0)
+            except (TypeError, ValueError):
+                quota_remaining = 0
         try:
             schedule_start, schedule_end = _resolve_schedule_window(
                 course, window_start, window_end
@@ -2808,6 +2817,8 @@ def generate_schedule(
             total_required = effective_occurrences * course.session_length_hours
             already_scheduled = sum(existing_day_hours.values())
             hours_remaining = max(total_required - already_scheduled, 0)
+            if quota_remaining is not None:
+                hours_remaining = min(hours_remaining, quota_remaining)
             progress.initialise(hours_remaining)
             reporter.info(
                 f"Heures requises : {total_required} h — déjà planifiées : {already_scheduled} h"
@@ -2958,7 +2969,7 @@ def generate_schedule(
                         return offsets
 
                     def _attempt_day(day: date) -> bool:
-                        nonlocal hours_remaining, block_index
+                        nonlocal hours_remaining, block_index, quota_remaining
                         week_start, _ = _week_bounds(day)
                         conflict_detected = False
                         for group in class_groups:
@@ -3002,6 +3013,8 @@ def generate_schedule(
                             block_hours = sum(session.duration_hours for session in block_sessions)
                             if block_hours > 0:
                                 progress.record(block_hours, sessions=len(block_sessions))
+                            if quota_remaining is not None:
+                                quota_remaining = max(quota_remaining - block_hours, 0)
                             for session in block_sessions:
                                 reporter.session_created(session)
                                 weekday_frequencies[session.start_time.weekday()] += 1
@@ -3161,12 +3174,20 @@ def generate_schedule(
                 )
                 hours_needed_map[(link.class_group_id, subgroup_label or None)] = amount
                 total_hours_needed += max(amount, 0)
+        if quota_remaining is not None:
+            total_hours_needed = min(total_hours_needed, quota_remaining)
         progress.initialise(total_hours_needed)
 
         for link in links:
+            if quota_remaining is not None and quota_remaining <= 0:
+                break
             class_group = link.class_group
             for subgroup_label in link.group_labels():
+                if quota_remaining is not None and quota_remaining <= 0:
+                    break
                 hours_needed = hours_needed_map.get((class_group.id, subgroup_label or None), 0)
+                if quota_remaining is not None:
+                    hours_needed = min(hours_needed, quota_remaining)
                 if hours_needed == 0:
                     continue
                 available_days = [
@@ -3200,6 +3221,9 @@ def generate_schedule(
                 relocation_weeks: set[date] = set()
 
                 while hours_remaining > 0:
+                    if quota_remaining is not None and quota_remaining <= 0:
+                        hours_remaining = 0
+                        break
                     blocks_total = max(
                         (hours_remaining + slot_length_hours - 1) // slot_length_hours,
                         1,
@@ -3305,7 +3329,7 @@ def generate_schedule(
                         return offsets
 
                     def _attempt_day(day: date) -> bool:
-                        nonlocal hours_remaining, block_index
+                        nonlocal hours_remaining, block_index, quota_remaining
                         week_start, _ = _week_bounds(day)
                         if has_weekly_course_conflict(
                             course,
@@ -3382,6 +3406,8 @@ def generate_schedule(
                             )
                             if block_hours > 0:
                                 progress.record(block_hours, sessions=len(block_sessions))
+                            if quota_remaining is not None:
+                                quota_remaining = max(quota_remaining - block_hours, 0)
                             for session in block_sessions:
                                 reporter.session_created(session)
                                 weekday_frequencies[session.start_time.weekday()] += 1
@@ -3536,6 +3562,10 @@ def generate_schedule(
                                     if block_hours > 0:
                                         progress.record(
                                             block_hours, sessions=len(block_sessions)
+                                        )
+                                    if quota_remaining is not None:
+                                        quota_remaining = max(
+                                            quota_remaining - block_hours, 0
                                         )
                                     for session in block_sessions:
                                         reporter.session_created(session)

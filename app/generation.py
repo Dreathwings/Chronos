@@ -170,6 +170,7 @@ class WeeklyGenerationPlanner:
                         window_end=week_end,
                         allowed_weeks=[(week_start, week_end, weekly_goal)],
                         progress=slice_progress,
+                        max_new_hours=target_hours,
                     )
                 except ValueError as exc:
                     state.mark_failed(str(exc))
