@@ -68,6 +68,21 @@ class CourseScheduleState:
             goal = remaining
         return max(0, min(goal, remaining))
 
+    def weekly_occurrence_multiplier(self) -> int:
+        if self.course.is_cm:
+            return 1
+        total = sum(link.group_count or 0 for link in self.course.class_links)
+        return max(total, 1)
+
+    def weekly_hours_target(self, week_start: date) -> int:
+        weekly_goal = self.weekly_goal(week_start)
+        if weekly_goal <= 0:
+            return 0
+        target = weekly_goal * self.session_length * self.weekly_occurrence_multiplier()
+        if self.pending_hours > 0:
+            target = min(target, self.pending_hours)
+        return max(int(target), 0)
+
     def is_active_during(self, week_start: date, week_end: date) -> bool:
         for span_start, span_end in self.allowed_spans:
             if span_end < week_start or span_start > week_end:
@@ -160,7 +175,9 @@ class WeeklyGenerationPlanner:
                     f"{state.course.name} — semaine du {week_start.strftime('%d/%m/%Y')}"
                 )
                 slice_progress = self.tracker.create_slice(label=slice_label)
-                target_hours = weekly_goal * state.session_length
+                target_hours = state.weekly_hours_target(week_start)
+                if target_hours <= 0:
+                    continue
                 slice_progress.initialise(target_hours)
 
                 try:
