@@ -21,6 +21,7 @@ class CourseScheduleState:
     allowed_spans: List[tuple[date, date]] = field(default_factory=list)
     weekly_targets: dict[date, int] = field(default_factory=dict)
     pending_hours: int = 0
+    carry_over_hours: int = 0
     failed: bool = False
     failure_reason: str | None = None
 
@@ -45,6 +46,7 @@ class CourseScheduleState:
         if self.pending_hours == 0:
             self.failed = False
             self.failure_reason = None
+            self.carry_over_hours = 0
 
     @property
     def session_length(self) -> int:
@@ -82,6 +84,32 @@ class CourseScheduleState:
         if self.pending_hours > 0:
             target = min(target, self.pending_hours)
         return max(int(target), 0)
+
+    def planned_hours_for_week(self, week_start: date) -> int:
+        base_target = self.weekly_hours_target(week_start)
+        total = base_target + max(self.carry_over_hours, 0)
+        if self.pending_hours > 0:
+            total = min(total, self.pending_hours)
+        return max(int(total), 0)
+
+    def hours_per_occurrence(self) -> int:
+        return max(self.session_length * self.weekly_occurrence_multiplier(), 1)
+
+    def occurrences_for_hours(self, hours: int) -> int:
+        if hours <= 0:
+            return 0
+        per_occurrence = self.hours_per_occurrence()
+        return math.ceil(max(int(hours), 0) / per_occurrence)
+
+    def record_week_result(self, planned_hours: int, actual_hours: int) -> None:
+        planned = max(int(planned_hours), 0)
+        actual = max(int(actual_hours), 0)
+        if actual >= planned:
+            self.carry_over_hours = 0
+        else:
+            self.carry_over_hours = planned - actual
+        if self.pending_hours <= 0:
+            self.carry_over_hours = 0
 
     def is_active_during(self, week_start: date, week_end: date) -> bool:
         for span_start, span_end in self.allowed_spans:
@@ -167,18 +195,21 @@ class WeeklyGenerationPlanner:
             active_states.sort(key=self._state_sort_key)
 
             for state in active_states:
-                weekly_goal = state.weekly_goal(week_start)
-                if weekly_goal <= 0:
+                base_weekly_goal = state.weekly_goal(week_start)
+                planned_hours = state.planned_hours_for_week(week_start)
+                if planned_hours <= 0:
                     continue
+
+                occurrences_goal = state.occurrences_for_hours(planned_hours)
+                weekly_goal = max(base_weekly_goal, occurrences_goal)
+                if weekly_goal <= 0:
+                    weekly_goal = occurrences_goal or base_weekly_goal or 1
 
                 slice_label = (
                     f"{state.course.name} — semaine du {week_start.strftime('%d/%m/%Y')}"
                 )
                 slice_progress = self.tracker.create_slice(label=slice_label)
-                target_hours = state.weekly_hours_target(week_start)
-                if target_hours <= 0:
-                    continue
-                slice_progress.initialise(target_hours)
+                slice_progress.initialise(planned_hours)
 
                 try:
                     created_sessions = generate_schedule(
@@ -187,7 +218,7 @@ class WeeklyGenerationPlanner:
                         window_end=week_end,
                         allowed_weeks=[(week_start, week_end, weekly_goal)],
                         progress=slice_progress,
-                        max_new_hours=target_hours,
+                        max_new_hours=planned_hours,
                     )
                 except ValueError as exc:
                     state.mark_failed(str(exc))
@@ -195,6 +226,8 @@ class WeeklyGenerationPlanner:
                     errors.append(f"{state.course.name} : {exc}")
                     continue
 
+                actual_hours = sum(session.duration_hours for session in created_sessions)
+                state.record_week_result(planned_hours, actual_hours)
                 total_created += len(created_sessions)
                 db.session.commit()
                 state.refresh()

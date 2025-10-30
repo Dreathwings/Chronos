@@ -1,5 +1,7 @@
 import unittest
 
+from datetime import timedelta
+
 from app import create_app, db
 from app.generation import CourseScheduleState
 from app.models import ClassGroup, Course, CourseClassLink, CourseName
@@ -62,6 +64,21 @@ class CourseScheduleStateWeeklyTargetTestCase(DatabaseTestCase):
         target = state.weekly_hours_target(week_start)
 
         self.assertEqual(target, 2)
+
+    def test_carry_over_hours_are_added_to_next_week(self) -> None:
+        course = self._create_course("TD", [1])
+        state = CourseScheduleState(course)
+        week_start, _ = state.allowed_spans[0]
+
+        initial_plan = state.planned_hours_for_week(week_start)
+        self.assertEqual(initial_plan, 2)
+
+        state.record_week_result(initial_plan, 0)
+
+        next_week = week_start + timedelta(days=7)
+        subsequent_plan = state.planned_hours_for_week(next_week)
+
+        self.assertEqual(subsequent_plan, 4)
 
 
 if __name__ == "__main__":
