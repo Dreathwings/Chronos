@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from itertools import combinations
 from typing import Iterable, List, Optional, Set
 
 from flask import current_app
@@ -68,6 +70,39 @@ COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
     "EVAL": 3,
     "Eval": 3,
 }
+
+
+SESSION_TYPE_ORDER = ["CM", "SAE", "EVAL", "TD", "TP"]
+
+
+@dataclass
+class SessionRequest:
+    course_type: str
+    class_groups: list[ClassGroup]
+    subgroup_label: str | None
+    link: CourseClassLink | None
+    duration_hours: int
+    required_teachers: int
+    index: int
+    preferred_teachers: list[Teacher] = field(default_factory=list)
+    available_slots: list[tuple[datetime, datetime]] = field(default_factory=list)
+    carry_count: int = 0
+
+    def teacher_tracking_key(self) -> tuple[int | None, str | None]:
+        if not self.class_groups:
+            return (None, (self.subgroup_label or "") or None)
+        reference = self.class_groups[0]
+        return (reference.id, (self.subgroup_label or "") or None)
+
+    def context_label(self, course: Course) -> str:
+        if self.course_type == "CM":
+            return f"{course.name} — CM"
+        if not self.class_groups:
+            return course.name
+        names = ", ".join(group.name for group in self.class_groups)
+        if self.subgroup_label:
+            return f"{course.name} — {names} ({self.subgroup_label})"
+        return f"{course.name} — {names}"
 
 
 class TeacherAllocationState:
@@ -2178,7 +2213,7 @@ def _resolve_schedule_window(
     return start, end
 
 
-def generate_schedule(
+def _legacy_generate_schedule(
     course: Course,
     *,
     window_start: date | None = None,
@@ -3186,6 +3221,533 @@ def generate_schedule(
             raise ValueError(summary)
         progress.complete(f"{len(created_sessions)} séance(s) générée(s)")
         reporter.finalise(len(created_sessions))
+        return created_sessions
+    finally:
+        _clear_allocation_state(course)
+
+
+def _occurrences_needed(total_hours: int, duration_hours: int) -> int:
+    if duration_hours <= 0:
+        return 0
+    if total_hours <= 0:
+        return 0
+    return (total_hours + duration_hours - 1) // duration_hours
+
+
+def _request_priority(request: SessionRequest) -> tuple[int, int]:
+    type_label = (request.course_type or "").upper()
+    try:
+        type_index = SESSION_TYPE_ORDER.index(type_label)
+    except ValueError:
+        type_index = len(SESSION_TYPE_ORDER)
+    return (type_index, request.index)
+
+
+def _normalise_course_type(course: Course) -> str:
+    label = (course.course_type or "").upper()
+    if label in {"EVAL", "EVALUATION"}:
+        return "EVAL"
+    if label == "TEST":
+        return "EVAL"
+    return label
+
+
+def _normalise_allowed_weeks(
+    allowed_weeks: Iterable[tuple[date, date]] | None,
+    *,
+    schedule_start: date,
+    schedule_end: date,
+    fallback_weekly_goal: int,
+) -> tuple[list[tuple[date, date]], dict[date, int]]:
+    if not allowed_weeks:
+        return [], {}
+    spans: list[tuple[date, date]] = []
+    weekly_targets: dict[date, int] = {}
+    for entry in allowed_weeks:
+        if entry is None:
+            continue
+        if isinstance(entry, (list, tuple)):
+            if len(entry) < 2:
+                continue
+            week_start = entry[0]
+            week_end = entry[1]
+            goal = entry[2] if len(entry) > 2 else None
+        else:
+            continue
+        if week_start is None or week_end is None:
+            continue
+        if week_end < week_start:
+            week_start, week_end = week_end, week_start
+        span_start = max(schedule_start, week_start)
+        span_end = min(schedule_end, week_end)
+        if span_start > span_end:
+            continue
+        spans.append((span_start, span_end))
+        canonical = _week_start_for(week_start)
+        try:
+            goal_value = int(goal) if goal is not None else fallback_weekly_goal
+        except (TypeError, ValueError):
+            goal_value = fallback_weekly_goal
+        weekly_targets[canonical] = max(goal_value, 0)
+    spans.sort(key=lambda span: span[0])
+    return spans, weekly_targets
+
+
+def _week_is_allowed(week_start: date, spans: list[tuple[date, date]]) -> bool:
+    if not spans:
+        return True
+    week_end = week_start + timedelta(days=6)
+    for span_start, span_end in spans:
+        if week_start > span_end or week_end < span_start:
+            continue
+        return True
+    return False
+
+
+def _build_session_requests(course: Course) -> list[SessionRequest]:
+    duration = max(int(course.session_length_hours or 0), 1)
+    course_type = _normalise_course_type(course)
+    requests: list[SessionRequest] = []
+    index = 0
+    if course_type == "CM":
+        class_groups = [group for group in course.classes if group is not None]
+        unique_groups: list[ClassGroup] = []
+        seen_ids: set[int] = set()
+        for group in class_groups:
+            if group.id is None:
+                continue
+            if group.id in seen_ids:
+                continue
+            seen_ids.add(group.id)
+            unique_groups.append(group)
+        if not unique_groups:
+            return []
+        pending_hours = max(course.total_required_hours - course.scheduled_hours, 0)
+        occurrences = _occurrences_needed(pending_hours, duration)
+        for _ in range(occurrences):
+            request = SessionRequest(
+                course_type="CM",
+                class_groups=list(unique_groups),
+                subgroup_label=None,
+                link=None,
+                duration_hours=duration,
+                required_teachers=1,
+                index=index,
+                preferred_teachers=list(course.teachers),
+            )
+            requests.append(request)
+            index += 1
+        return requests
+
+    for link in course.class_links:
+        class_group = link.class_group
+        if class_group is None:
+            continue
+        if course_type == "TP" and link.group_count > 1:
+            for label in link.group_labels():
+                hours_needed = _class_hours_needed(
+                    course,
+                    class_group,
+                    subgroup_label=label,
+                )
+                occurrences = _occurrences_needed(hours_needed, duration)
+                for _ in range(occurrences):
+                    request = SessionRequest(
+                        course_type="TP",
+                        class_groups=[class_group],
+                        subgroup_label=label,
+                        link=link,
+                        duration_hours=duration,
+                        required_teachers=1,
+                        index=index,
+                        preferred_teachers=list(link.preferred_teachers(label)),
+                    )
+                    if not request.preferred_teachers:
+                        request.preferred_teachers = list(course.teachers)
+                    requests.append(request)
+                    index += 1
+        else:
+            hours_needed = _class_hours_needed(course, class_group)
+            occurrences = _occurrences_needed(hours_needed, duration)
+            for _ in range(occurrences):
+                request = SessionRequest(
+                    course_type=course_type,
+                    class_groups=[class_group],
+                    subgroup_label=None,
+                    link=link,
+                    duration_hours=duration,
+                    required_teachers=2 if course_type == "SAE" else 1,
+                    index=index,
+                    preferred_teachers=list(link.preferred_teachers()),
+                )
+                if not request.preferred_teachers:
+                    request.preferred_teachers = list(course.teachers)
+                requests.append(request)
+                index += 1
+    return requests
+
+
+def _capacity_for_request(course: Course, request: SessionRequest) -> int:
+    total = 0
+    seen: set[int | None] = set()
+    for group in request.class_groups:
+        if group is None:
+            continue
+        if group.id in seen:
+            continue
+        seen.add(group.id)
+        total += course.capacity_needed_for(group)
+    return max(total, 1)
+
+
+def _teacher_is_usable(
+    teacher: Teacher,
+    *,
+    start: datetime,
+    end: datetime,
+    duration_hours: int,
+    created_sessions: list[Session],
+    allocation_state: TeacherAllocationState | None,
+) -> bool:
+    if teacher is None or teacher.id is None:
+        return False
+    if allocation_state and not allocation_state.can_allocate(teacher.id, duration_hours):
+        return False
+    if not teacher.is_available_during(start, end):
+        return False
+    for session in teacher.sessions:
+        if overlaps(session.start_time, session.end_time, start, end):
+            return False
+    for session in created_sessions:
+        if session.teacher_id == teacher.id and overlaps(
+            session.start_time,
+            session.end_time,
+            start,
+            end,
+        ):
+            return False
+    return True
+
+
+def _select_teachers_for_request(
+    course: Course,
+    request: SessionRequest,
+    *,
+    start: datetime,
+    end: datetime,
+    created_sessions: list[Session],
+    allocation_state: TeacherAllocationState | None,
+    last_teachers: dict[tuple[int | None, str | None], Teacher],
+) -> list[Teacher] | None:
+    candidates: list[Teacher] = []
+    tracking_key = request.teacher_tracking_key()
+    previous = last_teachers.get(tracking_key)
+    if previous is not None and previous not in candidates:
+        candidates.append(previous)
+    for teacher in request.preferred_teachers:
+        if teacher is None or teacher in candidates:
+            continue
+        candidates.append(teacher)
+    if request.link is not None:
+        for teacher in request.link.assigned_teachers():
+            if teacher is None or teacher in candidates:
+                continue
+            candidates.append(teacher)
+    for teacher in course.teachers:
+        if teacher is None or teacher in candidates:
+            continue
+        candidates.append(teacher)
+    if request.required_teachers > len(candidates):
+        for teacher in Teacher.query.order_by(Teacher.name.asc()).all():
+            if teacher in candidates:
+                continue
+            candidates.append(teacher)
+
+    usable = [
+        teacher
+        for teacher in candidates
+        if _teacher_is_usable(
+            teacher,
+            start=start,
+            end=end,
+            duration_hours=request.duration_hours,
+            created_sessions=created_sessions,
+            allocation_state=allocation_state,
+        )
+    ]
+    if len(usable) < request.required_teachers:
+        return None
+    if request.required_teachers <= 1:
+        return usable[:1]
+    for combo in combinations(usable, request.required_teachers):
+        return list(combo)
+    return None
+
+
+def _schedule_request(
+    course: Course,
+    request: SessionRequest,
+    *,
+    week_start: date,
+    week_end: date,
+    schedule_start: date,
+    schedule_end: date,
+    closed_days: set[date],
+    created_sessions: list[Session],
+    progress: ScheduleProgress,
+    reporter: ScheduleReporter,
+    allocation_state: TeacherAllocationState | None,
+    last_teachers: dict[tuple[int | None, str | None], Teacher],
+) -> bool:
+    day_diagnostics: dict[date, PlacementDiagnostics] = {}
+    duration = max(request.duration_hours, 1)
+    for day_offset in range(7):
+        day = week_start + timedelta(days=day_offset)
+        if day > week_end or day > schedule_end:
+            continue
+        if day < schedule_start:
+            continue
+        if day.weekday() >= 5:
+            continue
+        if day in closed_days:
+            continue
+        diagnostics = PlacementDiagnostics()
+        for start_index in range(len(SCHEDULE_SLOTS)):
+            contiguous = _collect_contiguous_slots(start_index, duration)
+            if not contiguous:
+                continue
+            if not all(fits_in_windows(start, end) for start, end in contiguous):
+                continue
+            slot_start = datetime.combine(day, contiguous[0][0])
+            slot_end = datetime.combine(day, contiguous[-1][1])
+            if any(
+                not group.is_available_during(slot_start, slot_end, subgroup_label=request.subgroup_label)
+                for group in request.class_groups
+                if group is not None
+            ):
+                for group in request.class_groups:
+                    if group is None:
+                        continue
+                    if not group.is_available_during(
+                        slot_start,
+                        slot_end,
+                        subgroup_label=request.subgroup_label,
+                    ):
+                        diagnostics.add_class(
+                            _describe_class_unavailability(group, slot_start, slot_end)
+                        )
+                continue
+            teachers = _select_teachers_for_request(
+                course,
+                request,
+                start=slot_start,
+                end=slot_end,
+                created_sessions=created_sessions,
+                allocation_state=allocation_state,
+                last_teachers=last_teachers,
+            )
+            if not teachers:
+                diagnostics.add_teacher(
+                    _describe_teacher_unavailability(
+                        course,
+                        slot_start,
+                        slot_end,
+                        link=request.link,
+                        subgroup_label=request.subgroup_label,
+                    )
+                )
+                continue
+            capacity = _capacity_for_request(course, request)
+            room = find_available_room(
+                course,
+                slot_start,
+                slot_end,
+                required_capacity=capacity,
+            )
+            if not room:
+                diagnostics.add_room(
+                    _describe_room_unavailability(
+                        course,
+                        slot_start,
+                        slot_end,
+                        required_capacity=capacity,
+                    )
+                )
+                continue
+
+            request.available_slots.append((slot_start, slot_end))
+            primary_group = request.class_groups[0] if request.class_groups else None
+            if primary_group is None:
+                diagnostics.add_other("Aucune classe n'est associée à la séance.")
+                return False
+            session = Session(
+                course=course,
+                teacher=teachers[0],
+                room=room,
+                class_group=primary_group,
+                subgroup_label=request.subgroup_label,
+                start_time=slot_start,
+                end_time=slot_end,
+            )
+            attendees = []
+            seen_ids: set[int] = set()
+            for group in request.class_groups:
+                if group is None:
+                    continue
+                if group.id in seen_ids:
+                    continue
+                attendees.append(group)
+                seen_ids.add(group.id)
+            session.attendees = attendees
+            db.session.add(session)
+            db.session.flush()
+            _register_created_sessions(course, [session], created_sessions)
+            progress.record(session.duration_hours, sessions=1)
+            reporter.session_created(session)
+            if len(teachers) > 1:
+                extras = ", ".join(teacher.name for teacher in teachers[1:] if teacher)
+                if extras:
+                    reporter.info(
+                        f"Co-intervention prévue avec {extras} pour {request.context_label(course)}"
+                    )
+            last_teachers[request.teacher_tracking_key()] = teachers[0]
+            return True
+        if diagnostics.teacher_reasons or diagnostics.room_reasons or diagnostics.class_reasons:
+            day_diagnostics[day] = diagnostics
+    for day, diagnostics in sorted(day_diagnostics.items(), key=lambda item: item[0]):
+        diagnostics.emit(
+            reporter,
+            context_label=request.context_label(course),
+            day=day,
+        )
+    return False
+
+
+def generate_schedule(
+    course: Course,
+    *,
+    window_start: date | None = None,
+    window_end: date | None = None,
+    allowed_weeks: Iterable[tuple[date, date]] | None = None,
+    progress: ScheduleProgress | None = None,
+) -> list[Session]:
+    progress = progress or NullScheduleProgress()
+    reporter = ScheduleReporter(course)
+    created_sessions: list[Session] = []
+    allocation_state = TeacherAllocationState(course)
+    _set_allocation_state(course, allocation_state)
+    try:
+        schedule_start, schedule_end = _resolve_schedule_window(
+            course,
+            window_start,
+            window_end,
+        )
+        fallback_weekly_goal = max(int(course.sessions_per_week or 0), 0)
+        allowed_payload = list(allowed_weeks) if allowed_weeks else []
+        allowed_spans, weekly_targets = _normalise_allowed_weeks(
+            allowed_payload,
+            schedule_start=schedule_start,
+            schedule_end=schedule_end,
+            fallback_weekly_goal=fallback_weekly_goal,
+        )
+        if allowed_payload and not allowed_spans:
+            message = "Les semaines sélectionnées ne recoupent pas la fenêtre du cours."
+            reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
+            reporter.summary = message
+            reporter.finalise(0)
+            raise ValueError(message)
+        reporter.set_window(schedule_start, schedule_end)
+
+        all_requests = _build_session_requests(course)
+        if not all_requests:
+            reporter.summary = "Aucune séance à planifier"
+            reporter.finalise(0)
+            progress.complete("Aucune séance à planifier")
+            return []
+
+        all_requests.sort(key=_request_priority)
+        pending_requests: deque[SessionRequest] = deque(all_requests)
+        carryover: deque[SessionRequest] = deque()
+        last_teachers: dict[tuple[int | None, str | None], Teacher] = {}
+
+        total_hours = sum(request.duration_hours for request in all_requests)
+        progress.initialise(total_hours)
+
+        current_week = _week_start_for(schedule_start)
+        week_starts: list[date] = []
+        while current_week <= schedule_end:
+            week_starts.append(current_week)
+            current_week += timedelta(days=7)
+
+        for week_start in week_starts:
+            if not _week_is_allowed(week_start, allowed_spans):
+                continue
+            weekly_limit = weekly_targets.get(week_start)
+            if weekly_limit is not None and weekly_limit <= 0:
+                continue
+            if weekly_limit is None and fallback_weekly_goal > 0:
+                weekly_limit = fallback_weekly_goal
+            week_end = min(week_start + timedelta(days=4), schedule_end)
+            closed_days = _closed_days_between(week_start, week_end)
+
+            weekly_requests: list[SessionRequest] = []
+            while carryover and (weekly_limit is None or len(weekly_requests) < weekly_limit):
+                weekly_requests.append(carryover.popleft())
+            while pending_requests and (weekly_limit is None or len(weekly_requests) < weekly_limit):
+                weekly_requests.append(pending_requests.popleft())
+
+            if not weekly_requests:
+                continue
+
+            weekly_requests.sort(key=_request_priority)
+            for request in weekly_requests:
+                scheduled = _schedule_request(
+                    course,
+                    request,
+                    week_start=week_start,
+                    week_end=week_end,
+                    schedule_start=schedule_start,
+                    schedule_end=schedule_end,
+                    closed_days=closed_days,
+                    created_sessions=created_sessions,
+                    progress=progress,
+                    reporter=reporter,
+                    allocation_state=allocation_state,
+                    last_teachers=last_teachers,
+                )
+                if not scheduled:
+                    request.carry_count += 1
+                    carryover.append(request)
+
+        while pending_requests:
+            carryover.append(pending_requests.popleft())
+
+        if carryover:
+            failures = []
+            for request in carryover:
+                label = request.context_label(course)
+                failures.append(label)
+                reporter.warning(
+                    f"Impossible de placer la séance {label} dans la période définie.",
+                    suggestions=suggest_schedule_recovery(
+                        "Impossible de planifier la séance dans la période donnée.",
+                        course,
+                    ),
+                )
+            summary = "Certaines séances n'ont pas pu être planifiées : " + ", ".join(
+                sorted(set(failures))
+            )
+            reporter.summary = summary
+            reporter.finalise(len(created_sessions))
+            raise ValueError(summary)
+
+        reporter.summary = (
+            f"{len(created_sessions)} séance(s) générée(s)"
+            if created_sessions
+            else "Aucune séance générée"
+        )
+        reporter.finalise(len(created_sessions))
+        progress.complete(reporter.summary)
         return created_sessions
     finally:
         _clear_allocation_state(course)
