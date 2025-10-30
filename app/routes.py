@@ -46,6 +46,7 @@ from .models import (
     semester_date_window,
 )
 from .progress import progress_registry, ScheduleProgressTracker
+from .generation import WeeklyGenerationPlanner
 from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
@@ -3077,6 +3078,7 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 .options(
                     selectinload(Course.class_links),
                     selectinload(Course.sessions),
+                    selectinload(Course.allowed_weeks),
                 )
                 .all()
             )
@@ -3086,32 +3088,8 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
             )
             tracker.initialise(total_hours)
 
-            total_created = 0
-            errors: list[str] = []
-
-            for course in courses:
-                allowed_ranges = course.allowed_week_ranges
-                window_start = allowed_ranges[0][0] if allowed_ranges else None
-                window_end = allowed_ranges[-1][1] if allowed_ranges else None
-                allowed_payload = course.allowed_week_payload or None
-                slice_progress = tracker.create_slice(
-                    label=f"Planification de {course.name}"
-                )
-                try:
-                    created_sessions = generate_schedule(
-                        course,
-                        window_start=window_start,
-                        window_end=window_end,
-                        allowed_weeks=allowed_payload,
-                        progress=slice_progress,
-                    )
-                except ValueError as exc:
-                    errors.append(f"{course.name} : {exc}")
-                    tracker.set_current_label(None)
-                    db.session.commit()
-                    continue
-                total_created += len(created_sessions)
-                db.session.commit()
+            planner = WeeklyGenerationPlanner(courses, tracker)
+            total_created, errors = planner.run()
 
             if errors:
                 current_app.logger.warning(
