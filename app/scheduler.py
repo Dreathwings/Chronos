@@ -81,6 +81,35 @@ class WeeklyGenerationTarget:
     session_goal: int
 
 
+@dataclass
+class WeeklyLimitState:
+    """Track the weekly session limits enforced during generation."""
+
+    course: Course
+    weekly_targets: dict[date, int]
+    counts: Counter
+
+    def limit_for(self, week_start: date) -> int | None:
+        target = self.weekly_targets.get(week_start)
+        if target is None:
+            return None
+        return max(int(target), 0)
+
+    def remaining_sessions(self, week_start: date) -> int | None:
+        limit = self.limit_for(week_start)
+        if limit is None:
+            return None
+        return limit - self.counts.get(week_start, 0)
+
+    def register(self, session: Session) -> None:
+        if not session.start_time:
+            return
+        week_start = _week_start_for(session.start_time.date())
+        if week_start not in self.weekly_targets:
+            return
+        self.counts[week_start] += 1
+
+
 class TeacherAllocationState:
     def __init__(self, course: Course) -> None:
         self.course = course
@@ -123,6 +152,9 @@ class TeacherAllocationState:
 _ALLOCATION_STATE: dict[int, TeacherAllocationState] = {}
 
 
+_WEEKLY_LIMIT_STATE: dict[int, WeeklyLimitState] = {}
+
+
 def _set_allocation_state(course: Course, state: TeacherAllocationState) -> None:
     _ALLOCATION_STATE[id(course)] = state
 
@@ -133,6 +165,21 @@ def _get_allocation_state(course: Course) -> TeacherAllocationState | None:
 
 def _clear_allocation_state(course: Course) -> None:
     _ALLOCATION_STATE.pop(id(course), None)
+
+
+def _set_weekly_limit_state(course: Course, state: WeeklyLimitState | None) -> None:
+    if state is None:
+        _WEEKLY_LIMIT_STATE.pop(id(course), None)
+        return
+    _WEEKLY_LIMIT_STATE[id(course)] = state
+
+
+def _get_weekly_limit_state(course: Course) -> WeeklyLimitState | None:
+    return _WEEKLY_LIMIT_STATE.get(id(course))
+
+
+def _clear_weekly_limit_state(course: Course) -> None:
+    _WEEKLY_LIMIT_STATE.pop(id(course), None)
 
 
 def build_weekly_targets(course: Course) -> list[WeeklyGenerationTarget]:
@@ -201,9 +248,13 @@ def _register_created_sessions(
     created_sessions.extend(sessions)
     allocation_state = _get_allocation_state(course)
     if not allocation_state:
-        return
+        allocation_state = None
+    weekly_state = _get_weekly_limit_state(course)
     for session in sessions:
-        allocation_state.consume(session.teacher_id, float(session.duration_hours))
+        if allocation_state:
+            allocation_state.consume(session.teacher_id, float(session.duration_hours))
+        if weekly_state:
+            weekly_state.register(session)
 
 
 def _course_type_priority(course_type: str | None) -> int | None:
@@ -1058,7 +1109,29 @@ def has_weekly_course_conflict(
     ignore_session_id: int | None = None,
     additional_hours: int | None = None,
 ) -> bool:
-    return False
+    state = _get_weekly_limit_state(course)
+    if state is None:
+        return False
+    if isinstance(start, datetime):
+        week_day = start.date()
+    else:
+        week_day = start
+    week_start = _week_start_for(week_day)
+    remaining = state.remaining_sessions(week_start)
+    if remaining is None:
+        return False
+    if remaining <= 0:
+        return True
+    estimated_sessions = 1
+    if additional_hours is not None:
+        try:
+            hours = max(int(additional_hours), 0)
+        except (TypeError, ValueError):
+            hours = 0
+        session_length = max(int(course.session_length_hours or 0), 1)
+        if hours > 0:
+            estimated_sessions = max((hours + session_length - 1) // session_length, 1)
+    return remaining < estimated_sessions
 
 
 def _warn_weekly_limit(
@@ -2329,6 +2402,23 @@ def generate_schedule(
         else:
             reporter.set_window(schedule_start, schedule_end)
 
+        if weekly_targets:
+            weekly_state = WeeklyLimitState(
+                course=course,
+                weekly_targets=weekly_targets,
+                counts=Counter(),
+            )
+            for session in course.sessions:
+                if not session.start_time:
+                    continue
+                week_start = _week_start_for(session.start_time.date())
+                if week_start not in weekly_targets:
+                    continue
+                weekly_state.counts[week_start] += 1
+            _set_weekly_limit_state(course, weekly_state)
+        else:
+            _set_weekly_limit_state(course, None)
+
         closed_days = _closed_days_between(schedule_start, schedule_end)
         if closed_days:
             reporter.info(
@@ -3260,3 +3350,4 @@ def generate_schedule(
         return created_sessions
     finally:
         _clear_allocation_state(course)
+        _clear_weekly_limit_state(course)

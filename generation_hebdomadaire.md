@@ -14,7 +14,7 @@ Cette note décrit les principales étapes désormais suivies par la génératio
 
 ## 3. Affectation des enseignants et recherche de créneaux
 * Pour chaque cours actif, on fixe un objectif de **séances** pour la semaine (cible + report des séances non planifiées précédemment).
-* `generate_schedule` est invoqué avec une fenêtre d'une semaine et conserve le suivi de progression existant.
+* `generate_schedule` est invoqué avec une fenêtre d'une semaine, conserve le suivi de progression existant **et plafonne la création de séances à l'objectif fixé pour la semaine**.
 * L'algorithme essaie de conserver l'enseignant utilisé sur les séances précédentes tout en respectant les besoins en capacité, matériel et postes informatiques.
 
 ## 4. Gestion des reports
