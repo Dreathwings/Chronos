@@ -76,6 +76,10 @@ COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
 class WeeklyGenerationTarget:
     """Describe the generation objective for a single week."""
 
+    # ``session_goal`` stores the number of actual sessions to plan across all
+    # classes/subgroups for the associated week (already normalised from the
+    # business rules).
+
     week_start: date
     week_end: date
     session_goal: int
@@ -196,11 +200,12 @@ def build_weekly_targets(course: Course) -> list[WeeklyGenerationTarget]:
     if course.allowed_weeks:
         targets: list[WeeklyGenerationTarget] = []
         for entry in sorted(course.allowed_weeks, key=lambda item: item.week_start):
+            weekly_goal = entry.effective_sessions(fallback_goal)
             targets.append(
                 WeeklyGenerationTarget(
                     week_start=entry.week_start,
                     week_end=entry.week_end,
-                    session_goal=entry.effective_sessions(fallback_goal),
+                    session_goal=course.session_count_for_week_target(weekly_goal),
                 )
             )
         return targets
@@ -234,7 +239,7 @@ def build_weekly_targets(course: Course) -> list[WeeklyGenerationTarget]:
         WeeklyGenerationTarget(
             week_start=week_start,
             week_end=week_start + timedelta(days=6),
-            session_goal=max(int(goal), 0),
+            session_goal=course.session_count_for_week_target(goal),
         )
         for week_start, goal in zip(week_starts, weekly_goals)
     ]
@@ -2471,7 +2476,7 @@ def generate_schedule(
 
         available_week_count = 0
         total_weekly_goal = 0
-        weekly_breakdown: list[tuple[date, int]] = []
+        weekly_breakdown: list[tuple[date, int, float]] = []
         if normalised_weeks:
             candidate_days = (
                 {day for day in allowed_days if day.weekday() < 5}
@@ -2491,7 +2496,14 @@ def generate_schedule(
                     weekly_goal = max(int(weekly_goal), 0)
                 except (TypeError, ValueError):
                     weekly_goal = max(fallback_weekly_goal, 0)
-                weekly_breakdown.append((week_start, weekly_goal))
+                session_length = course.session_length_hours or 0
+                try:
+                    session_hours = float(session_length)
+                except (TypeError, ValueError):
+                    session_hours = 0.0
+                weekly_breakdown.append(
+                    (week_start, weekly_goal, weekly_goal * session_hours)
+                )
                 total_weekly_goal += weekly_goal
         else:
             base_days = (
@@ -2509,32 +2521,33 @@ def generate_schedule(
         base_week_count = available_week_count or len(normalised_weeks) or 1
         if total_weekly_goal <= 0 and fallback_weekly_goal > 0:
             total_weekly_goal = fallback_weekly_goal * base_week_count
+        required_sessions = course.session_count_for_week_target(course.sessions_required)
         effective_occurrences = max(
-            int(course.sessions_required or 0),
+            required_sessions,
             total_weekly_goal,
             1,
         )
 
         if weekly_breakdown:
             breakdown = ", ".join(
-                f"{week.strftime('%d/%m/%Y')} : {goal} occurrence(s)"
-                for week, goal in weekly_breakdown
+                f"{week.strftime('%d/%m/%Y')} : {goal} séance(s) — {hours:g} h"
+                for week, goal, hours in weekly_breakdown
             )
             reporter.info(
                 "Durée cible des séances : "
-                f"{course.session_length_hours} h — {effective_occurrences} occurrence(s) au total "
+                f"{course.session_length_hours} h — {effective_occurrences} séance(s) au total "
                 f"(répartition hebdomadaire : {breakdown})"
             )
         elif fallback_weekly_goal > 0:
             reporter.info(
                 "Durée cible des séances : "
-                f"{course.session_length_hours} h — {fallback_weekly_goal} occurrence(s) par semaine ⇒ "
-                f"{effective_occurrences} occurrence(s) par groupe"
+                f"{course.session_length_hours} h — {fallback_weekly_goal} séance(s) par semaine ⇒ "
+                f"{effective_occurrences} séance(s) par groupe"
             )
         else:
             reporter.info(
                 "Durée cible des séances : "
-                f"{course.session_length_hours} h — {effective_occurrences} occurrence(s) par groupe"
+                f"{course.session_length_hours} h — {effective_occurrences} séance(s) par groupe"
             )
 
         if not course.classes:
