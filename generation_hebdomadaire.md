@@ -16,6 +16,7 @@ Cette note décrit les principales étapes désormais suivies par la génératio
 * Pour chaque cours actif, on fixe un objectif de **séances** pour la semaine (cible + report des séances non planifiées précédemment).
 * Cet objectif convertit désormais les consignes métier en nombre réel de séances à planifier :
   * on multiplie la cible hebdomadaire par le nombre de classes ou de sous-groupes concernés selon le type du cours (CM = 1 séance commune, SAE/TD = 1 séance par classe, TP = 1 séance par demi-groupe).
+  * lorsque la configuration ne précise qu'un volume de séances « par semaine », celui-ci est automatiquement étendu à l'ensemble des classes affectées pour déterminer le total réel à produire.
   * on tient compte de la durée d'une séance pour annoncer la charge horaire à couvrir sur la semaine.
 * `generate_schedule` est invoqué avec une fenêtre d'une semaine, conserve le suivi de progression existant **et plafonne la création de séances à l'objectif fixé pour la semaine**.
 * L'algorithme essaie de conserver l'enseignant utilisé sur les séances précédentes tout en respectant les besoins en capacité, matériel et postes informatiques.
