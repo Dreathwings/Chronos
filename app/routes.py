@@ -2907,7 +2907,7 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 )
                 week_label = week_start.strftime("%d/%m/%Y")
                 for state, target in pairs:
-                    remaining_hours = state.remaining_hours()
+                    remaining_hours = state.remaining_hours
                     if remaining_hours <= 0:
                         state.carry_sessions = 0
                         continue
@@ -2990,11 +2990,11 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
 
             # Report remaining courses that could not be completed within the window
             for state in states:
-                if state.remaining_hours() > 0:
+                if state.remaining_hours > 0:
                     errors.append(
                         "{name} : {remaining} heure(s) restent à placer après la dernière semaine autorisée.".format(
                             name=state.course.name,
-                            remaining=state.remaining_hours(),
+                            remaining=state.remaining_hours,
                         )
                     )
 
