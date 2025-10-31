@@ -5,7 +5,7 @@ import math
 import threading
 from collections import OrderedDict
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Iterable, List, MutableSequence
+from typing import Any, Iterable, List, MutableSequence
 
 from flask import (
     Blueprint,
@@ -48,6 +48,8 @@ from .progress import progress_registry, ScheduleProgressTracker
 from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
+    build_weekly_targets,
+    WeeklyGenerationTarget,
     fits_in_windows,
     format_class_label,
     generate_schedule,
@@ -86,6 +88,10 @@ DEFAULT_SEMESTER = SEMESTER_CHOICES[0]
 
 COURSE_TYPE_CANONICAL = {
     choice.upper(): choice for choice in COURSE_TYPE_CHOICES
+}
+
+COURSE_TYPE_ORDER_LOOKUP = {
+    label.upper(): index for index, label in enumerate(COURSE_TYPE_PLACEMENT_ORDER)
 }
 
 COURSE_TYPE_ORDER_EXPRESSION = case(
@@ -813,7 +819,7 @@ def _validate_session_constraints(
             ignore_session_id=ignore_session_id,
         ):
             return (
-                "La séance ne respecte pas la chronologie CM → TD → TP → Eval "
+                "La séance ne respecte pas la chronologie CM → SAE → TD → TP → Eval "
                 "sur la semaine."
             )
     required_capacity = sum(course.capacity_needed_for(group) for group in class_groups)
@@ -2844,9 +2850,11 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 .options(
                     selectinload(Course.class_links),
                     selectinload(Course.sessions),
+                    selectinload(Course.allowed_weeks),
                 )
                 .all()
             )
+
             total_hours = sum(
                 max(course.total_required_hours - course.scheduled_hours, 0)
                 for course in courses
@@ -2856,29 +2864,139 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
             total_created = 0
             errors: list[str] = []
 
-            for course in courses:
-                allowed_ranges = course.allowed_week_ranges
-                window_start = allowed_ranges[0][0] if allowed_ranges else None
-                window_end = allowed_ranges[-1][1] if allowed_ranges else None
-                allowed_payload = course.allowed_week_payload or None
-                slice_progress = tracker.create_slice(
-                    label=f"Planification de {course.name}"
-                )
-                try:
-                    created_sessions = generate_schedule(
-                        course,
-                        window_start=window_start,
-                        window_end=window_end,
-                        allowed_weeks=allowed_payload,
-                        progress=slice_progress,
+            class _CourseWeeklyState:
+                __slots__ = ("course", "carry_sessions")
+
+                def __init__(self, course: Course):
+                    self.course = course
+                    self.carry_sessions = 0
+
+                @property
+                def remaining_hours(self) -> int:
+                    return max(
+                        int(self.course.total_required_hours - self.course.scheduled_hours),
+                        0,
                     )
-                except ValueError as exc:
-                    errors.append(f"{course.name} : {exc}")
-                    tracker.set_current_label(None)
+
+            states: list[_CourseWeeklyState] = []
+            weekly_index: dict[date, list[tuple[_CourseWeeklyState, WeeklyGenerationTarget]]] = (
+                {}
+            )
+
+            for course in courses:
+                targets = build_weekly_targets(course)
+                state = _CourseWeeklyState(course)
+                states.append(state)
+                for target in targets:
+                    weekly_index.setdefault(target.week_start, []).append((state, target))
+
+            state_lookup = {
+                state.course.id: state for state in states if state.course.id is not None
+            }
+
+            for week_start in sorted(weekly_index):
+                pairs = weekly_index[week_start]
+                pairs.sort(
+                    key=lambda item: (
+                        COURSE_TYPE_ORDER_LOOKUP.get(
+                            (item[0].course.course_type or "").upper(),
+                            len(COURSE_TYPE_PLACEMENT_ORDER),
+                        ),
+                        item[0].course.name.lower(),
+                    )
+                )
+                week_label = week_start.strftime("%d/%m/%Y")
+                for state, target in pairs:
+                    remaining_hours = state.remaining_hours()
+                    if remaining_hours <= 0:
+                        state.carry_sessions = 0
+                        continue
+
+                    weekly_sessions_target = (
+                        max(int(target.session_goal or 0), 0) + state.carry_sessions
+                    )
+                    if weekly_sessions_target <= 0:
+                        state.carry_sessions = 0
+                        continue
+
+                    allowed_payload = [
+                        (target.week_start, target.week_end, weekly_sessions_target)
+                    ]
+                    slice_progress = tracker.create_slice(
+                        label=(
+                            f"Semaine du {week_label} — planification de {state.course.name}"
+                        )
+                    )
+                    before_hours = state.course.scheduled_hours
+                    created_sessions: list[Session] | None = None
+                    relocation_attempted = False
+
+                    for attempt in range(2):
+                        try:
+                            created_sessions = generate_schedule(
+                                state.course,
+                                window_start=target.week_start,
+                                window_end=target.week_end,
+                                allowed_weeks=allowed_payload,
+                                progress=slice_progress,
+                            )
+                            break
+                        except ValueError as exc:
+                            if not relocation_attempted:
+                                relocated = _relocate_blocking_sessions(
+                                    state=state,
+                                    week_start=target.week_start,
+                                    week_end=target.week_end,
+                                    state_lookup=state_lookup,
+                                )
+                                relocation_attempted = True
+                                if relocated:
+                                    current_app.logger.info(
+                                        "%s séance(s) déplacée(s) pour libérer la semaine du %s pour %s",
+                                        relocated,
+                                        week_label,
+                                        state.course.name,
+                                    )
+                                    continue
+                            state.carry_sessions = weekly_sessions_target
+                            errors.append(
+                                f"{state.course.name} — semaine du {week_label} : {exc}"
+                            )
+                            tracker.set_current_label(None)
+                            db.session.commit()
+                            break
+
+                    if created_sessions is None:
+                        continue
+
+                    total_created += len(created_sessions)
                     db.session.commit()
-                    continue
-                total_created += len(created_sessions)
-                db.session.commit()
+
+                    produced_hours = max(
+                        int(state.course.scheduled_hours - before_hours), 0
+                    )
+                    produced_sessions = sum(
+                        1
+                        for session in created_sessions
+                        if session.start_time
+                        and target.week_start
+                        <= session.start_time.date()
+                        <= target.week_end
+                    )
+                    state.carry_sessions = max(
+                        weekly_sessions_target - produced_sessions,
+                        0,
+                    )
+
+            # Report remaining courses that could not be completed within the window
+            for state in states:
+                if state.remaining_hours() > 0:
+                    errors.append(
+                        "{name} : {remaining} heure(s) restent à placer après la dernière semaine autorisée.".format(
+                            name=state.course.name,
+                            remaining=state.remaining_hours(),
+                        )
+                    )
 
             if errors:
                 current_app.logger.warning(
@@ -2902,6 +3020,49 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
             current_app.logger.exception("Automatic bulk scheduling failed")
         finally:
             db.session.remove()
+
+
+def _relocate_blocking_sessions(
+    *,
+    state,
+    week_start: date,
+    week_end: date,
+    state_lookup: dict[int, Any],
+) -> int:
+    course = state.course
+    class_ids = {
+        link.class_group_id
+        for link in course.class_links
+        if link.class_group_id is not None
+    }
+    if not class_ids:
+        return 0
+    start_dt = datetime.combine(week_start, time.min)
+    end_dt = datetime.combine(week_end, time.max)
+    sessions = (
+        Session.query.options(
+            selectinload(Session.attendees),
+            selectinload(Session.course),
+        )
+        .filter(Session.start_time >= start_dt)
+        .filter(Session.start_time <= end_dt)
+        .all()
+    )
+    relocated = 0
+    for session in sorted(sessions, key=lambda s: s.start_time):
+        if session.course_id == course.id:
+            continue
+        if not session.attendee_ids().intersection(class_ids):
+            continue
+        other_state = state_lookup.get(session.course_id)
+        if other_state is None:
+            continue
+        other_state.carry_sessions += 1
+        db.session.delete(session)
+        relocated += 1
+    if relocated:
+        db.session.flush()
+    return relocated
 
 
 def _enqueue_bulk_schedule() -> ScheduleProgressTracker:

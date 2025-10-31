@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, List, Optional, Set
 
@@ -62,12 +63,22 @@ START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
 
 COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
     "CM": 0,
-    "TD": 1,
-    "TP": 2,
-    "TEST": 3,
-    "EVAL": 3,
-    "Eval": 3,
+    "SAE": 1,
+    "TD": 2,
+    "TP": 3,
+    "TEST": 4,
+    "EVAL": 5,
+    "Eval": 5,
 }
+
+
+@dataclass(frozen=True)
+class WeeklyGenerationTarget:
+    """Describe the generation objective for a single week."""
+
+    week_start: date
+    week_end: date
+    session_goal: int
 
 
 class TeacherAllocationState:
@@ -122,6 +133,66 @@ def _get_allocation_state(course: Course) -> TeacherAllocationState | None:
 
 def _clear_allocation_state(course: Course) -> None:
     _ALLOCATION_STATE.pop(id(course), None)
+
+
+def build_weekly_targets(course: Course) -> list[WeeklyGenerationTarget]:
+    """Return the weekly targets that should be attempted for ``course``.
+
+    The generation engine distributes the requested occurrences across the
+    allowed weeks (when explicitly configured) or across the whole semester
+    window otherwise. Each entry exposes a week span along with the number of
+    occurrences that should ideally be scheduled during that period.
+    """
+
+    fallback_goal = max(int(course.sessions_per_week or 0), 0)
+
+    if course.allowed_weeks:
+        targets: list[WeeklyGenerationTarget] = []
+        for entry in sorted(course.allowed_weeks, key=lambda item: item.week_start):
+            targets.append(
+                WeeklyGenerationTarget(
+                    week_start=entry.week_start,
+                    week_end=entry.week_end,
+                    session_goal=entry.effective_sessions(fallback_goal),
+                )
+            )
+        return targets
+
+    semester_window = course.semester_window
+    if semester_window is None:
+        return []
+
+    start, end = semester_window
+    week_starts: list[date] = []
+    current = _week_start_for(start)
+    while current <= end:
+        week_starts.append(current)
+        current += timedelta(days=7)
+
+    if not week_starts:
+        return []
+
+    if fallback_goal > 0:
+        weekly_goals = [fallback_goal for _ in week_starts]
+    else:
+        total_occurrences = max(int(course.sessions_required or 0), 1)
+        base_goal = total_occurrences // len(week_starts)
+        remainder = total_occurrences % len(week_starts)
+        weekly_goals = [
+            base_goal + (1 if index < remainder else 0)
+            for index in range(len(week_starts))
+        ]
+
+    targets = [
+        WeeklyGenerationTarget(
+            week_start=week_start,
+            week_end=week_start + timedelta(days=6),
+            session_goal=max(int(goal), 0),
+        )
+        for week_start, goal in zip(week_starts, weekly_goals)
+    ]
+
+    return targets
 
 
 def _register_created_sessions(
@@ -1655,7 +1726,7 @@ def _try_full_block(
         ):
             if diagnostics is not None:
                 diagnostics.add_other(
-                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                    "La chronologie CM → SAE → TD → TP → Eval serait violée sur ce créneau."
                 )
             continue
         session = Session(
@@ -1807,7 +1878,7 @@ def _try_split_block(
         ):
             if diagnostics is not None:
                 diagnostics.add_other(
-                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                    "La chronologie CM → SAE → TD → TP → Eval serait violée sur ce créneau."
                 )
             continue
         sessions: list[Session] = []
@@ -1989,7 +2060,7 @@ def _cm_try_full_block(
         if not chronology_ok:
             if diagnostics is not None:
                 diagnostics.add_other(
-                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                    "La chronologie CM → SAE → TD → TP → Eval serait violée sur ce créneau."
                 )
             continue
         session = Session(
@@ -2131,7 +2202,7 @@ def _cm_try_split_block(
         if not chronology_ok:
             if diagnostics is not None:
                 diagnostics.add_other(
-                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                    "La chronologie CM → SAE → TD → TP → Eval serait violée sur ce créneau."
                 )
             continue
         sessions: list[Session] = []
@@ -2692,7 +2763,7 @@ def generate_schedule(
                             _warn_weekly_limit(reporter, weekly_limit_weeks)
                             for week_start in sorted(chronology_weeks):
                                 reporter.warning(
-                                    "Ordre CM → TD → TP impossible à respecter "
+                                    "Ordre CM → SAE → TD → TP → Eval impossible à respecter "
                                     f"la semaine du {week_start.strftime('%d/%m/%Y')}"
                                 )
                             break
@@ -3138,7 +3209,7 @@ def generate_schedule(
                         _warn_weekly_limit(reporter, weekly_limit_weeks)
                         for week_start in sorted(chronology_weeks):
                             reporter.warning(
-                                f"Chronologie CM → TD → TP impossible pour {class_group.name} "
+                                f"Chronologie CM → SAE → TD → TP → Eval impossible pour {class_group.name} "
                                 f"sur la semaine du {week_start.strftime('%d/%m/%Y')}"
                             )
                         break
