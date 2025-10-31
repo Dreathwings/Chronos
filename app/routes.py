@@ -2906,6 +2906,12 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                     )
                 )
                 week_label = week_start.strftime("%d/%m/%Y")
+
+                prepared_pairs: list[
+                    tuple[_CourseWeeklyState, WeeklyGenerationTarget, int]
+                ] = []
+                week_entries: list[str] = []
+
                 for state, target in pairs:
                     remaining_hours = state.remaining_hours
                     if remaining_hours <= 0:
@@ -2919,12 +2925,28 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                         state.carry_sessions = 0
                         continue
 
+                    prepared_pairs.append((state, target, weekly_sessions_target))
+                    week_entries.append(
+                        f"{state.course.name} ({weekly_sessions_target} séance(s))"
+                    )
+
+                if week_entries:
+                    summary_label = (
+                        f"Semaine du {week_label} : " + ", ".join(week_entries)
+                    )
+                else:
+                    summary_label = f"Semaine du {week_label} : aucun cours à planifier"
+
+                tracker.set_current_label(summary_label)
+
+                for state, target, weekly_sessions_target in prepared_pairs:
                     allowed_payload = [
                         (target.week_start, target.week_end, weekly_sessions_target)
                     ]
                     slice_progress = tracker.create_slice(
                         label=(
-                            f"Semaine du {week_label} — planification de {state.course.name}"
+                            f"{summary_label} → planification de {state.course.name}"
+                            f" ({weekly_sessions_target} séance(s))"
                         )
                     )
                     before_hours = state.course.scheduled_hours
