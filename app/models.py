@@ -406,14 +406,36 @@ class Course(db.Model, TimeStampedModel):
         fallback = max(int(self.sessions_per_week or 0), 0)
         payload: list[tuple[date, date, int]] = []
         for entry in self.allowed_weeks:
+            weekly_goal = entry.effective_sessions(fallback)
             payload.append(
                 (
                     entry.week_start,
                     entry.week_end,
-                    entry.effective_sessions(fallback),
+                    self.session_count_for_week_target(weekly_goal),
                 )
             )
         return payload
+
+    def weekly_session_multiplier(self) -> int:
+        if self.is_cm:
+            return 1
+        total = 0
+        for link in self.class_links:
+            try:
+                group_count = int(link.group_count or 0)
+            except (TypeError, ValueError):
+                group_count = 0
+            total += max(group_count, 1)
+        return max(total, 1)
+
+    def session_count_for_week_target(self, weekly_goal: int | None) -> int:
+        try:
+            occurrences = int(weekly_goal or 0)
+        except (TypeError, ValueError):
+            occurrences = 0
+        if occurrences <= 0:
+            return 0
+        return occurrences * self.weekly_session_multiplier()
 
     def subgroup_name_for(
         self, class_group: "ClassGroup" | int, subgroup_label: str | None

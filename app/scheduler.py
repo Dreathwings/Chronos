@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, List, Optional, Set
 
@@ -62,12 +63,55 @@ START_TIMES: List[time] = [slot_start for slot_start, _ in SCHEDULE_SLOTS]
 
 COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
     "CM": 0,
-    "TD": 1,
-    "TP": 2,
-    "TEST": 3,
-    "EVAL": 3,
-    "Eval": 3,
+    "SAE": 1,
+    "TD": 2,
+    "TP": 3,
+    "TEST": 4,
+    "EVAL": 5,
+    "Eval": 5,
 }
+
+
+@dataclass(frozen=True)
+class WeeklyGenerationTarget:
+    """Describe the generation objective for a single week."""
+
+    # ``session_goal`` stores the number of actual sessions to plan across all
+    # classes/subgroups for the associated week (already normalised from the
+    # business rules).
+
+    week_start: date
+    week_end: date
+    session_goal: int
+
+
+@dataclass
+class WeeklyLimitState:
+    """Track the weekly session limits enforced during generation."""
+
+    course: Course
+    weekly_targets: dict[date, int]
+    counts: Counter
+
+    def limit_for(self, week_start: date) -> int | None:
+        target = self.weekly_targets.get(week_start)
+        if target is None:
+            return None
+        return max(int(target), 0)
+
+    def remaining_sessions(self, week_start: date) -> int | None:
+        limit = self.limit_for(week_start)
+        if limit is None:
+            return None
+        return limit - self.counts.get(week_start, 0)
+
+    def register(self, session: Session) -> None:
+        if not session.start_time:
+            return
+        week_start = _week_start_for(session.start_time.date())
+        if week_start not in self.weekly_targets:
+            return
+        self.counts[week_start] += 1
 
 
 class TeacherAllocationState:
@@ -112,6 +156,9 @@ class TeacherAllocationState:
 _ALLOCATION_STATE: dict[int, TeacherAllocationState] = {}
 
 
+_WEEKLY_LIMIT_STATE: dict[int, WeeklyLimitState] = {}
+
+
 def _set_allocation_state(course: Course, state: TeacherAllocationState) -> None:
     _ALLOCATION_STATE[id(course)] = state
 
@@ -124,15 +171,95 @@ def _clear_allocation_state(course: Course) -> None:
     _ALLOCATION_STATE.pop(id(course), None)
 
 
+def _set_weekly_limit_state(course: Course, state: WeeklyLimitState | None) -> None:
+    if state is None:
+        _WEEKLY_LIMIT_STATE.pop(id(course), None)
+        return
+    _WEEKLY_LIMIT_STATE[id(course)] = state
+
+
+def _get_weekly_limit_state(course: Course) -> WeeklyLimitState | None:
+    return _WEEKLY_LIMIT_STATE.get(id(course))
+
+
+def _clear_weekly_limit_state(course: Course) -> None:
+    _WEEKLY_LIMIT_STATE.pop(id(course), None)
+
+
+def build_weekly_targets(course: Course) -> list[WeeklyGenerationTarget]:
+    """Return the weekly targets that should be attempted for ``course``.
+
+    The generation engine distributes the requested occurrences across the
+    allowed weeks (when explicitly configured) or across the whole semester
+    window otherwise. Each entry exposes a week span along with the number of
+    occurrences that should ideally be scheduled during that period.
+    """
+
+    fallback_goal = max(int(course.sessions_per_week or 0), 0)
+
+    if course.allowed_weeks:
+        targets: list[WeeklyGenerationTarget] = []
+        for entry in sorted(course.allowed_weeks, key=lambda item: item.week_start):
+            weekly_goal = entry.effective_sessions(fallback_goal)
+            targets.append(
+                WeeklyGenerationTarget(
+                    week_start=entry.week_start,
+                    week_end=entry.week_end,
+                    session_goal=course.session_count_for_week_target(weekly_goal),
+                )
+            )
+        return targets
+
+    semester_window = course.semester_window
+    if semester_window is None:
+        return []
+
+    start, end = semester_window
+    week_starts: list[date] = []
+    current = _week_start_for(start)
+    while current <= end:
+        week_starts.append(current)
+        current += timedelta(days=7)
+
+    if not week_starts:
+        return []
+
+    if fallback_goal > 0:
+        weekly_goals = [fallback_goal for _ in week_starts]
+    else:
+        total_occurrences = max(int(course.sessions_required or 0), 1)
+        base_goal = total_occurrences // len(week_starts)
+        remainder = total_occurrences % len(week_starts)
+        weekly_goals = [
+            base_goal + (1 if index < remainder else 0)
+            for index in range(len(week_starts))
+        ]
+
+    targets = [
+        WeeklyGenerationTarget(
+            week_start=week_start,
+            week_end=week_start + timedelta(days=6),
+            session_goal=course.session_count_for_week_target(goal),
+        )
+        for week_start, goal in zip(week_starts, weekly_goals)
+    ]
+
+    return targets
+
+
 def _register_created_sessions(
     course: Course, sessions: Iterable[Session], created_sessions: list[Session]
 ) -> None:
     created_sessions.extend(sessions)
     allocation_state = _get_allocation_state(course)
     if not allocation_state:
-        return
+        allocation_state = None
+    weekly_state = _get_weekly_limit_state(course)
     for session in sessions:
-        allocation_state.consume(session.teacher_id, float(session.duration_hours))
+        if allocation_state:
+            allocation_state.consume(session.teacher_id, float(session.duration_hours))
+        if weekly_state:
+            weekly_state.register(session)
 
 
 def _course_type_priority(course_type: str | None) -> int | None:
@@ -987,7 +1114,29 @@ def has_weekly_course_conflict(
     ignore_session_id: int | None = None,
     additional_hours: int | None = None,
 ) -> bool:
-    return False
+    state = _get_weekly_limit_state(course)
+    if state is None:
+        return False
+    if isinstance(start, datetime):
+        week_day = start.date()
+    else:
+        week_day = start
+    week_start = _week_start_for(week_day)
+    remaining = state.remaining_sessions(week_start)
+    if remaining is None:
+        return False
+    if remaining <= 0:
+        return True
+    estimated_sessions = 1
+    if additional_hours is not None:
+        try:
+            hours = max(int(additional_hours), 0)
+        except (TypeError, ValueError):
+            hours = 0
+        session_length = max(int(course.session_length_hours or 0), 1)
+        if hours > 0:
+            estimated_sessions = max((hours + session_length - 1) // session_length, 1)
+    return remaining < estimated_sessions
 
 
 def _warn_weekly_limit(
@@ -1655,7 +1804,7 @@ def _try_full_block(
         ):
             if diagnostics is not None:
                 diagnostics.add_other(
-                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                    "La chronologie CM → SAE → TD → TP → Eval serait violée sur ce créneau."
                 )
             continue
         session = Session(
@@ -1807,7 +1956,7 @@ def _try_split_block(
         ):
             if diagnostics is not None:
                 diagnostics.add_other(
-                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                    "La chronologie CM → SAE → TD → TP → Eval serait violée sur ce créneau."
                 )
             continue
         sessions: list[Session] = []
@@ -1989,7 +2138,7 @@ def _cm_try_full_block(
         if not chronology_ok:
             if diagnostics is not None:
                 diagnostics.add_other(
-                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                    "La chronologie CM → SAE → TD → TP → Eval serait violée sur ce créneau."
                 )
             continue
         session = Session(
@@ -2131,7 +2280,7 @@ def _cm_try_split_block(
         if not chronology_ok:
             if diagnostics is not None:
                 diagnostics.add_other(
-                    "La chronologie CM → TD → TP → Eval serait violée sur ce créneau."
+                    "La chronologie CM → SAE → TD → TP → Eval serait violée sur ce créneau."
                 )
             continue
         sessions: list[Session] = []
@@ -2204,6 +2353,9 @@ def generate_schedule(
             raise
 
         fallback_weekly_goal = max(int(course.sessions_per_week or 0), 0)
+        fallback_session_goal = course.session_count_for_week_target(
+            fallback_weekly_goal
+        )
         weekly_targets: dict[date, int] = {}
         normalised_weeks: list[tuple[date, date]] = []
         if allowed_weeks:
@@ -2258,6 +2410,23 @@ def generate_schedule(
         else:
             reporter.set_window(schedule_start, schedule_end)
 
+        if weekly_targets:
+            weekly_state = WeeklyLimitState(
+                course=course,
+                weekly_targets=weekly_targets,
+                counts=Counter(),
+            )
+            for session in course.sessions:
+                if not session.start_time:
+                    continue
+                week_start = _week_start_for(session.start_time.date())
+                if week_start not in weekly_targets:
+                    continue
+                weekly_state.counts[week_start] += 1
+            _set_weekly_limit_state(course, weekly_state)
+        else:
+            _set_weekly_limit_state(course, None)
+
         closed_days = _closed_days_between(schedule_start, schedule_end)
         if closed_days:
             reporter.info(
@@ -2310,7 +2479,7 @@ def generate_schedule(
 
         available_week_count = 0
         total_weekly_goal = 0
-        weekly_breakdown: list[tuple[date, int]] = []
+        weekly_breakdown: list[tuple[date, int, float]] = []
         if normalised_weeks:
             candidate_days = (
                 {day for day in allowed_days if day.weekday() < 5}
@@ -2325,12 +2494,21 @@ def generate_schedule(
                 )
             available_week_count = len(week_occurrences)
             for week_start in week_occurrences:
-                weekly_goal = weekly_targets.get(week_start, fallback_weekly_goal)
+                weekly_goal = weekly_targets.get(week_start)
+                if weekly_goal is None:
+                    weekly_goal = fallback_session_goal
                 try:
                     weekly_goal = max(int(weekly_goal), 0)
                 except (TypeError, ValueError):
-                    weekly_goal = max(fallback_weekly_goal, 0)
-                weekly_breakdown.append((week_start, weekly_goal))
+                    weekly_goal = max(fallback_session_goal, 0)
+                session_length = course.session_length_hours or 0
+                try:
+                    session_hours = float(session_length)
+                except (TypeError, ValueError):
+                    session_hours = 0.0
+                weekly_breakdown.append(
+                    (week_start, weekly_goal, weekly_goal * session_hours)
+                )
                 total_weekly_goal += weekly_goal
         else:
             base_days = (
@@ -2347,33 +2525,42 @@ def generate_schedule(
 
         base_week_count = available_week_count or len(normalised_weeks) or 1
         if total_weekly_goal <= 0 and fallback_weekly_goal > 0:
-            total_weekly_goal = fallback_weekly_goal * base_week_count
+            total_weekly_goal = fallback_session_goal * base_week_count
+        required_sessions = course.session_count_for_week_target(course.sessions_required)
         effective_occurrences = max(
-            int(course.sessions_required or 0),
+            required_sessions,
             total_weekly_goal,
             1,
         )
 
         if weekly_breakdown:
             breakdown = ", ".join(
-                f"{week.strftime('%d/%m/%Y')} : {goal} occurrence(s)"
-                for week, goal in weekly_breakdown
+                f"{week.strftime('%d/%m/%Y')} : {goal} séance(s) — {hours:g} h"
+                for week, goal, hours in weekly_breakdown
             )
             reporter.info(
                 "Durée cible des séances : "
-                f"{course.session_length_hours} h — {effective_occurrences} occurrence(s) au total "
+                f"{course.session_length_hours} h — {effective_occurrences} séance(s) au total "
                 f"(répartition hebdomadaire : {breakdown})"
             )
         elif fallback_weekly_goal > 0:
+            multiplier = course.weekly_session_multiplier()
+            per_week_sessions = max(fallback_session_goal, 0)
+            per_week_detail = (
+                f"{fallback_weekly_goal} séance(s) par semaine et par groupe ({multiplier} groupe(s)/classe(s))"
+                if multiplier > 1
+                else f"{fallback_weekly_goal} séance(s) par semaine"
+            )
             reporter.info(
                 "Durée cible des séances : "
-                f"{course.session_length_hours} h — {fallback_weekly_goal} occurrence(s) par semaine ⇒ "
-                f"{effective_occurrences} occurrence(s) par groupe"
+                f"{course.session_length_hours} h — {per_week_detail} ⇒ "
+                f"{per_week_sessions} séance(s) hebdomadaires pour le cours — "
+                f"{effective_occurrences} séance(s) au total"
             )
         else:
             reporter.info(
                 "Durée cible des séances : "
-                f"{course.session_length_hours} h — {effective_occurrences} occurrence(s) par groupe"
+                f"{course.session_length_hours} h — {effective_occurrences} séance(s) par groupe"
             )
 
         if not course.classes:
@@ -2692,7 +2879,7 @@ def generate_schedule(
                             _warn_weekly_limit(reporter, weekly_limit_weeks)
                             for week_start in sorted(chronology_weeks):
                                 reporter.warning(
-                                    "Ordre CM → TD → TP impossible à respecter "
+                                    "Ordre CM → SAE → TD → TP → Eval impossible à respecter "
                                     f"la semaine du {week_start.strftime('%d/%m/%Y')}"
                                 )
                             break
@@ -3138,7 +3325,7 @@ def generate_schedule(
                         _warn_weekly_limit(reporter, weekly_limit_weeks)
                         for week_start in sorted(chronology_weeks):
                             reporter.warning(
-                                f"Chronologie CM → TD → TP impossible pour {class_group.name} "
+                                f"Chronologie CM → SAE → TD → TP → Eval impossible pour {class_group.name} "
                                 f"sur la semaine du {week_start.strftime('%d/%m/%Y')}"
                             )
                         break
@@ -3189,3 +3376,4 @@ def generate_schedule(
         return created_sessions
     finally:
         _clear_allocation_state(course)
+        _clear_weekly_limit_state(course)
