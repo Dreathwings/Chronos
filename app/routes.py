@@ -2894,6 +2894,29 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 state.course.id: state for state in states if state.course.id is not None
             }
 
+            def _render_week_progress_table(
+                week_label: str, rows: list[dict[str, Any]]
+            ) -> str:
+                if not rows:
+                    return f"Semaine du {week_label} : aucun cours à planifier"
+                lines = [
+                    f"Semaine du {week_label}",
+                    "",
+                    "| Cours | Séances visées | Restantes | Statut |",
+                    "| --- | ---: | ---: | :---: |",
+                ]
+                for row in rows:
+                    status = "✅" if row["remaining"] == 0 else "⏳"
+                    lines.append(
+                        "| {name} | {target} | {remaining} | {status} |".format(
+                            name=row["name"],
+                            target=row["target"],
+                            remaining=row["remaining"],
+                            status=status,
+                        )
+                    )
+                return "\n".join(lines)
+
             for week_start in sorted(weekly_index):
                 pairs = weekly_index[week_start]
                 pairs.sort(
@@ -2908,9 +2931,9 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 week_label = week_start.strftime("%d/%m/%Y")
 
                 prepared_pairs: list[
-                    tuple[_CourseWeeklyState, WeeklyGenerationTarget, int]
+                    tuple[_CourseWeeklyState, WeeklyGenerationTarget, int, dict[str, Any]]
                 ] = []
-                week_entries: list[str] = []
+                week_rows: list[dict[str, Any]] = []
 
                 for state, target in pairs:
                     remaining_hours = state.remaining_hours
@@ -2925,27 +2948,32 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                         state.carry_sessions = 0
                         continue
 
-                    prepared_pairs.append((state, target, weekly_sessions_target))
-                    week_entries.append(
-                        f"{state.course.name} ({weekly_sessions_target} séance(s))"
+                    row_info = {
+                        "name": state.course.name,
+                        "target": weekly_sessions_target,
+                        "remaining": weekly_sessions_target,
+                    }
+                    prepared_pairs.append(
+                        (state, target, weekly_sessions_target, row_info)
                     )
+                    week_rows.append(row_info)
 
-                if week_entries:
-                    summary_label = (
-                        f"Semaine du {week_label} : " + ", ".join(week_entries)
-                    )
-                else:
-                    summary_label = f"Semaine du {week_label} : aucun cours à planifier"
-
+                summary_label = _render_week_progress_table(week_label, week_rows)
                 tracker.set_current_label(summary_label)
 
-                for state, target, weekly_sessions_target in prepared_pairs:
+                for (
+                    state,
+                    target,
+                    weekly_sessions_target,
+                    row_info,
+                ) in prepared_pairs:
                     allowed_payload = [
                         (target.week_start, target.week_end, weekly_sessions_target)
                     ]
                     slice_progress = tracker.create_slice(
                         label=(
-                            f"{summary_label} → planification de {state.course.name}"
+                            f"{summary_label}\n\n"
+                            f"→ planification de {state.course.name}"
                             f" ({weekly_sessions_target} séance(s))"
                         )
                     )
@@ -2989,6 +3017,11 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                             break
 
                     if created_sessions is None:
+                        row_info["remaining"] = weekly_sessions_target
+                        summary_label = _render_week_progress_table(
+                            week_label, week_rows
+                        )
+                        tracker.set_current_label(summary_label)
                         continue
 
                     total_created += len(created_sessions)
@@ -3009,6 +3042,10 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                         weekly_sessions_target - produced_sessions,
                         0,
                     )
+
+                    row_info["remaining"] = state.carry_sessions
+                    summary_label = _render_week_progress_table(week_label, week_rows)
+                    tracker.set_current_label(summary_label)
 
             # Report remaining courses that could not be completed within the window
             for state in states:
