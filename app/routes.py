@@ -2930,23 +2930,38 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 )
                 week_label = week_start.strftime("%d/%m/%Y")
 
+                aggregated_pairs: list[
+                    tuple[_CourseWeeklyState, list[WeeklyGenerationTarget]]
+                ] = []
+                course_buckets: dict[_CourseWeeklyState, list[WeeklyGenerationTarget]] = {}
+                for state, target in pairs:
+                    bucket = course_buckets.get(state)
+                    if bucket is None:
+                        bucket = []
+                        course_buckets[state] = bucket
+                        aggregated_pairs.append((state, bucket))
+                    bucket.append(target)
+
                 prepared_pairs: list[
-                    tuple[_CourseWeeklyState, WeeklyGenerationTarget, int, dict[str, Any]]
+                    tuple[_CourseWeeklyState, date, date, int, dict[str, Any]]
                 ] = []
                 week_rows: list[dict[str, Any]] = []
 
-                for state, target in pairs:
+                for state, targets in aggregated_pairs:
                     remaining_hours = state.remaining_hours
                     if remaining_hours <= 0:
                         state.carry_sessions = 0
                         continue
 
-                    weekly_sessions_target = (
-                        max(int(target.session_goal or 0), 0) + state.carry_sessions
+                    base_goal = sum(
+                        max(int(target.session_goal or 0), 0) for target in targets
                     )
+                    weekly_sessions_target = base_goal + state.carry_sessions
                     if weekly_sessions_target <= 0:
                         state.carry_sessions = 0
                         continue
+
+                    week_end = max(target.week_end for target in targets)
 
                     row_info = {
                         "name": state.course.name,
@@ -2954,7 +2969,7 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                         "remaining": weekly_sessions_target,
                     }
                     prepared_pairs.append(
-                        (state, target, weekly_sessions_target, row_info)
+                        (state, week_start, week_end, weekly_sessions_target, row_info)
                     )
                     week_rows.append(row_info)
 
@@ -2963,12 +2978,13 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
 
                 for (
                     state,
-                    target,
+                    target_week_start,
+                    target_week_end,
                     weekly_sessions_target,
                     row_info,
                 ) in prepared_pairs:
                     allowed_payload = [
-                        (target.week_start, target.week_end, weekly_sessions_target)
+                        (target_week_start, target_week_end, weekly_sessions_target)
                     ]
                     slice_progress = tracker.create_slice(
                         label=(
@@ -2985,8 +3001,8 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                         try:
                             created_sessions = generate_schedule(
                                 state.course,
-                                window_start=target.week_start,
-                                window_end=target.week_end,
+                                window_start=target_week_start,
+                                window_end=target_week_end,
                                 allowed_weeks=allowed_payload,
                                 progress=slice_progress,
                             )
@@ -2995,8 +3011,8 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                             if not relocation_attempted:
                                 relocated = _relocate_blocking_sessions(
                                     state=state,
-                                    week_start=target.week_start,
-                                    week_end=target.week_end,
+                                    week_start=target_week_start,
+                                    week_end=target_week_end,
                                     state_lookup=state_lookup,
                                 )
                                 relocation_attempted = True
@@ -3034,9 +3050,9 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                         1
                         for session in created_sessions
                         if session.start_time
-                        and target.week_start
+                        and target_week_start
                         <= session.start_time.date()
-                        <= target.week_end
+                        <= target_week_end
                     )
                     state.carry_sessions = max(
                         weekly_sessions_target - produced_sessions,
