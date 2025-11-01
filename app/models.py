@@ -256,7 +256,6 @@ class Course(db.Model, TimeStampedModel):
     priority: Mapped[int] = mapped_column(Integer, default=1)
     course_type: Mapped[str] = mapped_column(String(3), default="CM")
     semester: Mapped[str] = mapped_column(String(2), default="S1")
-    sessions_per_week: Mapped[int] = mapped_column(Integer, default=1)
     color: Mapped[Optional[str]] = mapped_column(String(7))
     course_name_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("course_name.id"), nullable=True
@@ -304,7 +303,6 @@ class Course(db.Model, TimeStampedModel):
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
-        CheckConstraint("sessions_per_week >= 0", name="chk_sessions_per_week_non_negative"),
         CheckConstraint("computers_required >= 0", name="chk_course_computers_non_negative"),
         CheckConstraint(
             "course_type IN ('CM','TD','TP','SAE','Eval')",
@@ -402,18 +400,25 @@ class Course(db.Model, TimeStampedModel):
         return [entry.week_span for entry in self.allowed_weeks]
 
     @property
-    def allowed_week_payload(self) -> list[tuple[date, date, int]]:
-        fallback = max(int(self.sessions_per_week or 0), 0)
-        payload: list[tuple[date, date, int]] = []
+    def allowed_week_payload(self) -> list[tuple[date, date, int | None]]:
+        if not self.allowed_weeks:
+            return []
+        fallback = self._default_weekly_target(len(self.allowed_weeks))
+        payload: list[tuple[date, date, int | None]] = []
         for entry in self.allowed_weeks:
-            payload.append(
-                (
-                    entry.week_start,
-                    entry.week_end,
-                    entry.effective_sessions(fallback),
-                )
-            )
+            target = entry.sessions_target
+            if target is None and fallback is not None:
+                target = max(int(fallback or 0), 0)
+            payload.append((entry.week_start, entry.week_end, target))
         return payload
+
+    def _default_weekly_target(self, weeks_count: int) -> int | None:
+        total_sessions = max(int(self.sessions_required or 0), 0)
+        if weeks_count <= 0:
+            return total_sessions or None
+        if total_sessions <= 0:
+            return None
+        return max(int(ceil(total_sessions / weeks_count)), 1)
 
     def subgroup_name_for(
         self, class_group: "ClassGroup" | int, subgroup_label: str | None
@@ -457,18 +462,19 @@ class Course(db.Model, TimeStampedModel):
             multiplier = 1
         else:
             multiplier = group_total or 1
-        per_week_goal = max(int(self.sessions_per_week or 0), 0)
         if self.allowed_weeks:
-            occurrences = sum(
-                entry.effective_sessions(per_week_goal)
-                for entry in self.allowed_weeks
-            )
+            fallback = self._default_weekly_target(len(self.allowed_weeks))
+            occurrences = 0
+            for entry in self.allowed_weeks:
+                target = entry.sessions_target
+                if target is None and fallback is not None:
+                    target = fallback
+                occurrences += max(int(target or 0), 0)
             if occurrences <= 0:
                 occurrences = max(int(self.sessions_required or 0), 1)
         else:
             occurrences = max(
                 int(self.sessions_required or 0),
-                per_week_goal,
                 1,
             )
         return occurrences * self.session_length_hours * multiplier
@@ -767,13 +773,17 @@ class CourseAllowedWeek(db.Model, TimeStampedModel):
     def week_span(self) -> tuple[date, date]:
         return self.week_start, self.week_end
 
-    def effective_sessions(self, default: int) -> int:
+    def effective_sessions(self, default: int | None = None) -> int:
         value = self.sessions_target
         if value is None:
+            if default is None:
+                return 0
             return max(int(default or 0), 0)
         try:
             return max(int(value), 0)
         except (TypeError, ValueError):
+            if default is None:
+                return 0
             return max(int(default or 0), 0)
 
 

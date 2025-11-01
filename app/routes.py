@@ -381,7 +381,7 @@ def _parse_week_selection(values: Iterable[str]) -> list[tuple[date, date]]:
 def _collect_week_targets(
     form_data,
     existing_targets: dict[date, int],
-    fallback: int,
+    fallback: int | None,
 ) -> OrderedDict[date, int]:
     targets: OrderedDict[date, int] = OrderedDict()
     seen: set[date] = set()
@@ -395,7 +395,9 @@ def _collect_week_targets(
         seen.add(span_start)
         iso_key = span_start.isoformat()
         field_name = f"allowed_week_sessions_{iso_key}"
-        default_value = existing_targets.get(span_start, fallback)
+        default_value = existing_targets.get(span_start)
+        if default_value is None:
+            default_value = fallback
         targets[span_start] = _parse_non_negative_int(
             form_data.get(field_name),
             default_value,
@@ -2293,6 +2295,8 @@ def schedule_progress_status(job_id: str):
             "message": snapshot.message,
             "detail": detail_text,
             "finished": snapshot.finished,
+            "week_label": snapshot.week_label,
+            "week_rows": snapshot.week_rows,
         }
     )
 
@@ -2331,13 +2335,6 @@ def course_detail(course_id: int):
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
-            session_goal = max(
-                _parse_non_negative_int(
-                    request.form.get("sessions_per_week"), course.sessions_per_week
-                ),
-                1,
-            )
-            course.sessions_per_week = session_goal
             raw_color = (request.form.get("color") or "").strip()
             course.color = raw_color if raw_color else None
             course.configured_name = selected_course_name
@@ -2382,14 +2379,19 @@ def course_detail(course_id: int):
                     request.form.get(f"teacher_hours_{teacher.id}"),
                     current_default,
                 )
+            default_week_target = course._default_weekly_target(len(course.allowed_weeks)) or 0
             existing_week_targets = {
-                allowed.week_start: allowed.effective_sessions(session_goal)
+                allowed.week_start: (
+                    allowed.sessions_target
+                    if allowed.sessions_target is not None
+                    else default_week_target
+                )
                 for allowed in course.allowed_weeks
             }
             selected_week_targets = _collect_week_targets(
                 request.form,
                 existing_week_targets,
-                session_goal,
+                default_week_target,
             )
 
             _sync_simple_relationship(course.equipments, selected_equipments)
@@ -2403,8 +2405,6 @@ def course_detail(course_id: int):
             if synchronised_targets:
                 total_sessions = sum(max(value, 0) for value in synchronised_targets.values())
                 course.sessions_required = max(total_sessions, 1)
-            else:
-                course.sessions_required = max(session_goal, 1)
             try:
                 db.session.commit()
                 flash("Cours mis à jour", "success")
@@ -2628,7 +2628,7 @@ def course_detail(course_id: int):
 
     week_ranges.sort(key=lambda span: span[0])
 
-    default_week_target = max(int(course.sessions_per_week or 0), 0)
+    default_week_target = course._default_weekly_target(len(week_ranges)) or 0
     course_week_session_map = {
         start.isoformat(): default_week_target for start, _ in week_ranges
     }
@@ -2645,9 +2645,12 @@ def course_detail(course_id: int):
     for allowed in course.allowed_weeks:
         if _is_week_closed(allowed.week_start, allowed.week_end, closing_spans):
             continue
-        course_week_session_map[
-            allowed.week_start.isoformat()
-        ] = allowed.effective_sessions(default_week_target)
+        target = allowed.sessions_target
+        if target is None:
+            target = default_week_target
+        course_week_session_map[allowed.week_start.isoformat()] = max(
+            int(target or 0), 0
+        )
 
     remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
     generation_display_status = _effective_generation_status(
@@ -2681,6 +2684,7 @@ def course_detail(course_id: int):
         selected_course_week_values=selected_course_week_values,
         selected_course_week_labels=selected_course_week_labels,
         course_week_session_map=course_week_session_map,
+        default_week_target=default_week_target,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
     )

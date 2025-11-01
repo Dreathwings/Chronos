@@ -2185,6 +2185,7 @@ class WeekPlan:
     start: date
     end: date
     days: list[date]
+    target_sessions: int | None = None
 
     def label(self) -> str:
         return self.start.strftime("%d/%m/%Y")
@@ -2230,11 +2231,53 @@ SESSION_TYPE_ORDER = {
 }
 
 
+def _publish_week_progress(
+    progress: ScheduleProgress,
+    week_label: str | None,
+    quota: int | None,
+    total_scheduled: int,
+    preexisting: int,
+    rows: Iterable[dict[str, str]],
+) -> None:
+    updater = getattr(progress, "update_week_progress", None)
+    if not callable(updater):
+        return
+    if week_label is None:
+        updater(None, [])
+        return
+    total_value = max(int(total_scheduled or 0), 0)
+    quota_value = None if quota is None else max(int(quota), 0)
+    meta_label = "Suivi hebdomadaire"
+    if quota_value is not None and quota_value > 0:
+        summary = f"{total_value} / {quota_value} séance(s)"
+    else:
+        summary = f"{total_value} séance(s)"
+    preexisting_value = max(int(preexisting or 0), 0)
+    if preexisting_value > 0:
+        summary = f"{summary} — {preexisting_value} déjà planifiée(s)"
+    table_rows: list[dict[str, str]] = [
+        {"label": meta_label, "status": summary, "state": "meta"}
+    ]
+    for row in rows:
+        if row is None:
+            continue
+        label = str(row.get("label", "")).strip()
+        if not label:
+            continue
+        status = str(row.get("status", "")).strip()
+        state = str(row.get("state", "")).strip() or "pending"
+        table_rows.append({"label": label, "status": status, "state": state})
+    updater(week_label, table_rows)
+
+
 def _build_week_plans(
     course: Course,
     schedule_start: date,
     schedule_end: date,
-    allowed_weeks: Iterable[tuple[date, date]] | None,
+    allowed_weeks: Iterable[
+        tuple[date, date] | tuple[date, date, int | None]
+    ]
+    | None,
     reporter: ScheduleReporter,
 ) -> list[WeekPlan]:
     closed_days = _closed_days_between(schedule_start, schedule_end)
@@ -2242,6 +2285,7 @@ def _build_week_plans(
         reporter.info(f"{len(closed_days)} jour(s) exclus pour fermeture (vacances)")
 
     allowed_days: set[date] = set()
+    week_targets: dict[date, int | None] = {}
     if allowed_weeks:
         for entry in allowed_weeks:
             if entry is None:
@@ -2257,12 +2301,26 @@ def _build_week_plans(
                 continue
             effective_start = max(span_start, schedule_start)
             effective_end = min(span_end, schedule_end)
+            week_start = _week_start_for(span_start)
+            raw_target = entry[2] if len(entry) >= 3 else None
+            target_value: int | None
+            if raw_target is None:
+                target_value = None
+            else:
+                try:
+                    target_value = max(int(raw_target), 0)
+                except (TypeError, ValueError):
+                    target_value = None
             for day in daterange(effective_start, effective_end):
                 if day.weekday() >= 5:
                     continue
                 if day in closed_days:
                     continue
                 allowed_days.add(day)
+            if week_start not in week_targets:
+                week_targets[week_start] = target_value
+            elif target_value is not None:
+                week_targets[week_start] = target_value
         if not allowed_days:
             message = "Les semaines sélectionnées ne recoupent pas la fenêtre du cours."
             reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
@@ -2294,7 +2352,14 @@ def _build_week_plans(
     for week_start in sorted(week_map):
         days = sorted(week_map[week_start])
         week_end = min(week_start + timedelta(days=6), schedule_end)
-        weeks.append(WeekPlan(start=week_start, end=week_end, days=days))
+        weeks.append(
+            WeekPlan(
+                start=week_start,
+                end=week_end,
+                days=days,
+                target_sessions=week_targets.get(week_start),
+            )
+        )
 
     if weeks:
         reporter.info(
@@ -2530,7 +2595,10 @@ def generate_schedule(
     *,
     window_start: date | None = None,
     window_end: date | None = None,
-    allowed_weeks: Iterable[tuple[date, date]] | None = None,
+    allowed_weeks: Iterable[
+        tuple[date, date] | tuple[date, date, int | None]
+    ]
+    | None = None,
     progress: ScheduleProgress | None = None,
 ) -> list[Session]:
     progress = progress or NullScheduleProgress()
@@ -2600,9 +2668,57 @@ def generate_schedule(
                 candidates,
                 key=lambda req: SESSION_TYPE_ORDER.get(req.course_type, 99),
             )
+            week_label = f"Semaine du {week.start.strftime('%d/%m/%Y')}"
+            set_label = getattr(progress, "set_current_label", None)
+            if callable(set_label):
+                set_label(week_label)
+            quota = week.target_sessions
+            preexisting_count = sum(
+                1
+                for _ in _course_sessions_in_week(
+                    course,
+                    week.start,
+                    week.end,
+                )
+            )
+            placed_in_week = 0
+            row_states: dict[int, dict[str, str]] = {}
+            for request in ordered:
+                state = "done" if request.scheduled else "pending"
+                status = "Planifiée" if request.scheduled else "À planifier"
+                row_states[id(request)] = {
+                    "label": request.describe(),
+                    "status": status,
+                    "state": state,
+                }
+
+            def refresh_week_progress() -> None:
+                _publish_week_progress(
+                    progress,
+                    week_label,
+                    quota,
+                    preexisting_count + placed_in_week,
+                    preexisting_count,
+                    row_states.values(),
+                )
+
+            refresh_week_progress()
+            if quota is not None and preexisting_count >= quota:
+                reporter.info(
+                    "Quota hebdomadaire atteint "
+                    f"({preexisting_count}/{quota}) pour la semaine du {week.label()}"
+                )
             next_carry: list[SessionRequest] = []
             for request in ordered:
                 if request.scheduled:
+                    continue
+                if quota is not None and preexisting_count + placed_in_week >= quota:
+                    row = row_states.get(id(request))
+                    if row is not None:
+                        row["state"] = "blocked"
+                        row["status"] = "Reportée (quota atteint)"
+                    next_carry.append(request)
+                    refresh_week_progress()
                     continue
                 placed = _schedule_request_for_week(
                     request,
@@ -2614,9 +2730,21 @@ def generate_schedule(
                 )
                 if placed:
                     request.scheduled = True
+                    placed_in_week += 1
+                    row = row_states.get(id(request))
+                    if row is not None:
+                        row["state"] = "done"
+                        row["status"] = "Planifiée"
                 else:
+                    row = row_states.get(id(request))
+                    if row is not None:
+                        row["state"] = "retry"
+                        row["status"] = "À replanifier"
                     next_carry.append(request)
+                refresh_week_progress()
             carry_over = next_carry
+
+        _publish_week_progress(progress, None, None, 0, 0, [])
 
         unscheduled = [request for request in requests if not request.scheduled]
         _emit_alignment_warnings(course, reporter, created_sessions)

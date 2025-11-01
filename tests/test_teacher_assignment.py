@@ -1495,7 +1495,6 @@ class ScheduleTeacherFallbackTestCase(DatabaseTestCase):
             course_type="TD",
             session_length_hours=2,
             sessions_required=3,
-            sessions_per_week=0,
             semester="S1",
             configured_name=base_name,
         )

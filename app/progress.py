@@ -4,7 +4,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Iterable, List
 
 
 class ScheduleProgress:
@@ -19,6 +19,11 @@ class ScheduleProgress:
     def complete(self, message: str | None = None) -> None:  # pragma: no cover
         """Mark the job as finished successfully."""
 
+    def update_week_progress(
+        self, label: str | None, rows: Iterable[dict[str, str]] | None = None
+    ) -> None:  # pragma: no cover - interface
+        """Update the table tracking the current week's generation."""
+
 
 class NullScheduleProgress(ScheduleProgress):
     """Fallback progress adapter used when no tracking is requested."""
@@ -30,6 +35,11 @@ class NullScheduleProgress(ScheduleProgress):
         return
 
     def complete(self, message: str | None = None) -> None:
+        return
+
+    def update_week_progress(
+        self, label: str | None, rows: Iterable[dict[str, str]] | None = None
+    ) -> None:
         return
 
 
@@ -46,6 +56,8 @@ class ProgressSnapshot:
     message: str | None
     finished: bool
     current_label: str | None
+    week_label: str | None
+    week_rows: List[dict[str, str]]
 
 
 class ScheduleProgressTracker(ScheduleProgress):
@@ -65,6 +77,8 @@ class ScheduleProgressTracker(ScheduleProgress):
         self._started_at: float | None = None
         self._finished_at: float | None = None
         self._current_label: str | None = None
+        self._week_label: str | None = None
+        self._week_rows: list[dict[str, str]] = []
 
     # Public helpers -------------------------------------------------
     def initialise(self, total_hours: float) -> None:
@@ -131,6 +145,8 @@ class ScheduleProgressTracker(ScheduleProgress):
                 message=message,
                 finished=finished,
                 current_label=self._current_label,
+                week_label=self._week_label,
+                week_rows=[dict(row) for row in self._week_rows],
             )
 
     def is_finished(self) -> bool:
@@ -173,6 +189,8 @@ class ScheduleProgressTracker(ScheduleProgress):
         with self._lock:
             if label is None:
                 self._current_label = None
+                self._week_label = None
+                self._week_rows = []
             else:
                 stripped = label.strip()
                 self._current_label = stripped or None
@@ -183,6 +201,39 @@ class ScheduleProgressTracker(ScheduleProgress):
 
     def create_slice(self, label: str | None = None) -> "ScheduleProgressSlice":
         return ScheduleProgressSlice(self, label=label)
+
+    def update_week_progress(
+        self, label: str | None, rows: Iterable[dict[str, str]] | None = None
+    ) -> None:
+        with self._lock:
+            if label is None:
+                self._week_label = None
+                self._week_rows = []
+                return
+            stripped = label.strip()
+            if not stripped:
+                self._week_label = None
+                self._week_rows = []
+                return
+            prepared: list[dict[str, str]] = []
+            if rows:
+                for row in rows:
+                    if not row:
+                        continue
+                    label_text = str(row.get("label", "")).strip()
+                    if not label_text:
+                        continue
+                    status_text = str(row.get("status", "")).strip()
+                    state_text = str(row.get("state", "")).strip() or "pending"
+                    prepared.append(
+                        {
+                            "label": label_text,
+                            "status": status_text,
+                            "state": state_text,
+                        }
+                    )
+            self._week_label = stripped
+            self._week_rows = prepared[:12]
 
 
 class ScheduleProgressSlice(ScheduleProgress):
@@ -197,6 +248,11 @@ class ScheduleProgressSlice(ScheduleProgress):
 
     def record(self, hours: float, sessions: int = 0) -> None:
         self._tracker.record(hours, sessions=sessions)
+
+    def update_week_progress(
+        self, label: str | None, rows: Iterable[dict[str, str]] | None = None
+    ) -> None:
+        self._tracker.update_week_progress(label, rows)
 
     def complete(self, message: str | None = None) -> None:
         self._tracker.set_current_label(None)
