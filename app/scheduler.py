@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, List, Optional, Set
@@ -68,6 +69,98 @@ COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
     "EVAL": 3,
     "Eval": 3,
 }
+
+
+class WeeklyGenerationTracker:
+    """Accumulate session details for the week currently being scheduled."""
+
+    def __init__(self, course: Course, progress: ScheduleProgress) -> None:
+        self._course = course
+        self._progress = progress
+        self._current_week: date | None = None
+        self._rows: list[dict[str, object]] = []
+        self._planned_rows: dict[date, list[dict[str, object]]] = {}
+
+    def reset(self) -> None:
+        self._current_week = None
+        self._rows = []
+        self._planned_rows.clear()
+        self._progress.update_week_overview(None, [])
+
+    def prepare_week(
+        self, week_start: date | None, targets: Iterable[dict[str, object]]
+    ) -> None:
+        canonical = _week_start_for(week_start) if week_start else None
+        entries: list[dict[str, object]] = []
+        for target in targets:
+            entry = {
+                "course": target.get("course", self._course.name),
+                "type": target.get("type", self._course.course_type),
+                "class_label": target.get("class_label") or "—",
+                "subgroup": target.get("subgroup") or "",
+                "teacher": target.get("teacher") or "—",
+                "time": target.get("time") or "À planifier",
+            }
+            entries.append(entry)
+        if canonical is not None:
+            self._planned_rows[canonical] = list(entries)
+            self._current_week = canonical
+            self._rows = list(entries)
+            label = canonical.strftime("%d/%m/%Y")
+        else:
+            self._current_week = None
+            self._rows = list(entries)
+            label = None
+        self._progress.update_week_overview(label, list(self._rows))
+
+    def record_sessions(self, sessions: Iterable[Session]) -> None:
+        session_list = sorted(sessions, key=lambda s: s.start_time)
+        if not session_list:
+            return
+        for session in session_list:
+            week_start = _week_start_for(session.start_time.date())
+            planned = self._planned_rows.setdefault(week_start, [])
+            row = self._build_row(session)
+            matched = False
+            for entry in planned:
+                if (
+                    entry.get("course") == row["course"]
+                    and entry.get("class_label") == row["class_label"]
+                    and (entry.get("subgroup") or "") == (row["subgroup"] or "")
+                    and entry.get("time") == "À planifier"
+                ):
+                    entry.update(row)
+                    matched = True
+                    break
+            if not matched:
+                planned.append(row)
+            self._planned_rows[week_start] = planned
+            self._current_week = week_start
+            self._rows = planned
+            label = week_start.strftime("%d/%m/%Y") if self._current_week else None
+            self._progress.update_week_overview(label, list(self._rows))
+
+    def _build_row(self, session: Session) -> dict[str, object]:
+        attendees = session.attendee_names()
+        if attendees:
+            class_label = ", ".join(attendees)
+        elif session.class_group is not None:
+            class_label = session.class_group.name
+        else:
+            class_label = "—"
+        subgroup = session.subgroup_display_name() or session.subgroup_label or ""
+        teacher_name = session.teacher.name if session.teacher else "—"
+        time_span = (
+            f"{session.start_time.strftime('%d/%m %Hh%M')} → {session.end_time.strftime('%Hh%M')}"
+        )
+        return {
+            "course": self._course.name,
+            "type": self._course.course_type,
+            "class_label": class_label,
+            "subgroup": subgroup,
+            "teacher": teacher_name,
+            "time": time_span,
+        }
 
 
 class TeacherAllocationState:
@@ -2185,6 +2278,8 @@ def generate_schedule(
     window_end: date | None = None,
     allowed_weeks: Iterable[tuple[date, date]] | None = None,
     progress: ScheduleProgress | None = None,
+    occurrence_limit: int | None = None,
+    current_week: date | None = None,
 ) -> list[Session]:
     progress = progress or NullScheduleProgress()
     reporter = ScheduleReporter(course)
@@ -2192,6 +2287,8 @@ def generate_schedule(
     placement_failures: list[str] = []
     allocation_state = TeacherAllocationState(course)
     _set_allocation_state(course, allocation_state)
+    week_tracker = WeeklyGenerationTracker(course, progress)
+    week_tracker.reset()
     try:
         try:
             schedule_start, schedule_end = _resolve_schedule_window(
@@ -2203,7 +2300,7 @@ def generate_schedule(
             reporter.finalise(len(created_sessions))
             raise
 
-        fallback_weekly_goal = max(int(course.sessions_per_week or 0), 0)
+        fallback_weekly_goal = 0
         weekly_targets: dict[date, int] = {}
         normalised_weeks: list[tuple[date, date]] = []
         if allowed_weeks:
@@ -2348,11 +2445,21 @@ def generate_schedule(
         base_week_count = available_week_count or len(normalised_weeks) or 1
         if total_weekly_goal <= 0 and fallback_weekly_goal > 0:
             total_weekly_goal = fallback_weekly_goal * base_week_count
-        effective_occurrences = max(
-            int(course.sessions_required or 0),
-            total_weekly_goal,
-            1,
-        )
+
+        requested_occurrences = max(int(course.sessions_required or 0), 0)
+        if occurrence_limit is not None:
+            try:
+                capped = max(int(occurrence_limit), 0)
+            except (TypeError, ValueError):
+                capped = 0
+            if capped == 0:
+                requested_occurrences = 0
+            else:
+                requested_occurrences = min(requested_occurrences, capped)
+
+        effective_occurrences = max(requested_occurrences, total_weekly_goal)
+        if effective_occurrences < 0:
+            effective_occurrences = 0
 
         if weekly_breakdown:
             breakdown = ", ".join(
@@ -2367,8 +2474,7 @@ def generate_schedule(
         elif fallback_weekly_goal > 0:
             reporter.info(
                 "Durée cible des séances : "
-                f"{course.session_length_hours} h — {fallback_weekly_goal} occurrence(s) par semaine ⇒ "
-                f"{effective_occurrences} occurrence(s) par groupe"
+                f"{course.session_length_hours} h — objectif de {fallback_weekly_goal} occurrence(s)"
             )
         else:
             reporter.info(
@@ -2408,6 +2514,28 @@ def generate_schedule(
             already_scheduled = sum(existing_day_hours.values())
             hours_remaining = max(total_required - already_scheduled, 0)
             progress.initialise(hours_remaining)
+            plan_week = current_week or schedule_start
+            attendee_label = ", ".join(
+                sorted((link.class_group.name for link in links), key=str.lower)
+            )
+            if not attendee_label:
+                attendee_label = "—"
+            planned_occurrences = int(
+                math.ceil(max(hours_remaining, 0) / max(slot_length_hours, 1))
+            )
+            placeholders = [
+                {
+                    "course": course.name,
+                    "type": course.course_type,
+                    "class_label": attendee_label,
+                    "subgroup": "",
+                    "teacher": "—",
+                    "time": "À planifier",
+                }
+                for _ in range(planned_occurrences)
+            ]
+            if plan_week is not None or placeholders:
+                week_tracker.prepare_week(plan_week, placeholders)
             reporter.info(
                 f"Heures requises : {total_required} h — déjà planifiées : {already_scheduled} h"
             )
@@ -2601,6 +2729,7 @@ def generate_schedule(
                             block_hours = sum(session.duration_hours for session in block_sessions)
                             if block_hours > 0:
                                 progress.record(block_hours, sessions=len(block_sessions))
+                                week_tracker.record_sessions(block_sessions)
                             for session in block_sessions:
                                 reporter.session_created(session)
                                 weekday_frequencies[session.start_time.weekday()] += 1
@@ -2755,6 +2884,37 @@ def generate_schedule(
                 hours_needed_map[(link.class_group_id, subgroup_label or None)] = amount
                 total_hours_needed += max(amount, 0)
         progress.initialise(total_hours_needed)
+        plan_week_reference = current_week or schedule_start
+        placeholder_rows: list[dict[str, object]] = []
+        for link in links:
+            class_group = link.class_group
+            display_label = class_group.name
+            for subgroup_label in link.group_labels():
+                subgroup_display = (
+                    course.subgroup_name_for(class_group, subgroup_label)
+                    or subgroup_label
+                    or ""
+                )
+                hours_needed = hours_needed_map.get(
+                    (class_group.id, subgroup_label or None), 0
+                )
+                if hours_needed <= 0:
+                    continue
+                session_length = max(slot_length_hours, 1)
+                session_count = int(math.ceil(hours_needed / session_length))
+                for _ in range(session_count):
+                    placeholder_rows.append(
+                        {
+                            "course": course.name,
+                            "type": course.course_type,
+                            "class_label": display_label,
+                            "subgroup": subgroup_display or "",
+                            "teacher": "—",
+                            "time": "À planifier",
+                        }
+                    )
+        if plan_week_reference is not None or placeholder_rows:
+            week_tracker.prepare_week(plan_week_reference, placeholder_rows)
 
         for link in links:
             class_group = link.class_group
@@ -2975,6 +3135,7 @@ def generate_schedule(
                             )
                             if block_hours > 0:
                                 progress.record(block_hours, sessions=len(block_sessions))
+                                week_tracker.record_sessions(block_sessions)
                             for session in block_sessions:
                                 reporter.session_created(session)
                                 weekday_frequencies[session.start_time.weekday()] += 1
@@ -3125,6 +3286,7 @@ def generate_schedule(
                                         progress.record(
                                             block_hours, sessions=len(block_sessions)
                                         )
+                                        week_tracker.record_sessions(block_sessions)
                                     for session in block_sessions:
                                         reporter.session_created(session)
                                         weekday_frequencies[

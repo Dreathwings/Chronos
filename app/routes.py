@@ -4,6 +4,7 @@ import json
 import math
 import threading
 from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, List, MutableSequence
 
@@ -44,7 +45,11 @@ from .models import (
     SEMESTER_CHOICES,
     semester_date_window,
 )
-from .progress import progress_registry, ScheduleProgressTracker
+from .progress import (
+    progress_registry,
+    ScheduleProgressSlice,
+    ScheduleProgressTracker,
+)
 from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
@@ -54,6 +59,7 @@ from .scheduler import (
     has_weekly_course_conflict,
     overlaps,
     respects_weekly_chronology,
+    _week_start_for,
 )
 from .utils import (
     parse_unavailability_ranges,
@@ -2293,6 +2299,8 @@ def schedule_progress_status(job_id: str):
             "message": snapshot.message,
             "detail": detail_text,
             "finished": snapshot.finished,
+            "current_week_label": snapshot.current_week_label,
+            "current_week_sessions": snapshot.current_week_sessions,
         }
     )
 
@@ -2331,13 +2339,6 @@ def course_detail(course_id: int):
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
-            session_goal = max(
-                _parse_non_negative_int(
-                    request.form.get("sessions_per_week"), course.sessions_per_week
-                ),
-                1,
-            )
-            course.sessions_per_week = session_goal
             raw_color = (request.form.get("color") or "").strip()
             course.color = raw_color if raw_color else None
             course.configured_name = selected_course_name
@@ -2628,7 +2629,7 @@ def course_detail(course_id: int):
 
     week_ranges.sort(key=lambda span: span[0])
 
-    default_week_target = max(int(course.sessions_per_week or 0), 0)
+    default_week_target = max(int(course.sessions_required or 0), 0)
     course_week_session_map = {
         start.isoformat(): default_week_target for start, _ in week_ranges
     }
@@ -2833,6 +2834,86 @@ def _enqueue_course_schedule(
     return tracker
 
 
+def _default_academic_week_start(reference: date | None) -> date:
+    if reference is None:
+        today = date.today()
+    else:
+        today = reference
+    year = today.year if today.month >= 9 else today.year - 1
+    base = date(year, 9, 1)
+    return _week_start_for(base)
+
+
+def _build_course_week_plan(course: Course) -> list[tuple[date, date, int]]:
+    payload = course.allowed_week_payload
+    week_map: dict[date, tuple[date, int]] = {}
+    if payload:
+        for week_start, week_end, weekly_goal in payload:
+            if week_start is None:
+                continue
+            canonical_start = _week_start_for(week_start)
+            end = week_end or (canonical_start + timedelta(days=6))
+            try:
+                goal = max(int(weekly_goal), 0)
+            except (TypeError, ValueError):
+                goal = 0
+            if canonical_start in week_map:
+                existing_end, existing_goal = week_map[canonical_start]
+                merged_end = max(existing_end, end)
+                week_map[canonical_start] = (merged_end, existing_goal + goal)
+            else:
+                week_map[canonical_start] = (end, goal)
+    else:
+        semester_window = course.semester_window
+        if semester_window is not None:
+            base_start, base_end = semester_window
+        else:
+            base_start = _default_academic_week_start(None)
+            base_end = base_start + timedelta(days=6)
+        goal = max(int(course.sessions_required or 0), 0)
+        week_map[_week_start_for(base_start)] = (max(base_end, base_start), goal)
+
+    ordered = []
+    for week_start, (week_end, goal) in week_map.items():
+        canonical_end = max(week_end, week_start + timedelta(days=6))
+        ordered.append((week_start, canonical_end, goal))
+    ordered.sort(key=lambda entry: entry[0])
+    return ordered
+
+
+@dataclass
+class _CourseWeekState:
+    course: Course
+    plan: list[tuple[date, date, int]]
+    pointer: int
+    active_payload: list[tuple[date, date, int]]
+    cumulative_goal: int
+    total_goal: int
+    progress_slice: ScheduleProgressSlice
+
+    def next_week_start(self) -> date | None:
+        if self.cumulative_goal >= self.total_goal:
+            return None
+        if self.pointer >= len(self.plan):
+            return None
+        return self.plan[self.pointer][0]
+
+    def advance(self) -> tuple[tuple[date, date, int], int] | None:
+        if self.pointer >= len(self.plan):
+            return None
+        entry = self.plan[self.pointer]
+        self.pointer += 1
+        self.active_payload.append(entry)
+        _, _, weekly_goal = entry
+        previous = self.cumulative_goal
+        updated = previous + max(weekly_goal, 0)
+        if updated > self.total_goal:
+            updated = self.total_goal
+        self.cumulative_goal = updated
+        delta = updated - previous
+        return entry, delta
+
+
 def _run_bulk_schedule_job(app, tracker_id: str) -> None:
     with app.app_context():
         tracker = progress_registry.get(tracker_id)
@@ -2856,29 +2937,72 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
             total_created = 0
             errors: list[str] = []
 
+            course_states: list[_CourseWeekState] = []
             for course in courses:
-                allowed_ranges = course.allowed_week_ranges
-                window_start = allowed_ranges[0][0] if allowed_ranges else None
-                window_end = allowed_ranges[-1][1] if allowed_ranges else None
-                allowed_payload = course.allowed_week_payload or None
+                plan = _build_course_week_plan(course)
+                if not plan:
+                    continue
+                specified_total = sum(goal for _, _, goal in plan)
+                base_occurrences = max(int(course.sessions_required or 0), 0)
+                if specified_total > 0:
+                    total_goal = specified_total
+                else:
+                    total_goal = base_occurrences
+                if total_goal <= 0:
+                    continue
                 slice_progress = tracker.create_slice(
                     label=f"Planification de {course.name}"
                 )
-                try:
-                    created_sessions = generate_schedule(
-                        course,
-                        window_start=window_start,
-                        window_end=window_end,
-                        allowed_weeks=allowed_payload,
-                        progress=slice_progress,
-                    )
-                except ValueError as exc:
-                    errors.append(f"{course.name} : {exc}")
-                    tracker.set_current_label(None)
+                state = _CourseWeekState(
+                    course=course,
+                    plan=plan,
+                    pointer=0,
+                    active_payload=[],
+                    cumulative_goal=0,
+                    total_goal=total_goal,
+                    progress_slice=slice_progress,
+                )
+                course_states.append(state)
+
+            while True:
+                pending_starts = [
+                    state.next_week_start()
+                    for state in course_states
+                    if state.next_week_start() is not None
+                ]
+                if not pending_starts:
+                    break
+                current_week = min(pending_starts)
+                for state in course_states:
+                    if state.next_week_start() != current_week:
+                        continue
+                    result = state.advance()
+                    if result is None:
+                        continue
+                    (week_start, week_end, weekly_goal), delta = result
+                    if delta <= 0:
+                        continue
+                    course = state.course
+                    window_start = state.active_payload[0][0]
+                    window_end = state.active_payload[-1][1]
+                    allowed_payload = list(state.active_payload)
+                    try:
+                        created_sessions = generate_schedule(
+                            course,
+                            window_start=window_start,
+                            window_end=window_end,
+                            allowed_weeks=allowed_payload,
+                            progress=state.progress_slice,
+                            occurrence_limit=state.cumulative_goal,
+                            current_week=week_start,
+                        )
+                    except ValueError as exc:
+                        errors.append(f"{course.name} : {exc}")
+                        tracker.set_current_label(None)
+                        db.session.commit()
+                        continue
+                    total_created += len(created_sessions)
                     db.session.commit()
-                    continue
-                total_created += len(created_sessions)
-                db.session.commit()
 
             if errors:
                 current_app.logger.warning(
