@@ -7,6 +7,7 @@
 
 2. **Préparation hebdomadaire**
    - Construction de la liste des semaines ouvertes à partir du 1er septembre de l'année scolaire concernée.
+   - Recensement exhaustif des séances à placer pour la semaine courante avant de lancer les placements.
    - Initialisation du suivi de progression avec le tableau récapitulant les séances à planifier pour la semaine active.
 
 3. **Ordonnancement des séances**

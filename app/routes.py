@@ -2994,6 +2994,7 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                             allowed_weeks=allowed_payload,
                             progress=state.progress_slice,
                             occurrence_limit=state.cumulative_goal,
+                            current_week=week_start,
                         )
                     except ValueError as exc:
                         errors.append(f"{course.name} : {exc}")
