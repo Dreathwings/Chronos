@@ -2383,6 +2383,10 @@ def course_detail(course_id: int):
                     request.form.get(f"teacher_hours_{teacher.id}"),
                     current_default,
                 )
+            session_goal = _parse_non_negative_int(
+                request.form.get("sessions_required"),
+                max(int(course.sessions_required or 0), 0),
+            )
             existing_week_targets = {
                 allowed.week_start: allowed.effective_sessions(session_goal)
                 for allowed in course.allowed_weeks
