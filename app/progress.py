@@ -4,6 +4,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Dict
 
 
@@ -19,6 +20,12 @@ class ScheduleProgress:
     def complete(self, message: str | None = None) -> None:  # pragma: no cover
         """Mark the job as finished successfully."""
 
+    def prepare_week(self, week_start: date, total_sessions: int) -> None:  # pragma: no cover
+        """Declare a new weekly planning target."""
+
+    def complete_week_session(self, week_start: date, sessions: int = 1) -> None:  # pragma: no cover
+        """Record progress for the provided week."""
+
 
 class NullScheduleProgress(ScheduleProgress):
     """Fallback progress adapter used when no tracking is requested."""
@@ -30,6 +37,12 @@ class NullScheduleProgress(ScheduleProgress):
         return
 
     def complete(self, message: str | None = None) -> None:
+        return
+
+    def prepare_week(self, week_start: date, total_sessions: int) -> None:
+        return
+
+    def complete_week_session(self, week_start: date, sessions: int = 1) -> None:
         return
 
 
@@ -46,6 +59,7 @@ class ProgressSnapshot:
     message: str | None
     finished: bool
     current_label: str | None
+    week_table: list[dict[str, object]]
 
 
 class ScheduleProgressTracker(ScheduleProgress):
@@ -65,6 +79,9 @@ class ScheduleProgressTracker(ScheduleProgress):
         self._started_at: float | None = None
         self._finished_at: float | None = None
         self._current_label: str | None = None
+        self._week_plan: Dict[date, int] = {}
+        self._week_progress: Dict[date, int] = {}
+        self._active_week: date | None = None
 
     # Public helpers -------------------------------------------------
     def initialise(self, total_hours: float) -> None:
@@ -119,6 +136,7 @@ class ScheduleProgressTracker(ScheduleProgress):
             eta = self._eta_locked()
             finished = self._state in self.SUCCESS_STATES
             message = self._message
+            week_rows = self._week_rows_locked()
             return ProgressSnapshot(
                 job_id=self.job_id,
                 label=self.label,
@@ -131,6 +149,7 @@ class ScheduleProgressTracker(ScheduleProgress):
                 message=message,
                 finished=finished,
                 current_label=self._current_label,
+                week_table=week_rows,
             )
 
     def is_finished(self) -> bool:
@@ -184,6 +203,50 @@ class ScheduleProgressTracker(ScheduleProgress):
     def create_slice(self, label: str | None = None) -> "ScheduleProgressSlice":
         return ScheduleProgressSlice(self, label=label)
 
+    def prepare_week(self, week_start: date, total_sessions: int) -> None:
+        with self._lock:
+            total = max(int(total_sessions or 0), 0)
+            self._week_plan[week_start] = total
+            if week_start not in self._week_progress:
+                self._week_progress[week_start] = 0
+
+    def complete_week_session(self, week_start: date, sessions: int = 1) -> None:
+        if sessions <= 0:
+            return
+        with self._lock:
+            current = self._week_progress.get(week_start, 0)
+            self._week_progress[week_start] = max(current + sessions, 0)
+            if week_start not in self._week_plan:
+                self._week_plan[week_start] = 0
+            self._active_week = week_start
+
+    def _week_rows_locked(self) -> list[dict[str, object]]:
+        if not self._week_plan and not self._week_progress:
+            return []
+        rows: list[dict[str, object]] = []
+        for week_start in sorted(self._week_plan.keys() | self._week_progress.keys()):
+            total = max(self._week_plan.get(week_start, 0), 0)
+            completed = max(self._week_progress.get(week_start, 0), 0)
+            label = self._format_week_label(week_start)
+            rows.append(
+                {
+                    "label": label,
+                    "total": total,
+                    "completed": completed if total <= 0 else min(completed, total),
+                    "active": week_start == self._active_week,
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _format_week_label(week_start: date) -> str:
+        iso_year, iso_week, _ = week_start.isocalendar()
+        week_end = week_start + timedelta(days=6)
+        return (
+            f"S{iso_week:02d} {iso_year} — "
+            f"{week_start.strftime('%d/%m')} → {week_end.strftime('%d/%m')}"
+        )
+
 
 class ScheduleProgressSlice(ScheduleProgress):
     """Adapter used to feed a shared tracker for nested jobs."""
@@ -197,6 +260,12 @@ class ScheduleProgressSlice(ScheduleProgress):
 
     def record(self, hours: float, sessions: int = 0) -> None:
         self._tracker.record(hours, sessions=sessions)
+
+    def prepare_week(self, week_start: date, total_sessions: int) -> None:
+        self._tracker.prepare_week(week_start, total_sessions)
+
+    def complete_week_session(self, week_start: date, sessions: int = 1) -> None:
+        self._tracker.complete_week_session(week_start, sessions=sessions)
 
     def complete(self, message: str | None = None) -> None:
         self._tracker.set_current_label(None)

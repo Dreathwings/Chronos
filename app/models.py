@@ -256,7 +256,6 @@ class Course(db.Model, TimeStampedModel):
     priority: Mapped[int] = mapped_column(Integer, default=1)
     course_type: Mapped[str] = mapped_column(String(3), default="CM")
     semester: Mapped[str] = mapped_column(String(2), default="S1")
-    sessions_per_week: Mapped[int] = mapped_column(Integer, default=1)
     color: Mapped[Optional[str]] = mapped_column(String(7))
     course_name_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("course_name.id"), nullable=True
@@ -304,7 +303,6 @@ class Course(db.Model, TimeStampedModel):
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
-        CheckConstraint("sessions_per_week >= 0", name="chk_sessions_per_week_non_negative"),
         CheckConstraint("computers_required >= 0", name="chk_course_computers_non_negative"),
         CheckConstraint(
             "course_type IN ('CM','TD','TP','SAE','Eval')",
@@ -402,15 +400,14 @@ class Course(db.Model, TimeStampedModel):
         return [entry.week_span for entry in self.allowed_weeks]
 
     @property
-    def allowed_week_payload(self) -> list[tuple[date, date, int]]:
-        fallback = max(int(self.sessions_per_week or 0), 0)
-        payload: list[tuple[date, date, int]] = []
+    def allowed_week_payload(self) -> list[tuple[date, date, int | None]]:
+        payload: list[tuple[date, date, int | None]] = []
         for entry in self.allowed_weeks:
             payload.append(
                 (
                     entry.week_start,
                     entry.week_end,
-                    entry.effective_sessions(fallback),
+                    entry.sessions_target,
                 )
             )
         return payload
@@ -457,10 +454,9 @@ class Course(db.Model, TimeStampedModel):
             multiplier = 1
         else:
             multiplier = group_total or 1
-        per_week_goal = max(int(self.sessions_per_week or 0), 0)
         if self.allowed_weeks:
             occurrences = sum(
-                entry.effective_sessions(per_week_goal)
+                entry.effective_sessions(0) or 0
                 for entry in self.allowed_weeks
             )
             if occurrences <= 0:
@@ -468,7 +464,6 @@ class Course(db.Model, TimeStampedModel):
         else:
             occurrences = max(
                 int(self.sessions_required or 0),
-                per_week_goal,
                 1,
             )
         return occurrences * self.session_length_hours * multiplier
@@ -767,13 +762,17 @@ class CourseAllowedWeek(db.Model, TimeStampedModel):
     def week_span(self) -> tuple[date, date]:
         return self.week_start, self.week_end
 
-    def effective_sessions(self, default: int) -> int:
+    def effective_sessions(self, default: int | None = None) -> int | None:
         value = self.sessions_target
         if value is None:
+            if default is None:
+                return None
             return max(int(default or 0), 0)
         try:
             return max(int(value), 0)
         except (TypeError, ValueError):
+            if default is None:
+                return None
             return max(int(default or 0), 0)
 
 

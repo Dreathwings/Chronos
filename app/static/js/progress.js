@@ -60,6 +60,8 @@
     const percentLabel = modalEl.querySelector('[data-chronos-progress-percent]');
     const etaLabel = modalEl.querySelector('[data-chronos-progress-eta]');
     const detailLabel = modalEl.querySelector('[data-chronos-progress-detail]');
+    const weekContainer = modalEl.querySelector('[data-chronos-progress-week]');
+    const weekBody = modalEl.querySelector('[data-chronos-progress-week-body]');
     const stateLabel = modalEl.querySelector('[data-chronos-progress-state]');
     if (!progressBar || !percentLabel || !etaLabel || !detailLabel || !stateLabel) {
       return null;
@@ -96,6 +98,36 @@
         detailLabel.textContent = '';
         detailLabel.classList.add('d-none');
       }
+    }
+
+    function renderWeekTable(rows) {
+      if (!weekContainer || !weekBody) {
+        return;
+      }
+      weekBody.innerHTML = '';
+      if (!Array.isArray(rows) || rows.length === 0) {
+        weekContainer.classList.add('d-none');
+        return;
+      }
+      rows.forEach(function(row) {
+        const tr = document.createElement('tr');
+        if (row && row.active) {
+          tr.classList.add('table-primary');
+        }
+        const labelCell = document.createElement('td');
+        labelCell.textContent = row && row.label ? row.label : '';
+        const totalCell = document.createElement('td');
+        totalCell.classList.add('text-center');
+        totalCell.textContent = Number.isFinite(row && row.total) ? String(row.total) : '–';
+        const doneCell = document.createElement('td');
+        doneCell.classList.add('text-center');
+        doneCell.textContent = Number.isFinite(row && row.completed) ? String(row.completed) : '0';
+        tr.appendChild(labelCell);
+        tr.appendChild(totalCell);
+        tr.appendChild(doneCell);
+        weekBody.appendChild(tr);
+      });
+      weekContainer.classList.remove('d-none');
     }
 
     function updateTimer() {
@@ -147,6 +179,7 @@
           etaLabel.textContent = 'Calcul en cours';
         }
         applyDetail(detailFallback);
+        renderWeekTable([]);
 
         modal.show();
 
@@ -198,6 +231,7 @@
           ? snapshot.detail
           : detailFallback;
         applyDetail(detail);
+        renderWeekTable(snapshot.week_table);
       },
       finish(message) {
         stopTimer();
@@ -208,6 +242,7 @@
         if (message && message.trim().length > 0) {
           applyDetail(message);
         }
+        renderWeekTable([]);
       },
       fail(message) {
         stopTimer();
@@ -215,6 +250,7 @@
         stateLabel.textContent = 'Erreur lors de la génération';
         etaLabel.textContent = 'Erreur';
         applyDetail(message || 'Une erreur est survenue pendant la génération.');
+        renderWeekTable([]);
         window.setTimeout(function() {
           modal.hide();
           if (message && message.trim().length > 0) {
