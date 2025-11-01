@@ -4,7 +4,7 @@
    La fenêtre de planification du cours est normalisée (dates du semestre, filtre éventuel sur les semaines autorisées, suppression des périodes de fermeture) afin d'obtenir une liste ordonnée de semaines actives et des jours travaillés (lundi → vendredi).
 
 2. **Construction des demandes de séances**
-   Pour chaque cours, on calcule les heures restantes à planifier par type de séance (CM, SAE/EVAL, TD, TP). Les classes et sous-groupes concernés alimentent une file d'attente de « demandes de séances » à traiter. Les quotas hebdomadaires saisis via les champs `allowed-week-sessions-AAAA-MM-JJ` sont interprétés comme un nombre maximal de séances à positionner sur la semaine correspondante.
+   Pour chaque cours, on calcule les heures restantes à planifier par type de séance (CM, SAE/EVAL, TD, TP). Les classes et sous-groupes concernés alimentent une file d'attente de « demandes de séances » à traiter. Les quotas hebdomadaires saisis via les champs `allowed-week-sessions-AAAA-MM-JJ` sont interprétés comme un nombre maximal de séances à positionner sur la semaine correspondante pour l'ensemble du cours : un CM compte pour une seule séance, un TD/SAE pour autant de classes associées, un TP pour chaque demi-groupe configuré.
 
 3. **Itération semaine par semaine**  
    On parcourt les semaines disponibles dans l'ordre chronologique. À chaque semaine, les demandes restantes sont triées selon la priorité CM → SAE → EVAL → TD → TP.

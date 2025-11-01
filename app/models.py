@@ -383,6 +383,21 @@ class Course(db.Model, TimeStampedModel):
         link = self.class_link_for(class_group)
         return link.group_count if link else 1
 
+    @property
+    def session_group_multiplier(self) -> int:
+        if self.is_cm:
+            return 1
+        total = 0
+        for link in self.class_links:
+            try:
+                count = int(link.group_count or 0)
+            except (TypeError, ValueError):
+                count = 0
+            if count <= 0:
+                count = 1
+            total += count
+        return total if total > 0 else 1
+
     def group_labels_for(self, class_group: "ClassGroup" | int) -> list[str | None]:
         link = self.class_link_for(class_group)
         if link is None:
@@ -413,7 +428,7 @@ class Course(db.Model, TimeStampedModel):
         return payload
 
     def _default_weekly_target(self, weeks_count: int) -> int | None:
-        total_sessions = max(int(self.sessions_required or 0), 0)
+        total_sessions = max(int(self.sessions_required or 0), 1) * self.session_group_multiplier
         if weeks_count <= 0:
             return total_sessions or None
         if total_sessions <= 0:
@@ -457,11 +472,8 @@ class Course(db.Model, TimeStampedModel):
 
     @property
     def total_required_hours(self) -> int:
-        group_total = sum(link.group_count for link in self.class_links)
-        if self.is_cm:
-            multiplier = 1
-        else:
-            multiplier = group_total or 1
+        multiplier = self.session_group_multiplier
+        base_total_sessions = max(int(self.sessions_required or 0), 1) * multiplier
         if self.allowed_weeks:
             fallback = self._default_weekly_target(len(self.allowed_weeks))
             occurrences = 0
@@ -471,13 +483,10 @@ class Course(db.Model, TimeStampedModel):
                     target = fallback
                 occurrences += max(int(target or 0), 0)
             if occurrences <= 0:
-                occurrences = max(int(self.sessions_required or 0), 1)
+                occurrences = base_total_sessions
         else:
-            occurrences = max(
-                int(self.sessions_required or 0),
-                1,
-            )
-        return occurrences * self.session_length_hours * multiplier
+            occurrences = base_total_sessions
+        return occurrences * self.session_length_hours
 
     @property
     def latest_generation_log(self) -> "CourseScheduleLog | None":

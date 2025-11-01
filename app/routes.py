@@ -2404,7 +2404,14 @@ def course_detail(course_id: int):
             )
             if synchronised_targets:
                 total_sessions = sum(max(value, 0) for value in synchronised_targets.values())
-                course.sessions_required = max(total_sessions, 1)
+                multiplier = course.session_group_multiplier
+                if multiplier <= 0:
+                    multiplier = 1
+                if total_sessions <= 0:
+                    per_class_target = 1
+                else:
+                    per_class_target = max(int(math.ceil(total_sessions / multiplier)), 1)
+                course.sessions_required = per_class_target
             try:
                 db.session.commit()
                 flash("Cours mis à jour", "success")
