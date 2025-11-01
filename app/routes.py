@@ -2180,6 +2180,15 @@ def generation_overview():
             }
         )
 
+    total_required_hours = sum(row["required_hours"] for row in course_rows)
+    total_scheduled_hours = sum(row["scheduled_hours"] for row in course_rows)
+    total_remaining_hours = sum(row["remaining_hours"] for row in course_rows)
+
+    total_courses = len(course_rows)
+    scheduled_courses = sum(1 for row in course_rows if row["sessions_count"])
+    error_courses = sum(1 for row in course_rows if row["status"] == "error")
+    warning_courses = sum(1 for row in course_rows if row["status"] == "warning")
+
     search_term = search_query.lower()
     filtered_rows: list[dict[str, object]] = []
     for row in course_rows:
@@ -2205,20 +2214,6 @@ def generation_overview():
             continue
         filtered_rows.append(row)
 
-    total_required_hours = sum(
-        row["required_hours"] for row in filtered_rows
-    )
-    total_scheduled_hours = sum(
-        row["scheduled_hours"] for row in filtered_rows
-    )
-    total_remaining_hours = sum(
-        row["remaining_hours"] for row in filtered_rows
-    )
-
-    total_courses = len(filtered_rows)
-    scheduled_courses = sum(1 for row in filtered_rows if row["sessions_count"])
-    error_courses = sum(1 for row in filtered_rows if row["status"] == "error")
-    warning_courses = sum(1 for row in filtered_rows if row["status"] == "warning")
     has_active_filters = bool(
         search_query or selected_statuses or selected_course_type or selected_class_id
     )
