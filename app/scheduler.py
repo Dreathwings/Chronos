@@ -85,19 +85,20 @@ class WeeklyGenerationTracker:
         self._progress.update_week_overview(None, [])
 
     def record_sessions(self, sessions: Iterable[Session]) -> None:
-        session_list = list(sessions)
+        session_list = sorted(sessions, key=lambda s: s.start_time)
         if not session_list:
             return
-        first_session = session_list[0]
-        week_start = _week_start_for(first_session.start_time.date())
-        if self._current_week != week_start:
-            self._current_week = week_start
-            self._rows = []
         for session in session_list:
+            week_start = _week_start_for(session.start_time.date())
+            if self._current_week != week_start:
+                self._current_week = week_start
+                self._rows = []
             row = self._build_row(session)
             self._rows.append(row)
-        label = self._current_week.strftime("%d/%m/%Y") if self._current_week else None
-        self._progress.update_week_overview(label, list(self._rows))
+            label = (
+                self._current_week.strftime("%d/%m/%Y") if self._current_week else None
+            )
+            self._progress.update_week_overview(label, list(self._rows))
 
     def _build_row(self, session: Session) -> dict[str, object]:
         attendees = session.attendee_names()
