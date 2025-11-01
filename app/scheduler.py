@@ -2238,6 +2238,7 @@ def generate_schedule(
     window_end: date | None = None,
     allowed_weeks: Iterable[tuple[date, date]] | None = None,
     progress: ScheduleProgress | None = None,
+    occurrence_limit: int | None = None,
 ) -> list[Session]:
     progress = progress or NullScheduleProgress()
     reporter = ScheduleReporter(course)
@@ -2403,11 +2404,21 @@ def generate_schedule(
         base_week_count = available_week_count or len(normalised_weeks) or 1
         if total_weekly_goal <= 0 and fallback_weekly_goal > 0:
             total_weekly_goal = fallback_weekly_goal * base_week_count
-        effective_occurrences = max(
-            int(course.sessions_required or 0),
-            total_weekly_goal,
-            1,
-        )
+
+        requested_occurrences = max(int(course.sessions_required or 0), 0)
+        if occurrence_limit is not None:
+            try:
+                capped = max(int(occurrence_limit), 0)
+            except (TypeError, ValueError):
+                capped = 0
+            if capped == 0:
+                requested_occurrences = 0
+            else:
+                requested_occurrences = min(requested_occurrences, capped)
+
+        effective_occurrences = max(requested_occurrences, total_weekly_goal)
+        if effective_occurrences < 0:
+            effective_occurrences = 0
 
         if weekly_breakdown:
             breakdown = ", ".join(

@@ -10,6 +10,7 @@
    - Initialisation du suivi de progression avec le tableau récapitulant les séances à planifier pour la semaine active.
 
 3. **Ordonnancement des séances**
+   - Progression hebdomadaire globale : toutes les séances de la semaine courante sont planifiées pour l'ensemble des cours avant de passer à la suivante.
    - Classement des séances selon la chronologie pédagogique : CM → SAE → TD → TP → Éval.
    - Pour chaque type, sélection des créneaux compatibles (jours ouvrés, salles, équipements, indisponibilités, périodes de fermeture).
 
