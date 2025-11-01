@@ -61,6 +61,9 @@
     const etaLabel = modalEl.querySelector('[data-chronos-progress-eta]');
     const detailLabel = modalEl.querySelector('[data-chronos-progress-detail]');
     const stateLabel = modalEl.querySelector('[data-chronos-progress-state]');
+    const weekWrapper = modalEl.querySelector('[data-chronos-week-progress]');
+    const weekTitle = modalEl.querySelector('[data-chronos-week-title]');
+    const weekBody = modalEl.querySelector('[data-chronos-week-body]');
     if (!progressBar || !percentLabel || !etaLabel || !detailLabel || !stateLabel) {
       return null;
     }
@@ -96,6 +99,75 @@
         detailLabel.textContent = '';
         detailLabel.classList.add('d-none');
       }
+    }
+
+    function clearWeekProgress() {
+      if (!weekWrapper || !weekTitle || !weekBody) {
+        return;
+      }
+      weekTitle.textContent = '';
+      weekBody.innerHTML = '';
+      weekWrapper.classList.add('d-none');
+    }
+
+    function renderWeekProgress(snapshot) {
+      if (!weekWrapper || !weekTitle || !weekBody) {
+        return;
+      }
+      const label = snapshot && typeof snapshot.week_label === 'string'
+        ? snapshot.week_label.trim()
+        : '';
+      const rows = snapshot && Array.isArray(snapshot.week_rows)
+        ? snapshot.week_rows
+        : [];
+      if (!label || rows.length === 0) {
+        clearWeekProgress();
+        return;
+      }
+      weekTitle.textContent = label;
+      weekBody.innerHTML = '';
+      rows.forEach(function(row) {
+        if (!row || typeof row !== 'object') {
+          return;
+        }
+        const labelText = typeof row.label === 'string' ? row.label.trim() : '';
+        if (labelText.length === 0) {
+          return;
+        }
+        const statusText = typeof row.status === 'string' ? row.status.trim() : '';
+        const state = typeof row.state === 'string'
+          ? row.state.trim().toLowerCase()
+          : 'pending';
+        const tr = document.createElement('tr');
+        if (state === 'meta') {
+          const td = document.createElement('td');
+          td.colSpan = 2;
+          td.classList.add('small', 'text-muted');
+          td.textContent = statusText.length > 0
+            ? `${labelText} — ${statusText}`
+            : labelText;
+          tr.appendChild(td);
+        } else {
+          const th = document.createElement('th');
+          th.scope = 'row';
+          th.textContent = labelText;
+          const td = document.createElement('td');
+          td.textContent = statusText;
+          if (state === 'done') {
+            td.classList.add('text-success');
+          } else if (state === 'blocked') {
+            td.classList.add('text-warning');
+          } else if (state === 'retry') {
+            td.classList.add('text-danger');
+          } else if (state === 'pending') {
+            td.classList.add('text-muted');
+          }
+          tr.appendChild(th);
+          tr.appendChild(td);
+        }
+        weekBody.appendChild(tr);
+      });
+      weekWrapper.classList.remove('d-none');
     }
 
     function updateTimer() {
@@ -147,6 +219,7 @@
           etaLabel.textContent = 'Calcul en cours';
         }
         applyDetail(detailFallback);
+        clearWeekProgress();
 
         modal.show();
 
@@ -198,6 +271,7 @@
           ? snapshot.detail
           : detailFallback;
         applyDetail(detail);
+        renderWeekProgress(snapshot);
       },
       finish(message) {
         stopTimer();
@@ -208,6 +282,7 @@
         if (message && message.trim().length > 0) {
           applyDetail(message);
         }
+        clearWeekProgress();
       },
       fail(message) {
         stopTimer();
@@ -215,6 +290,7 @@
         stateLabel.textContent = 'Erreur lors de la génération';
         etaLabel.textContent = 'Erreur';
         applyDetail(message || 'Une erreur est survenue pendant la génération.');
+        clearWeekProgress();
         window.setTimeout(function() {
           modal.hide();
           if (message && message.trim().length > 0) {
@@ -226,9 +302,11 @@
         stopTimer();
         mode = 'idle';
         modal.hide();
+        clearWeekProgress();
       },
       stop() {
         stopTimer();
+        clearWeekProgress();
       },
     };
   }
