@@ -70,6 +70,58 @@ COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
 }
 
 
+class WeeklyGenerationTracker:
+    """Accumulate session details for the week currently being scheduled."""
+
+    def __init__(self, course: Course, progress: ScheduleProgress) -> None:
+        self._course = course
+        self._progress = progress
+        self._current_week: date | None = None
+        self._rows: list[dict[str, object]] = []
+
+    def reset(self) -> None:
+        self._current_week = None
+        self._rows = []
+        self._progress.update_week_overview(None, [])
+
+    def record_sessions(self, sessions: Iterable[Session]) -> None:
+        session_list = list(sessions)
+        if not session_list:
+            return
+        first_session = session_list[0]
+        week_start = _week_start_for(first_session.start_time.date())
+        if self._current_week != week_start:
+            self._current_week = week_start
+            self._rows = []
+        for session in session_list:
+            row = self._build_row(session)
+            self._rows.append(row)
+        label = self._current_week.strftime("%d/%m/%Y") if self._current_week else None
+        self._progress.update_week_overview(label, list(self._rows))
+
+    def _build_row(self, session: Session) -> dict[str, object]:
+        attendees = session.attendee_names()
+        if attendees:
+            class_label = ", ".join(attendees)
+        elif session.class_group is not None:
+            class_label = session.class_group.name
+        else:
+            class_label = "—"
+        subgroup = session.subgroup_display_name() or session.subgroup_label or ""
+        teacher_name = session.teacher.name if session.teacher else "—"
+        time_span = (
+            f"{session.start_time.strftime('%d/%m %Hh%M')} → {session.end_time.strftime('%Hh%M')}"
+        )
+        return {
+            "course": self._course.name,
+            "type": self._course.course_type,
+            "class_label": class_label,
+            "subgroup": subgroup,
+            "teacher": teacher_name,
+            "time": time_span,
+        }
+
+
 class TeacherAllocationState:
     def __init__(self, course: Course) -> None:
         self.course = course
@@ -2192,6 +2244,8 @@ def generate_schedule(
     placement_failures: list[str] = []
     allocation_state = TeacherAllocationState(course)
     _set_allocation_state(course, allocation_state)
+    week_tracker = WeeklyGenerationTracker(course, progress)
+    week_tracker.reset()
     try:
         try:
             schedule_start, schedule_end = _resolve_schedule_window(
@@ -2203,7 +2257,7 @@ def generate_schedule(
             reporter.finalise(len(created_sessions))
             raise
 
-        fallback_weekly_goal = max(int(course.sessions_per_week or 0), 0)
+        fallback_weekly_goal = 0
         weekly_targets: dict[date, int] = {}
         normalised_weeks: list[tuple[date, date]] = []
         if allowed_weeks:
@@ -2367,8 +2421,7 @@ def generate_schedule(
         elif fallback_weekly_goal > 0:
             reporter.info(
                 "Durée cible des séances : "
-                f"{course.session_length_hours} h — {fallback_weekly_goal} occurrence(s) par semaine ⇒ "
-                f"{effective_occurrences} occurrence(s) par groupe"
+                f"{course.session_length_hours} h — objectif de {fallback_weekly_goal} occurrence(s)"
             )
         else:
             reporter.info(
@@ -2601,6 +2654,7 @@ def generate_schedule(
                             block_hours = sum(session.duration_hours for session in block_sessions)
                             if block_hours > 0:
                                 progress.record(block_hours, sessions=len(block_sessions))
+                                week_tracker.record_sessions(block_sessions)
                             for session in block_sessions:
                                 reporter.session_created(session)
                                 weekday_frequencies[session.start_time.weekday()] += 1
@@ -2975,6 +3029,7 @@ def generate_schedule(
                             )
                             if block_hours > 0:
                                 progress.record(block_hours, sessions=len(block_sessions))
+                                week_tracker.record_sessions(block_sessions)
                             for session in block_sessions:
                                 reporter.session_created(session)
                                 weekday_frequencies[session.start_time.weekday()] += 1
@@ -3125,6 +3180,7 @@ def generate_schedule(
                                         progress.record(
                                             block_hours, sessions=len(block_sessions)
                                         )
+                                        week_tracker.record_sessions(block_sessions)
                                     for session in block_sessions:
                                         reporter.session_created(session)
                                         weekday_frequencies[

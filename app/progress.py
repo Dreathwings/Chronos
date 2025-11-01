@@ -4,7 +4,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, List
 
 
 class ScheduleProgress:
@@ -19,6 +19,11 @@ class ScheduleProgress:
     def complete(self, message: str | None = None) -> None:  # pragma: no cover
         """Mark the job as finished successfully."""
 
+    def update_week_overview(
+        self, week_label: str | None, entries: List[dict[str, object]]
+    ) -> None:  # pragma: no cover - interface
+        """Update the list of sessions generated for the active week."""
+
 
 class NullScheduleProgress(ScheduleProgress):
     """Fallback progress adapter used when no tracking is requested."""
@@ -30,6 +35,11 @@ class NullScheduleProgress(ScheduleProgress):
         return
 
     def complete(self, message: str | None = None) -> None:
+        return
+
+    def update_week_overview(
+        self, week_label: str | None, entries: List[dict[str, object]]
+    ) -> None:
         return
 
 
@@ -46,6 +56,8 @@ class ProgressSnapshot:
     message: str | None
     finished: bool
     current_label: str | None
+    current_week_label: str | None
+    current_week_sessions: List[dict[str, object]]
 
 
 class ScheduleProgressTracker(ScheduleProgress):
@@ -65,6 +77,8 @@ class ScheduleProgressTracker(ScheduleProgress):
         self._started_at: float | None = None
         self._finished_at: float | None = None
         self._current_label: str | None = None
+        self._current_week_label: str | None = None
+        self._current_week_sessions: List[dict[str, object]] = []
 
     # Public helpers -------------------------------------------------
     def initialise(self, total_hours: float) -> None:
@@ -112,6 +126,13 @@ class ScheduleProgressTracker(ScheduleProgress):
             self._finished_at = time.monotonic()
             self._current_label = None
 
+    def update_week_overview(
+        self, week_label: str | None, entries: List[dict[str, object]]
+    ) -> None:
+        with self._lock:
+            self._current_week_label = week_label
+            self._current_week_sessions = list(entries)
+
     # Snapshot -------------------------------------------------------
     def snapshot(self) -> ProgressSnapshot:
         with self._lock:
@@ -131,6 +152,8 @@ class ScheduleProgressTracker(ScheduleProgress):
                 message=message,
                 finished=finished,
                 current_label=self._current_label,
+                current_week_label=self._current_week_label,
+                current_week_sessions=list(self._current_week_sessions),
             )
 
     def is_finished(self) -> bool:
@@ -200,6 +223,11 @@ class ScheduleProgressSlice(ScheduleProgress):
 
     def complete(self, message: str | None = None) -> None:
         self._tracker.set_current_label(None)
+
+    def update_week_overview(
+        self, week_label: str | None, entries: List[dict[str, object]]
+    ) -> None:
+        self._tracker.update_week_overview(week_label, entries)
 
 
 class ProgressRegistry:

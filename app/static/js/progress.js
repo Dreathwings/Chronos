@@ -61,6 +61,9 @@
     const etaLabel = modalEl.querySelector('[data-chronos-progress-eta]');
     const detailLabel = modalEl.querySelector('[data-chronos-progress-detail]');
     const stateLabel = modalEl.querySelector('[data-chronos-progress-state]');
+    const weekPanel = modalEl.querySelector('[data-chronos-week-panel]');
+    const weekLabel = modalEl.querySelector('[data-chronos-week-label]');
+    const weekBody = modalEl.querySelector('[data-chronos-week-body]');
     if (!progressBar || !percentLabel || !etaLabel || !detailLabel || !stateLabel) {
       return null;
     }
@@ -96,6 +99,55 @@
         detailLabel.textContent = '';
         detailLabel.classList.add('d-none');
       }
+    }
+
+    function clearWeekTable() {
+      if (!weekPanel || !weekLabel || !weekBody) {
+        return;
+      }
+      weekLabel.textContent = '';
+      weekBody.innerHTML = '';
+      weekPanel.classList.add('d-none');
+    }
+
+    function renderWeekTable(snapshot) {
+      if (!weekPanel || !weekLabel || !weekBody) {
+        return;
+      }
+      const label = snapshot && typeof snapshot.current_week_label === 'string'
+        ? snapshot.current_week_label.trim()
+        : '';
+      const entries = snapshot && Array.isArray(snapshot.current_week_sessions)
+        ? snapshot.current_week_sessions
+        : [];
+      if (!label || entries.length === 0) {
+        clearWeekTable();
+        return;
+      }
+      weekLabel.textContent = label;
+      weekBody.innerHTML = '';
+      entries.forEach(function(entry) {
+        const row = document.createElement('tr');
+        const fields = [
+          entry.course,
+          entry.class_label,
+          entry.subgroup,
+          entry.teacher,
+          entry.time,
+          entry.type,
+        ];
+        fields.forEach(function(value, index) {
+          const cell = document.createElement('td');
+          const content = typeof value === 'string' && value.trim().length > 0 ? value : '—';
+          cell.textContent = content;
+          if (index === 2 && content === '—') {
+            cell.classList.add('text-muted');
+          }
+          row.appendChild(cell);
+        });
+        weekBody.appendChild(row);
+      });
+      weekPanel.classList.remove('d-none');
     }
 
     function updateTimer() {
@@ -138,6 +190,7 @@
         mode = initialMode;
         detailFallback = (options && options.detailText) || '';
         estimatedSeconds = options && options.estimatedSeconds ? options.estimatedSeconds : 0;
+        clearWeekTable();
 
         setPercent(1);
         stateLabel.textContent = 'Initialisation…';
@@ -198,6 +251,7 @@
           ? snapshot.detail
           : detailFallback;
         applyDetail(detail);
+        renderWeekTable(snapshot);
       },
       finish(message) {
         stopTimer();

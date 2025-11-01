@@ -2293,6 +2293,8 @@ def schedule_progress_status(job_id: str):
             "message": snapshot.message,
             "detail": detail_text,
             "finished": snapshot.finished,
+            "current_week_label": snapshot.current_week_label,
+            "current_week_sessions": snapshot.current_week_sessions,
         }
     )
 
@@ -2331,13 +2333,6 @@ def course_detail(course_id: int):
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
-            session_goal = max(
-                _parse_non_negative_int(
-                    request.form.get("sessions_per_week"), course.sessions_per_week
-                ),
-                1,
-            )
-            course.sessions_per_week = session_goal
             raw_color = (request.form.get("color") or "").strip()
             course.color = raw_color if raw_color else None
             course.configured_name = selected_course_name
@@ -2628,7 +2623,7 @@ def course_detail(course_id: int):
 
     week_ranges.sort(key=lambda span: span[0])
 
-    default_week_target = max(int(course.sessions_per_week or 0), 0)
+    default_week_target = max(int(course.sessions_required or 0), 0)
     course_week_session_map = {
         start.isoformat(): default_week_target for start, _ in week_ranges
     }

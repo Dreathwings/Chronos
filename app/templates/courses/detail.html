@@ -80,14 +80,6 @@
               <label class="form-label">Durée séance (h)</label>
               <input type="number" class="form-control" name="session_length_hours" value="{{ course.session_length_hours }}" min="1">
             </div>
-            <div class="col-md-3">
-              <label class="form-label">Séances par semaine sélectionnée</label>
-              <input type="number" class="form-control" name="sessions_per_week" value="{{ course.sessions_per_week }}" min="1">
-              <div class="form-text">
-                Nombre de séances automatiques à générer pour chacune des semaines cochées.
-                Sans sélection, la valeur s'applique à l'ensemble de la période.
-              </div>
-            </div>
           </div>
           <div class="row g-2">
             <div class="col-md-3">
@@ -134,10 +126,10 @@
                         id="allowed-week-sessions-{{ option.value }}"
                         name="allowed_week_sessions_{{ option.value }}"
                         min="0"
-                        value="{{ course_week_session_map.get(option.value, course.sessions_per_week) }}"
+                        value="{{ course_week_session_map.get(option.value, course.sessions_required) }}"
                         data-week-session-input
                         data-week-value="{{ option.value }}"
-                        data-week-default="{{ course_week_session_map.get(option.value, course.sessions_per_week) }}"
+                        data-week-default="{{ course_week_session_map.get(option.value, course.sessions_required) }}"
                         {% if option.value not in selected_course_week_values %}disabled{% endif %}
                       >
                       <div class="form-text">Nombre de séances ciblé pour cette semaine cochée.</div>
