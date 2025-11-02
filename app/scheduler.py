@@ -312,6 +312,12 @@ class TeacherAllocationState:
         self.course = course
         self.targets = dict(course.teacher_allocation_map)
         self.remaining = {teacher_id: float(hours) for teacher_id, hours in self.targets.items()}
+        self.session_targets = dict(course.teacher_session_targets)
+        self.session_distribution = dict(course.teacher_session_distribution)
+        self.session_remaining = {
+            teacher_id: float(target)
+            for teacher_id, target in self.session_targets.items()
+        }
         for session in course.sessions:
             teacher_id = session.teacher_id
             if teacher_id is None:
@@ -319,6 +325,11 @@ class TeacherAllocationState:
             duration = float(session.duration_hours)
             if teacher_id in self.remaining:
                 self.remaining[teacher_id] = max(self.remaining[teacher_id] - duration, 0.0)
+            if teacher_id in self.session_remaining:
+                self.session_remaining[teacher_id] = max(
+                    self.session_remaining[teacher_id] - 1.0,
+                    0.0,
+                )
 
     def remaining_hours(self, teacher_id: int | None) -> float | None:
         if teacher_id is None:
@@ -326,6 +337,20 @@ class TeacherAllocationState:
         if teacher_id not in self.remaining:
             return None
         return max(self.remaining[teacher_id], 0.0)
+
+    def remaining_sessions(self, teacher_id: int | None) -> float | None:
+        if teacher_id is None:
+            return None
+        if teacher_id not in self.session_remaining:
+            return None
+        return max(self.session_remaining[teacher_id], 0.0)
+
+    def session_share(self, teacher_id: int | None) -> float | None:
+        if teacher_id is None:
+            return None
+        if teacher_id not in self.session_distribution:
+            return None
+        return max(self.session_distribution[teacher_id], 0.0)
 
     def can_allocate(self, teacher_id: int | None, duration_hours: float) -> bool:
         if teacher_id is None:
@@ -344,6 +369,11 @@ class TeacherAllocationState:
             self.remaining[teacher_id] - max(duration_hours, 0.0),
             0.0,
         )
+        if teacher_id in self.session_remaining:
+            self.session_remaining[teacher_id] = max(
+                self.session_remaining[teacher_id] - 1.0,
+                0.0,
+            )
 
 
 _ALLOCATION_STATE: dict[int, TeacherAllocationState] = {}
@@ -1421,15 +1451,24 @@ def find_available_teacher(
             seen_existing.add(teacher.id)
         _append_unique(candidates, existing_teachers)
 
+    def _candidate_priority(teacher: Teacher) -> tuple[float, float, str]:
+        if allocation_state:
+            share = allocation_state.session_share(teacher.id)
+            remaining = allocation_state.remaining_sessions(teacher.id)
+        else:
+            share = None
+            remaining = None
+        share_priority = share if share is not None else -1.0
+        remaining_priority = remaining if remaining is not None else -1.0
+        return (-share_priority, -remaining_priority, teacher.name.lower())
+
     _append_unique(candidates, preferred)
     if not candidates:
-        _append_unique(
-            candidates,
-            sorted(
-                [teacher for teacher in fallback_pool if teacher not in preferred],
-                key=lambda t: t.name.lower(),
-            ),
-        )
+        fallback_candidates = [
+            teacher for teacher in fallback_pool if teacher not in preferred
+        ]
+        fallback_candidates.sort(key=_candidate_priority)
+        _append_unique(candidates, fallback_candidates)
 
     for teacher in candidates:
         segments_to_check = segments or [(start, end)]

@@ -19,7 +19,8 @@
 
 4. **Affectation des intervenants**
    - Recherche d'un enseignant disponible en privilégiant la continuité pour une même classe ou sous-groupe.
-   - Respect des allocations d'heures par enseignant et bascule automatique vers un autre intervenant lorsque le quota est atteint.
+   - Conversion des heures cibles en nombre de séances à assurer par enseignant : volume horaire ÷ durée d'une séance ÷ occurrences visées.
+   - Respect des allocations d'heures et de séances par enseignant et bascule automatique vers un autre intervenant lorsque le quota est atteint.
 
 5. **Placement définitif**
    - Réservation de la salle la plus adaptée et création des séances dans la base.

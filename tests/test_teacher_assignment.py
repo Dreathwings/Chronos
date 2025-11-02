@@ -27,6 +27,7 @@ from sqlalchemy import text
 from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
+    TeacherAllocationState,
     generate_schedule,
     has_weekly_course_conflict,
     _relocate_sessions_for_groups,
@@ -1737,6 +1738,95 @@ class ScheduleTemporalPreferenceTestCase(DatabaseTestCase):
         self.assertEqual(session.start_time.date(), date(2025, 9, 1))
         self.assertEqual(session.start_time.time(), time(13, 30))
         self.assertEqual(session.end_time.time(), time(15, 30))
+
+
+class TeacherAllocationQuotaTestCase(DatabaseTestCase):
+    def test_course_computes_teacher_session_distribution(self) -> None:
+        base_name = CourseName(name="Analyse")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=6,
+            semester="S1",
+            configured_name=base_name,
+        )
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=4),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=8),
+            ]
+        )
+
+        db.session.add_all([base_name, course, teacher_a, teacher_b])
+        db.session.commit()
+
+        self.assertEqual(course.session_occurrence_goal, 6)
+
+        targets = course.teacher_session_targets
+        self.assertAlmostEqual(targets.get(teacher_a.id, 0.0), 2.0)
+        self.assertAlmostEqual(targets.get(teacher_b.id, 0.0), 4.0)
+
+        distribution = course.teacher_session_distribution
+        self.assertAlmostEqual(distribution.get(teacher_a.id, 0.0), 2.0 / 6.0, places=4)
+        self.assertAlmostEqual(distribution.get(teacher_b.id, 0.0), 4.0 / 6.0, places=4)
+
+
+class TeacherAllocationStateSessionsTestCase(DatabaseTestCase):
+    def test_allocation_state_tracks_remaining_sessions(self) -> None:
+        base_name = CourseName(name="Algorithmique")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=3,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=30)
+        link = CourseClassLink(class_group=class_group)
+        room = Room(name="B105", capacity=40)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        course.class_links.append(link)
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=4),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=2),
+            ]
+        )
+
+        db.session.add_all([base_name, course, class_group, room, teacher_a, teacher_b])
+        db.session.commit()
+
+        first_session = Session(
+            course=course,
+            teacher=teacher_a,
+            room=room,
+            class_group=class_group,
+            start_time=datetime(2025, 9, 8, 8, 0),
+            end_time=datetime(2025, 9, 8, 10, 0),
+        )
+        first_session.attendees = [class_group]
+        db.session.add(first_session)
+        db.session.commit()
+
+        state = TeacherAllocationState(course)
+
+        remaining_a = state.remaining_sessions(teacher_a.id)
+        remaining_b = state.remaining_sessions(teacher_b.id)
+        share_a = state.session_share(teacher_a.id)
+        share_b = state.session_share(teacher_b.id)
+
+        assert remaining_a is not None and remaining_b is not None
+        assert share_a is not None and share_b is not None
+
+        self.assertAlmostEqual(remaining_a, 1.0)
+        self.assertAlmostEqual(remaining_b, 1.0)
+        self.assertAlmostEqual(share_a, 2.0 / 3.0, places=4)
+        self.assertAlmostEqual(share_b, 1.0 / 3.0, places=4)
 
 
 if __name__ == "__main__":
