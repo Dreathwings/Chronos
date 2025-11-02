@@ -555,14 +555,24 @@
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content shadow">
           <div class="modal-body">
-            <div class="d-flex align-items-center mb-3">
-              <div class="spinner-border text-primary me-3" role="status" aria-hidden="true"></div>
-              <div>
-                <h6 class="mb-1" data-chronos-progress-state>Initialisation…</h6>
-                <div class="text-muted small">
-                  Temps restant estimé : <span data-chronos-progress-eta>Calcul en cours</span>
+            <div class="d-flex flex-column flex-md-row align-items-start align-items-md-center gap-3 mb-3">
+              <div class="d-flex align-items-center flex-grow-1">
+                <div class="spinner-border text-primary me-3" role="status" aria-hidden="true"></div>
+                <div>
+                  <h6 class="mb-1" data-chronos-progress-state>Initialisation…</h6>
+                  <div class="text-muted small">
+                    Temps restant estimé : <span data-chronos-progress-eta>Calcul en cours</span>
+                  </div>
                 </div>
               </div>
+              <button
+                type="button"
+                class="btn btn-outline-danger btn-sm ms-md-auto"
+                data-chronos-progress-cancel
+                disabled
+              >
+                Arrêter la génération
+              </button>
             </div>
             <div class="progress" style="height: 0.75rem;">
               <div

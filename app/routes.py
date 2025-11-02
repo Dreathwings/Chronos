@@ -53,6 +53,7 @@ from .progress import (
 from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
+    GenerationCancelled,
     fits_in_windows,
     format_class_label,
     generate_schedule,
@@ -1052,6 +1053,9 @@ def dashboard():
                     "status_url": url_for(
                         "main.schedule_progress_status", job_id=tracker.job_id
                     ),
+                    "cancel_url": url_for(
+                        "main.schedule_progress_cancel", job_id=tracker.job_id
+                    ),
                     "redirect_url": url_for("main.dashboard"),
                     "label": "Génération globale",
                 }
@@ -2039,6 +2043,9 @@ def generation_overview():
                     "status_url": url_for(
                         "main.schedule_progress_status", job_id=tracker.job_id
                     ),
+                    "cancel_url": url_for(
+                        "main.schedule_progress_cancel", job_id=tracker.job_id
+                    ),
                     "redirect_url": url_for("main.generation_overview"),
                     "label": "Génération globale",
                 }
@@ -2303,8 +2310,18 @@ def schedule_progress_status(job_id: str):
             "finished": snapshot.finished,
             "current_week_label": snapshot.current_week_label,
             "current_week_sessions": snapshot.current_week_sessions,
+            "cancel_requested": snapshot.cancel_requested,
         }
     )
+
+
+@bp.post("/generation/progress/<string:job_id>/cancel")
+def schedule_progress_cancel(job_id: str):
+    tracker = progress_registry.get(job_id)
+    if tracker is None:
+        return jsonify({"error": "Progression introuvable"}), 404
+    tracker.request_cancel("Arrêt de la génération en cours…")
+    return jsonify({"status": "accepted", "cancel_requested": True})
 
 
 @bp.route("/matiere/<int:course_id>", methods=["GET", "POST"])
@@ -2435,6 +2452,9 @@ def course_detail(course_id: int):
                     "job_id": tracker.job_id,
                     "status_url": url_for(
                         "main.schedule_progress_status", job_id=tracker.job_id
+                    ),
+                    "cancel_url": url_for(
+                        "main.schedule_progress_cancel", job_id=tracker.job_id
                     ),
                     "redirect_url": url_for("main.course_detail", course_id=course.id),
                     "label": course.name,
@@ -2796,6 +2816,10 @@ def _run_course_schedule_job(
             if course is None:
                 tracker.fail("Cours introuvable.")
                 return
+            if tracker.cancel_requested():
+                tracker.mark_cancelled("Génération interrompue par l'utilisateur.")
+                db.session.rollback()
+                return
             created_sessions = generate_schedule(
                 course,
                 window_start=window_start,
@@ -2811,6 +2835,9 @@ def _run_course_schedule_job(
         except ValueError as exc:
             db.session.rollback()
             tracker.fail(str(exc))
+        except GenerationCancelled:
+            db.session.rollback()
+            tracker.mark_cancelled("Génération interrompue par l'utilisateur.")
         except Exception:  # pragma: no cover - defensive logging
             db.session.rollback()
             tracker.fail("Erreur inattendue lors de la génération.")
@@ -2945,6 +2972,10 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
 
             course_states: list[_CourseWeekState] = []
             for course in courses:
+                if tracker.cancel_requested():
+                    tracker.mark_cancelled("Génération interrompue par l'utilisateur.")
+                    db.session.rollback()
+                    return
                 plan = _build_course_week_plan(course)
                 if not plan:
                     continue
@@ -2971,6 +3002,10 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 course_states.append(state)
 
             while True:
+                if tracker.cancel_requested():
+                    tracker.mark_cancelled("Génération interrompue par l'utilisateur.")
+                    db.session.rollback()
+                    return
                 pending_starts = [
                     state.next_week_start()
                     for state in course_states
@@ -3002,6 +3037,12 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                             occurrence_limit=state.cumulative_goal,
                             current_week=week_start,
                         )
+                    except GenerationCancelled:
+                        tracker.mark_cancelled(
+                            "Génération interrompue par l'utilisateur."
+                        )
+                        db.session.rollback()
+                        return
                     except ValueError as exc:
                         errors.append(f"{course.name} : {exc}")
                         tracker.set_current_label(None)
@@ -3021,9 +3062,6 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 summary = (
                     "Aucune séance n'a pu être générée avec les contraintes actuelles."
                 )
-
-            if errors:
-                summary = f"{summary} — {len(errors)} cours en erreur"
 
             tracker.complete(summary)
         except Exception:

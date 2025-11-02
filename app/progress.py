@@ -20,6 +20,9 @@ class ScheduleProgress:
     def complete(self, message: str | None = None) -> None:  # pragma: no cover
         """Mark the job as finished successfully."""
 
+    def should_abort(self) -> bool:  # pragma: no cover - interface
+        """Return ``True`` when the caller should interrupt the job."""
+
     def update_week_overview(
         self, week_label: str | None, entries: List[dict[str, object]]
     ) -> None:  # pragma: no cover - interface
@@ -43,6 +46,9 @@ class NullScheduleProgress(ScheduleProgress):
     ) -> None:
         return
 
+    def should_abort(self) -> bool:
+        return False
+
 
 @dataclass
 class ProgressSnapshot:
@@ -59,12 +65,13 @@ class ProgressSnapshot:
     current_label: str | None
     current_week_label: str | None
     current_week_sessions: List[dict[str, object]]
+    cancel_requested: bool
 
 
 class ScheduleProgressTracker(ScheduleProgress):
     """Thread-safe tracker collecting scheduling progress."""
 
-    SUCCESS_STATES = {"success", "error"}
+    SUCCESS_STATES = {"success", "error", "cancelled"}
 
     def __init__(self, label: str) -> None:
         self.job_id = uuid.uuid4().hex
@@ -82,6 +89,7 @@ class ScheduleProgressTracker(ScheduleProgress):
         self._current_week_sessions: List[dict[str, object]] = []
         self._week_entries: "OrderedDict[str, dict[str, object]]" = OrderedDict()
         self._week_row_counter = 0
+        self._cancel_requested = False
 
     # Public helpers -------------------------------------------------
     def initialise(self, total_hours: float) -> None:
@@ -94,6 +102,38 @@ class ScheduleProgressTracker(ScheduleProgress):
             if self._started_at is None:
                 self._started_at = now
             self._finished_at = None
+
+    def request_cancel(self, message: str | None = None) -> None:
+        with self._lock:
+            if self._cancel_requested:
+                if message:
+                    self._message = message.strip() or self._message
+                return
+            self._cancel_requested = True
+            self._current_label = None
+            if message:
+                self._message = message.strip() or self._message
+            if self._state == "pending":
+                self._state = "running"
+                if self._started_at is None:
+                    self._started_at = time.monotonic()
+
+    def cancel_requested(self) -> bool:
+        with self._lock:
+            return self._cancel_requested
+
+    def mark_cancelled(self, message: str | None = None) -> None:
+        with self._lock:
+            self._cancel_requested = True
+            self._state = "cancelled"
+            if message:
+                self._message = message.strip() or self._message
+            elif not self._message:
+                self._message = "Génération interrompue par l'utilisateur."
+            if self._started_at is None:
+                self._started_at = time.monotonic()
+            self._finished_at = time.monotonic()
+            self._current_label = None
 
     def record(self, hours: float, sessions: int = 0) -> None:
         if hours <= 0 and sessions <= 0:
@@ -128,6 +168,10 @@ class ScheduleProgressTracker(ScheduleProgress):
                 self._started_at = time.monotonic()
             self._finished_at = time.monotonic()
             self._current_label = None
+
+    def should_abort(self) -> bool:
+        with self._lock:
+            return self._cancel_requested
 
     def update_week_overview(
         self, week_label: str | None, entries: List[dict[str, object]]
@@ -231,6 +275,7 @@ class ScheduleProgressTracker(ScheduleProgress):
                 current_label=self._current_label,
                 current_week_label=self._current_week_label,
                 current_week_sessions=list(self._current_week_sessions),
+                cancel_requested=self._cancel_requested,
             )
 
     def is_finished(self) -> bool:
@@ -271,6 +316,9 @@ class ScheduleProgressTracker(ScheduleProgress):
     # Coordination helpers ------------------------------------------
     def set_current_label(self, label: str | None) -> None:
         with self._lock:
+            if self._cancel_requested:
+                self._current_label = None
+                return
             if label is None:
                 self._current_label = None
             else:
@@ -305,6 +353,9 @@ class ScheduleProgressSlice(ScheduleProgress):
         self, week_label: str | None, entries: List[dict[str, object]]
     ) -> None:
         self._tracker.update_week_overview(week_label, entries)
+
+    def should_abort(self) -> bool:
+        return self._tracker.should_abort()
 
 
 class ProgressRegistry:

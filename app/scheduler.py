@@ -44,6 +44,21 @@ SCHEDULE_SLOTS: List[tuple[time, time]] = [
 MAX_SLOT_GAP = timedelta(minutes=15)
 
 
+class GenerationCancelled(Exception):
+    """Raised when automatic generation is interrupted by the user."""
+
+
+def _abort_if_cancelled(progress: ScheduleProgress) -> None:
+    should_abort = False
+    if hasattr(progress, "should_abort"):
+        try:
+            should_abort = bool(progress.should_abort())
+        except Exception:  # pragma: no cover - defensive
+            should_abort = False
+    if should_abort:
+        raise GenerationCancelled()
+
+
 def _build_extended_breaks() -> set[tuple[time, time]]:
     extended: set[tuple[time, time]] = set()
     for idx in range(len(WORKING_WINDOWS) - 1):
@@ -213,7 +228,10 @@ class WeeklyGenerationTracker:
                     continue
             entry["status"] = "error"
             if message:
-                entry["error_message"] = message
+                if label:
+                    entry["error_message"] = f"Semaine du {label} — {message}"
+                else:
+                    entry["error_message"] = message
             snapshot.append(dict(entry))
         if target_key:
             self._targets.pop(target_key, None)
@@ -2456,6 +2474,7 @@ def generate_schedule(
     current_week: date | None = None,
 ) -> list[Session]:
     progress = progress or NullScheduleProgress()
+    _abort_if_cancelled(progress)
     reporter = ScheduleReporter(course)
     created_sessions: list[Session] = []
     placement_failures: list[str] = []
@@ -2761,6 +2780,7 @@ def generate_schedule(
                     link.class_group_id: link for link in links if link.class_group_id is not None
                 }
                 while hours_remaining > 0:
+                    _abort_if_cancelled(progress)
                     blocks_total = max(
                         (hours_remaining + slot_length_hours - 1) // slot_length_hours,
                         1,
@@ -2870,6 +2890,7 @@ def generate_schedule(
 
                     def _attempt_day(day: date) -> bool:
                         nonlocal hours_remaining, block_index, last_failure_reason
+                        _abort_if_cancelled(progress)
                         week_start, _ = _week_bounds(day)
                         conflict_detected = False
                         for group in class_groups:
@@ -3073,6 +3094,7 @@ def generate_schedule(
         hours_needed_map: dict[tuple[int, str | None], float] = {}
         total_hours_needed = 0.0
         for link in links:
+            _abort_if_cancelled(progress)
             for subgroup_label in link.group_labels():
                 amount = _class_hours_needed(
                     course,
@@ -3086,6 +3108,7 @@ def generate_schedule(
         plan_week_reference = current_week or schedule_start
         placeholder_rows: list[dict[str, object]] = []
         for link in links:
+            _abort_if_cancelled(progress)
             class_group = link.class_group
             display_label = class_group.name
             for subgroup_label in link.group_labels():
@@ -3119,8 +3142,10 @@ def generate_schedule(
             week_tracker.prepare_week(plan_week_reference, placeholder_rows)
 
         for link in links:
+            _abort_if_cancelled(progress)
             class_group = link.class_group
             for subgroup_label in link.group_labels():
+                _abort_if_cancelled(progress)
                 hours_needed = hours_needed_map.get((class_group.id, subgroup_label or None), 0)
                 if hours_needed == 0:
                     continue
@@ -3161,6 +3186,7 @@ def generate_schedule(
                 relocation_weeks: set[date] = set()
 
                 while hours_remaining > 0:
+                    _abort_if_cancelled(progress)
                     blocks_total = max(
                         (hours_remaining + slot_length_hours - 1) // slot_length_hours,
                         1,
@@ -3270,6 +3296,7 @@ def generate_schedule(
 
                     def _attempt_day(day: date) -> bool:
                         nonlocal hours_remaining, block_index, last_failure_reason
+                        _abort_if_cancelled(progress)
                         week_start, _ = _week_bounds(day)
                         if has_weekly_course_conflict(
                             course,
@@ -3579,6 +3606,8 @@ def generate_schedule(
         progress.complete(f"{len(created_sessions)} séance(s) générée(s)")
         reporter.finalise(len(created_sessions))
         return created_sessions
+    except GenerationCancelled:
+        raise
     except Exception as exc:
         week_tracker.mark_error(str(exc))
         raise
