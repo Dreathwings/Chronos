@@ -13,7 +13,9 @@
 3. **Ordonnancement des séances**
    - Progression hebdomadaire globale : toutes les séances de la semaine courante sont planifiées pour l'ensemble des cours avant de passer à la suivante.
    - Classement des séances selon la chronologie pédagogique : CM → SAE → TD → TP → Éval.
+   - Priorisation des premiers jours ouvrés de la semaine afin de faciliter le respect de l'ordre pédagogique.
    - Pour chaque type, sélection des créneaux compatibles (jours ouvrés, salles, équipements, indisponibilités, périodes de fermeture).
+   - Préférence pour les matinées lors des TD et pour les après-midis lors des TP, tout en respectant les disponibilités et les contraintes d'équipement.
 
 4. **Affectation des intervenants**
    - Recherche d'un enseignant disponible en privilégiant la continuité pour une même classe ou sous-groupe.

@@ -71,6 +71,32 @@ COURSE_TYPE_CHRONOLOGY: dict[str, int] = {
 }
 
 
+def _slot_priority_indices(course: Course, desired_hours: int) -> list[int]:
+    """Return slot indices ordered by daytime preference for the course type."""
+
+    slot_count = len(SCHEDULE_SLOTS)
+    if desired_hours > 0:
+        usable_limit = max(slot_count - desired_hours + 1, 0)
+    else:
+        usable_limit = slot_count
+
+    def _slot_key(index: int) -> tuple[int, int, int, int]:
+        start = SCHEDULE_SLOTS[index][0]
+        hour_rank = start.hour
+        minute_rank = start.minute
+        course_type = (course.course_type or "").upper()
+        if course_type == "TD":
+            morning_bias = 0 if start < time(12, 0) else 1
+            return (morning_bias, hour_rank, minute_rank, index)
+        if course_type == "TP":
+            afternoon_bias = 0 if start >= time(12, 0) else 1
+            return (afternoon_bias, hour_rank, minute_rank, index)
+        return (0, hour_rank, minute_rank, index)
+
+    ordered = sorted(range(slot_count), key=_slot_key)
+    return [index for index in ordered if index < usable_limit]
+
+
 class WeeklyGenerationTracker:
     """Accumulate session details for the week currently being scheduled."""
 
@@ -2720,11 +2746,11 @@ def generate_schedule(
                         return (
                             continuity_flag,
                             future_bias,
+                            day_indices[d],
                             continuity_distance,
                             -weekday_frequencies.get(d.weekday(), 0),
                             per_day_hours[d],
                             anchor_distance,
-                            day_indices[d],
                         )
 
                     ordered_days = sorted(available_days, key=_cm_day_sort_key)
@@ -2759,6 +2785,9 @@ def generate_schedule(
                         )
                         if preferred_slot is not None and preferred_slot not in offsets:
                             offsets.append(preferred_slot)
+                        for offset in _slot_priority_indices(course, desired_hours):
+                            if offset not in offsets:
+                                offsets.append(offset)
                         fallback_offset = int(per_day_hours[day])
                         if fallback_offset not in offsets:
                             offsets.append(fallback_offset)
@@ -3106,11 +3135,11 @@ def generate_schedule(
                         return (
                             continuity_flag,
                             future_bias,
+                            day_indices[d],
                             continuity_distance,
                             -weekday_frequencies.get(d.weekday(), 0),
                             per_day_hours[d],
                             anchor_distance,
-                            day_indices[d],
                         )
 
                     ordered_days = sorted(available_days, key=_day_sort_key)
@@ -3145,6 +3174,9 @@ def generate_schedule(
                         )
                         if preferred_slot is not None and preferred_slot not in offsets:
                             offsets.append(preferred_slot)
+                        for offset in _slot_priority_indices(course, desired_hours):
+                            if offset not in offsets:
+                                offsets.append(offset)
                         fallback_offset = int(per_day_hours[day])
                         if fallback_offset not in offsets:
                             offsets.append(fallback_offset)

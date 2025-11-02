@@ -1666,5 +1666,78 @@ class ScheduleGenerationFailureTestCase(DatabaseTestCase):
         )
 
 
+class ScheduleTemporalPreferenceTestCase(DatabaseTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.teacher = Teacher(name="Alice")
+        self.room = Room(name="B205", capacity=40)
+        self.class_group = ClassGroup(name="INFO1", size=30)
+        db.session.add_all([self.teacher, self.room, self.class_group])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=self.teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+    def _create_course(self, course_type: str) -> Course:
+        base_name = CourseName(name=f"{course_type} de test")
+        course = Course(
+            name=Course.compose_name(course_type, base_name.name, "S1"),
+            course_type=course_type,
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        link = CourseClassLink(
+            class_group=self.class_group,
+            group_count=1,
+        )
+        link.teacher_a = self.teacher
+        course.class_links.append(link)
+        course.teachers.append(self.teacher)
+        db.session.add(course)
+        db.session.commit()
+        return course
+
+    def test_td_prefers_morning_slots_at_week_start(self) -> None:
+        course = self._create_course("TD")
+
+        created = generate_schedule(
+            course,
+            window_start=date(2025, 9, 1),
+            window_end=date(2025, 9, 5),
+        )
+
+        self.assertEqual(len(created), 1)
+        session = created[0]
+        self.assertEqual(session.start_time.date(), date(2025, 9, 1))
+        self.assertEqual(session.start_time.time(), time(8, 0))
+        self.assertEqual(session.end_time.time(), time(10, 0))
+
+    def test_tp_prefers_afternoon_slots_at_week_start(self) -> None:
+        course = self._create_course("TP")
+
+        created = generate_schedule(
+            course,
+            window_start=date(2025, 9, 1),
+            window_end=date(2025, 9, 5),
+        )
+
+        self.assertEqual(len(created), 1)
+        session = created[0]
+        self.assertEqual(session.start_time.date(), date(2025, 9, 1))
+        self.assertEqual(session.start_time.time(), time(13, 30))
+        self.assertEqual(session.end_time.time(), time(15, 30))
+
+
 if __name__ == "__main__":
     unittest.main()
