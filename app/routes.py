@@ -2156,7 +2156,8 @@ def generation_overview():
                     continue
                 errors.append(str(entry.get("message", "")).strip())
                 suggestions.extend(entry.get("suggestions", []) or [])
-
+        error_list = _unique(errors)
+        
         class_group_ids = [
             link.class_group_id
             for link in course.class_links
@@ -2167,7 +2168,8 @@ def generation_overview():
                 "course": course,
                 "status": status,
                 "latest_log": latest_log,
-                "errors": _unique(errors),
+                "errors": error_list,
+                "error_count": len(error_list),
                 "suggestions": _unique(suggestions),
                 "sessions_count": len(course.sessions),
                 "scheduled_hours": scheduled_hours,

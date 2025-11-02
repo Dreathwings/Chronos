@@ -201,7 +201,7 @@ class ScheduleProgressTracker(ScheduleProgress):
                 row = {
                     key: value
                     for key, value in stored.items()
-                    if key not in {"uid", "course_id", "__action__"}
+                    if key not in {"uid", "course_id", "__action__", "target_key"}
                 }
                 display_rows.append(row)
             self._current_week_sessions = display_rows

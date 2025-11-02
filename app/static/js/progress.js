@@ -134,20 +134,42 @@
         } else if (status === 'error') {
           row.classList.add('table-danger');
         }
+        const errorText = typeof entry.error_message === 'string'
+          ? entry.error_message.trim()
+          : '';
         const fields = [
-          entry.course,
-          entry.class_label,
-          entry.subgroup,
-          entry.teacher,
-          entry.time,
-          entry.type,
+          { value: entry.course },
+          { value: entry.class_label },
+          { value: entry.subgroup },
+          { value: entry.teacher },
+          { value: entry.time },
+          { value: entry.type },
+          { value: errorText, isError: true },
         ];
-        fields.forEach(function(value, index) {
+        fields.forEach(function(field, index) {
           const cell = document.createElement('td');
-          const content = typeof value === 'string' && value.trim().length > 0 ? value : '—';
+          let content = '';
+          if (typeof field.value === 'string') {
+            content = field.value.trim();
+          } else if (field.value !== null && field.value !== undefined) {
+            content = String(field.value);
+          }
+          if (!content) {
+            content = '—';
+          }
           cell.textContent = content;
           if (index === 2 && content === '—') {
             cell.classList.add('text-muted');
+          }
+          if (field.isError) {
+            if (content === '—') {
+              cell.classList.add('text-muted');
+            } else {
+              cell.classList.add('small');
+              if (status === 'error') {
+                cell.classList.add('text-danger');
+              }
+            }
           }
           row.appendChild(cell);
         });

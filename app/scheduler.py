@@ -108,12 +108,14 @@ class WeeklyGenerationTracker:
         self._rows: list[dict[str, object]] = []
         self._planned_rows: dict[date, list[dict[str, object]]] = {}
         self._uid_counters: dict[date | None, int] = {}
+        self._targets: dict[str, list[str]] = {}
 
     def reset(self) -> None:
         self._current_week = None
         self._rows = []
         self._planned_rows.clear()
         self._uid_counters.clear()
+        self._targets.clear()
         self._progress.update_week_overview(
             None,
             [{"__action__": "reset", "course_id": self._course_key}],
@@ -135,7 +137,14 @@ class WeeklyGenerationTracker:
             }
             entry["course_id"] = self._course_key
             entry["status"] = target.get("status") or "pending"
+            target_key = target.get("target_key")
+            if target_key:
+                entry["target_key"] = str(target_key)
+            error_message = target.get("error_message")
+            if error_message:
+                entry["error_message"] = str(error_message)
             entry["uid"] = target.get("uid") or self._allocate_uid(canonical)
+            self._register_target(entry)
             entries.append(entry)
         if canonical is not None:
             self._planned_rows[canonical] = list(entries)
@@ -166,6 +175,8 @@ class WeeklyGenerationTracker:
                 ):
                     row["uid"] = entry.get("uid", row["uid"])
                     entry.update(row)
+                    entry.pop("error_message", None)
+                    self._consume_target(entry)
                     matched = True
                     break
             if not matched:
@@ -176,22 +187,81 @@ class WeeklyGenerationTracker:
             label = week_start.strftime("%d/%m/%Y") if self._current_week else None
             self._progress.update_week_overview(label, list(self._rows))
 
-    def mark_error(self) -> None:
+    def mark_error(self, message: str | None = None) -> None:
+        if not self._rows:
+            return
+        self.register_failure(None, message)
+
+    def register_failure(self, target_key: str | None, message: str | None = None) -> None:
         if not self._rows:
             return
         label = self._current_week.strftime("%d/%m/%Y") if self._current_week else None
         snapshot: list[dict[str, object]] = []
+        pending_uids: set[str] | None = None
+        if target_key:
+            mapped = self._targets.get(target_key, [])
+            if mapped:
+                pending_uids = set(mapped)
         for entry in self._rows:
-            if entry.get("status") != "success":
-                entry["status"] = "error"
+            if entry.get("status") == "success":
+                snapshot.append(dict(entry))
+                continue
+            if pending_uids is not None:
+                uid = str(entry.get("uid")) if entry.get("uid") is not None else None
+                if uid not in pending_uids:
+                    snapshot.append(dict(entry))
+                    continue
+            entry["status"] = "error"
+            if message:
+                entry["error_message"] = message
             snapshot.append(dict(entry))
+        if target_key:
+            self._targets.pop(target_key, None)
         self._progress.update_week_overview(label, snapshot)
+
+    def target_key(self, class_group: ClassGroup | None, subgroup_label: str | None = None) -> str:
+        class_part: str
+        if class_group is None:
+            class_part = "cm"
+        elif class_group.id is not None:
+            class_part = f"cg-{class_group.id}"
+        else:
+            class_part = f"cg-{id(class_group)}"
+        subgroup_part = (subgroup_label or "").strip().lower() or "-"
+        return f"{self._course_key}:{class_part}:{subgroup_part}"
 
     def _allocate_uid(self, week_start: date | None) -> str:
         counter = self._uid_counters.get(week_start, 0)
         self._uid_counters[week_start] = counter + 1
         suffix = week_start.isoformat() if isinstance(week_start, date) else "pending"
         return f"{self._course_key}-{suffix}-{counter:04d}"
+
+    def _register_target(self, entry: dict[str, object]) -> None:
+        uid = entry.get("uid")
+        key = entry.get("target_key")
+        if not key or not uid:
+            return
+        key = str(key)
+        uid = str(uid)
+        queue = self._targets.setdefault(key, [])
+        if uid not in queue:
+            queue.append(uid)
+
+    def _consume_target(self, entry: dict[str, object]) -> None:
+        key = entry.get("target_key")
+        uid = entry.get("uid")
+        if not key or not uid:
+            entry.pop("target_key", None)
+            return
+        key = str(key)
+        uid = str(uid)
+        queue = self._targets.get(key)
+        if queue and uid in queue:
+            queue.remove(uid)
+            if not queue:
+                self._targets.pop(key, None)
+        entry.pop("target_key", None)
+        entry.pop("error_message", None)
 
     def _build_row(self, session: Session, week_start: date | None) -> dict[str, object]:
         attendees = session.attendee_names()
@@ -2635,6 +2705,7 @@ def generate_schedule(
                     "subgroup": "",
                     "teacher": "—",
                     "time": "À planifier",
+                    "target_key": week_tracker.target_key(None, None),
                 }
                 for _ in range(planned_occurrences)
             ]
@@ -2670,6 +2741,10 @@ def generate_schedule(
                 reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
                 placement_failures.append(message)
                 last_failure_reason = message
+                week_tracker.register_failure(
+                    week_tracker.target_key(None, None),
+                    message,
+                )
             else:
                 per_day_hours = {day: existing_day_hours.get(day, 0) for day in available_days}
                 day_indices = {day: index for index, day in enumerate(available_days)}
@@ -2953,6 +3028,10 @@ def generate_schedule(
                         message = f"{message} : {last_failure_reason}"
                     reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
                     placement_failures.append(message)
+                    week_tracker.register_failure(
+                        week_tracker.target_key(None, None),
+                        message,
+                    )
             if not placement_failures:
                 for group in class_groups:
                     _report_one_hour_alignment(
@@ -3031,6 +3110,9 @@ def generate_schedule(
                             "subgroup": subgroup_display or "",
                             "teacher": "—",
                             "time": "À planifier",
+                            "target_key": week_tracker.target_key(
+                                class_group, subgroup_label
+                            ),
                         }
                     )
         if plan_week_reference is not None or placeholder_rows:
@@ -3057,6 +3139,10 @@ def generate_schedule(
                     reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
                     placement_failures.append(message)
                     last_failure_reason = message
+                    week_tracker.register_failure(
+                        week_tracker.target_key(class_group, subgroup_label),
+                        message,
+                    )
                     continue
 
                 existing_day_hours = _existing_hours_by_day(course, class_group, subgroup_label)
@@ -3451,6 +3537,10 @@ def generate_schedule(
                         message = f"{message} : {last_failure_reason}"
                     reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
                     placement_failures.append(message)
+                    week_tracker.register_failure(
+                        week_tracker.target_key(class_group, subgroup_label),
+                        message,
+                    )
         if not placement_failures:
             for link in links:
                 class_group = link.class_group
@@ -3489,8 +3579,8 @@ def generate_schedule(
         progress.complete(f"{len(created_sessions)} séance(s) générée(s)")
         reporter.finalise(len(created_sessions))
         return created_sessions
-    except Exception:
-        week_tracker.mark_error()
+    except Exception as exc:
+        week_tracker.mark_error(str(exc))
         raise
     finally:
         _clear_allocation_state(course)
