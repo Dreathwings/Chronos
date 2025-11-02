@@ -32,7 +32,23 @@ from app.scheduler import (
     _relocate_sessions_for_groups,
     _warn_weekly_limit,
     find_available_room,
+    PlacementDiagnostics,
 )
+from app.progress import NullScheduleProgress
+
+
+class PlacementDiagnosticsTestCase(unittest.TestCase):
+    def test_failure_summary_prioritises_teacher_reason(self) -> None:
+        diagnostics = PlacementDiagnostics()
+        diagnostics.add_room("Salle B201 déjà réservée.")
+        diagnostics.add_teacher("Alice est déclaré indisponible sur ce créneau.")
+
+        summary = diagnostics.failure_summary()
+
+        self.assertIsNotNone(summary)
+        assert summary is not None  # for type checkers
+        self.assertTrue(summary.startswith("Enseignant indisponible"))
+        self.assertIn("Alice", summary)
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -220,6 +236,38 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
 
         self.assertIsNotNone(chosen)
         self.assertEqual(chosen.id, room_free.id)
+
+    def test_schedule_failure_reports_teacher_reason(self) -> None:
+        base_name = CourseName(name="Analyse")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=24)
+        link = CourseClassLink(course=course, class_group=class_group, group_count=1)
+        teacher = Teacher(name="Alice")
+        room = Room(name="C101", capacity=30)
+        db.session.add_all([base_name, course, class_group, link, teacher, room])
+        db.session.commit()
+
+        course.teachers.append(teacher)
+        link.teacher_a = teacher
+        db.session.commit()
+
+        with self.assertRaises(ValueError) as cm:
+            generate_schedule(
+                course,
+                window_start=date(2025, 9, 1),
+                window_end=date(2025, 9, 5),
+                progress=NullScheduleProgress(),
+            )
+
+        message = str(cm.exception)
+        self.assertIn("Enseignant indisponible", message)
 
     def test_best_teacher_duos_prefers_shared_availability(self) -> None:
         teacher_a = Teacher(name="Alice")
