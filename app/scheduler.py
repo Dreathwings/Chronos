@@ -77,15 +77,21 @@ class WeeklyGenerationTracker:
     def __init__(self, course: Course, progress: ScheduleProgress) -> None:
         self._course = course
         self._progress = progress
+        self._course_key = course.id or id(course)
         self._current_week: date | None = None
         self._rows: list[dict[str, object]] = []
         self._planned_rows: dict[date, list[dict[str, object]]] = {}
+        self._uid_counters: dict[date | None, int] = {}
 
     def reset(self) -> None:
         self._current_week = None
         self._rows = []
         self._planned_rows.clear()
-        self._progress.update_week_overview(None, [])
+        self._uid_counters.clear()
+        self._progress.update_week_overview(
+            None,
+            [{"__action__": "reset", "course_id": self._course_key}],
+        )
 
     def prepare_week(
         self, week_start: date | None, targets: Iterable[dict[str, object]]
@@ -101,6 +107,9 @@ class WeeklyGenerationTracker:
                 "teacher": target.get("teacher") or "—",
                 "time": target.get("time") or "À planifier",
             }
+            entry["course_id"] = self._course_key
+            entry["status"] = target.get("status") or "pending"
+            entry["uid"] = target.get("uid") or self._allocate_uid(canonical)
             entries.append(entry)
         if canonical is not None:
             self._planned_rows[canonical] = list(entries)
@@ -120,15 +129,16 @@ class WeeklyGenerationTracker:
         for session in session_list:
             week_start = _week_start_for(session.start_time.date())
             planned = self._planned_rows.setdefault(week_start, [])
-            row = self._build_row(session)
+            row = self._build_row(session, week_start)
             matched = False
             for entry in planned:
                 if (
                     entry.get("course") == row["course"]
                     and entry.get("class_label") == row["class_label"]
                     and (entry.get("subgroup") or "") == (row["subgroup"] or "")
-                    and entry.get("time") == "À planifier"
+                    and entry.get("status") != "success"
                 ):
+                    row["uid"] = entry.get("uid", row["uid"])
                     entry.update(row)
                     matched = True
                     break
@@ -140,7 +150,24 @@ class WeeklyGenerationTracker:
             label = week_start.strftime("%d/%m/%Y") if self._current_week else None
             self._progress.update_week_overview(label, list(self._rows))
 
-    def _build_row(self, session: Session) -> dict[str, object]:
+    def mark_error(self) -> None:
+        if not self._rows:
+            return
+        label = self._current_week.strftime("%d/%m/%Y") if self._current_week else None
+        snapshot: list[dict[str, object]] = []
+        for entry in self._rows:
+            if entry.get("status") != "success":
+                entry["status"] = "error"
+            snapshot.append(dict(entry))
+        self._progress.update_week_overview(label, snapshot)
+
+    def _allocate_uid(self, week_start: date | None) -> str:
+        counter = self._uid_counters.get(week_start, 0)
+        self._uid_counters[week_start] = counter + 1
+        suffix = week_start.isoformat() if isinstance(week_start, date) else "pending"
+        return f"{self._course_key}-{suffix}-{counter:04d}"
+
+    def _build_row(self, session: Session, week_start: date | None) -> dict[str, object]:
         attendees = session.attendee_names()
         if attendees:
             class_label = ", ".join(attendees)
@@ -154,12 +181,15 @@ class WeeklyGenerationTracker:
             f"{session.start_time.strftime('%d/%m %Hh%M')} → {session.end_time.strftime('%Hh%M')}"
         )
         return {
+            "uid": self._allocate_uid(week_start),
+            "course_id": self._course_key,
             "course": self._course.name,
             "type": self._course.course_type,
             "class_label": class_label,
             "subgroup": subgroup,
             "teacher": teacher_name,
             "time": time_span,
+            "status": "success",
         }
 
 
@@ -3365,5 +3395,8 @@ def generate_schedule(
         progress.complete(f"{len(created_sessions)} séance(s) générée(s)")
         reporter.finalise(len(created_sessions))
         return created_sessions
+    except Exception:
+        week_tracker.mark_error()
+        raise
     finally:
         _clear_allocation_state(course)

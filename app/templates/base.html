@@ -24,6 +24,16 @@
       .fc-timegrid-slots table:nth-child(1) tbody:nth-child(2) tr{
         height: 3.5rem;
       }
+      #generationProgressModal .modal-dialog {
+        width: 50vw;
+        max-width: min(50vw, 960px);
+      }
+      @media (max-width: 992px) {
+        #generationProgressModal .modal-dialog {
+          width: 90vw;
+          max-width: 90vw;
+        }
+      }
     </style>
     {% block stylesheets %}{% endblock %}
     <script>

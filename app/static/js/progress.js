@@ -128,6 +128,12 @@
       weekBody.innerHTML = '';
       entries.forEach(function(entry) {
         const row = document.createElement('tr');
+        const status = (entry.status || '').toString().toLowerCase();
+        if (status === 'success') {
+          row.classList.add('table-success');
+        } else if (status === 'error') {
+          row.classList.add('table-danger');
+        }
         const fields = [
           entry.course,
           entry.class_label,

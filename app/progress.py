@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -79,6 +80,8 @@ class ScheduleProgressTracker(ScheduleProgress):
         self._current_label: str | None = None
         self._current_week_label: str | None = None
         self._current_week_sessions: List[dict[str, object]] = []
+        self._week_entries: "OrderedDict[str, dict[str, object]]" = OrderedDict()
+        self._week_row_counter = 0
 
     # Public helpers -------------------------------------------------
     def initialise(self, total_hours: float) -> None:
@@ -130,8 +133,82 @@ class ScheduleProgressTracker(ScheduleProgress):
         self, week_label: str | None, entries: List[dict[str, object]]
     ) -> None:
         with self._lock:
-            self._current_week_label = week_label
-            self._current_week_sessions = list(entries)
+            actions: List[dict[str, object]] = []
+            normal_entries: List[dict[str, object]] = []
+            for entry in entries:
+                if isinstance(entry, dict) and entry.get("__action__"):
+                    actions.append(entry)
+                else:
+                    normal_entries.append(entry)
+
+            if actions:
+                for action in actions:
+                    if action.get("__action__") != "reset":
+                        continue
+                    course_id = action.get("course_id")
+                    if course_id is None:
+                        self._week_entries = OrderedDict()
+                        self._week_row_counter = 0
+                        self._current_week_label = None
+                        continue
+                    self._week_entries = OrderedDict(
+                        (
+                            uid,
+                            data,
+                        )
+                        for uid, data in self._week_entries.items()
+                        if data.get("course_id") != course_id
+                    )
+                if not normal_entries and not self._week_entries:
+                    self._current_week_sessions = []
+                    if week_label is None:
+                        self._current_week_label = None
+                    return
+
+            if (
+                week_label is not None
+                and week_label != self._current_week_label
+                and normal_entries
+            ):
+                self._week_entries = OrderedDict()
+                self._week_row_counter = 0
+                self._current_week_label = week_label
+
+            if normal_entries:
+                target_label = week_label or self._current_week_label
+                for entry in normal_entries:
+                    uid = entry.get("uid")
+                    if uid is None:
+                        uid = self._generate_week_uid()
+                    uid = str(uid)
+                    stored = self._week_entries.get(uid)
+                    if stored is None:
+                        stored = {}
+                        self._week_entries[uid] = stored
+                    stored.update(entry)
+                    if "status" not in stored or stored["status"] is None:
+                        stored["status"] = "pending"
+                self._current_week_label = target_label
+
+            if not self._week_entries:
+                self._current_week_sessions = []
+                if not normal_entries and week_label is None:
+                    self._current_week_label = None
+                return
+
+            display_rows: List[dict[str, object]] = []
+            for stored in self._week_entries.values():
+                row = {
+                    key: value
+                    for key, value in stored.items()
+                    if key not in {"uid", "course_id", "__action__"}
+                }
+                display_rows.append(row)
+            self._current_week_sessions = display_rows
+
+    def _generate_week_uid(self) -> str:
+        self._week_row_counter += 1
+        return f"row-{self._week_row_counter}"
 
     # Snapshot -------------------------------------------------------
     def snapshot(self) -> ProgressSnapshot:
