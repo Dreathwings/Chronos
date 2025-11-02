@@ -31,6 +31,7 @@ from app.scheduler import (
     has_weekly_course_conflict,
     _relocate_sessions_for_groups,
     _warn_weekly_limit,
+    find_available_room,
 )
 
 
@@ -187,6 +188,38 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         teachers = event["extendedProps"]["teachers"]
         self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
+
+    def test_find_available_room_skips_duplicate_start_slot(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher = Teacher(name="Camille")
+        room_busy = Room(name="B204", capacity=24)
+        room_free = Room(name="B205", capacity=24)
+        db.session.add_all([teacher, room_busy, room_free])
+        db.session.commit()
+
+        start = datetime(2025, 10, 17, 10, 15, 0)
+        end = datetime(2025, 10, 17, 12, 15, 0)
+        existing = Session(
+            course=course,
+            teacher=teacher,
+            room=room_busy,
+            class_group=class_group,
+            start_time=start,
+            end_time=end,
+        )
+        existing.attendees = [class_group]
+        db.session.add(existing)
+        db.session.commit()
+
+        chosen = find_available_room(
+            course,
+            start,
+            end,
+            required_capacity=class_group.size,
+        )
+
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen.id, room_free.id)
 
     def test_best_teacher_duos_prefers_shared_availability(self) -> None:
         teacher_a = Teacher(name="Alice")

@@ -544,6 +544,22 @@ def find_available_room(
         if required_posts and (room.computers or 0) < required_posts:
             continue
 
+        # Certains environnements de connexion ne synchronisent pas immédiatement
+        # ``room.sessions`` et laissent passer des doublons exacts sur la clé
+        # (salle, début).  On vérifie explicitement l'existence d'une séance qui
+        # commencerait au même instant afin d'éviter une ``IntegrityError`` plus
+        # loin lors du ``flush``.
+        existing_slot = (
+            Session.query.filter(
+                Session.room_id == room.id,
+                Session.start_time == start,
+            )
+            .with_entities(Session.id)
+            .first()
+        )
+        if existing_slot:
+            continue
+
         room_equipment_ids = {equipment.id for equipment in room.equipments}
         if required_equipment_ids.difference(room_equipment_ids):
             continue
