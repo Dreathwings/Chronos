@@ -23,6 +23,7 @@ from app.models import (
     TeacherAvailability,
     best_teacher_duos,
     recommend_teacher_duos_for_classes,
+    session_attendance,
 )
 from sqlalchemy import text
 from app.routes import _validate_session_constraints
@@ -1568,6 +1569,67 @@ class SchedulerRelocationTestCase(DatabaseTestCase):
         self.assertEqual(Session.query.filter_by(course=course).count(), 0)
         self.assertEqual(per_day_hours[first_start.date()], 0)
         self.assertEqual(weekday_frequencies.get(first_start.weekday(), 0), 0)
+
+    def test_relocate_sessions_handles_missing_attendance_rows(self) -> None:
+        base_name = CourseName(name="Structures")
+        course = Course(
+            name=Course.compose_name("TP", base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO2", size=28)
+        link = CourseClassLink(class_group=class_group)
+        course.class_links.append(link)
+        teacher = Teacher(name="Bob")
+        room = Room(name="Lab1", capacity=30)
+        db.session.add_all([base_name, course, class_group, teacher, room])
+        db.session.commit()
+
+        session_start = datetime(2025, 9, 22, 13, 30)
+        session_end = datetime(2025, 9, 22, 15, 30)
+        existing_session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=session_start,
+            end_time=session_end,
+        )
+        existing_session.attendees = [class_group]
+        db.session.add(existing_session)
+        db.session.commit()
+
+        db.session.execute(
+            session_attendance.delete().where(
+                session_attendance.c.session_id == existing_session.id
+            )
+        )
+        db.session.commit()
+
+        per_day_hours = {session_start.date(): existing_session.duration_hours}
+        weekday_frequencies = Counter({session_start.weekday(): 1})
+        created_sessions: list[Session] = []
+        attempted_weeks: set[date] = set()
+
+        removed = _relocate_sessions_for_groups(
+            course=course,
+            class_groups=[class_group],
+            created_sessions=created_sessions,
+            per_day_hours=per_day_hours,
+            weekday_frequencies=weekday_frequencies,
+            reporter=None,
+            attempted_weeks=attempted_weeks,
+            subgroup_label=None,
+            context_label=class_group.name,
+        )
+
+        self.assertEqual(removed, 2)
+        self.assertEqual(Session.query.filter_by(course=course).count(), 0)
+        self.assertEqual(per_day_hours.get(session_start.date(), 0), 0)
+        self.assertEqual(weekday_frequencies.get(session_start.weekday(), 0), 0)
 
 
 class ScheduleTeacherFallbackTestCase(DatabaseTestCase):

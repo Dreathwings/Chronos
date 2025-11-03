@@ -9,6 +9,8 @@ from typing import Iterable, List, Optional, Set
 
 from flask import current_app
 
+from sqlalchemy.orm import attributes
+
 from . import db
 from .models import (
     ClassGroup,
@@ -19,6 +21,7 @@ from .models import (
     Room,
     Session,
     Teacher,
+    session_attendance,
 )
 from .progress import NullScheduleProgress, ScheduleProgress
 
@@ -1604,6 +1607,19 @@ def _preferred_slot_index_for_groups(
     return ordered[0][0]
 
 
+def _purge_session_attendance(session: Session) -> None:
+    """Remove attendance rows without relying on rowcount tracking."""
+
+    session_id = getattr(session, "id", None)
+    if session_id:
+        db.session.execute(
+            session_attendance.delete().where(
+                session_attendance.c.session_id == session_id
+            )
+        )
+    attributes.set_committed_value(session, "attendees", [])
+
+
 def _matching_sessions_for_groups(
     course: Course,
     class_groups: Iterable[ClassGroup],
@@ -1699,6 +1715,7 @@ def _relocate_sessions_for_groups(
                 weekday_frequencies[weekday] -= 1
                 if weekday_frequencies[weekday] <= 0:
                     del weekday_frequencies[weekday]
+            _purge_session_attendance(session)
             db.session.delete(session)
         db.session.flush()
 
