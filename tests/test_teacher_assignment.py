@@ -275,6 +275,42 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         self.assertIsNotNone(chosen)
         self.assertEqual(chosen.id, room_free.id)
 
+    def test_find_available_room_ignores_pending_conflicts_without_autoflush(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher = Teacher(name="Camille")
+        room_busy = Room(name="B206", capacity=24)
+        room_free = Room(name="B207", capacity=24)
+        db.session.add_all([teacher, room_busy, room_free])
+        db.session.commit()
+
+        start = datetime(2025, 10, 18, 13, 30, 0)
+        end = datetime(2025, 10, 18, 15, 30, 0)
+
+        pending = Session(
+            course=course,
+            teacher=teacher,
+            room=room_busy,
+            class_group=class_group,
+            start_time=start,
+            end_time=end,
+        )
+        pending.attendees = [class_group]
+        db.session.add(pending)
+
+        with db.session.no_autoflush:
+            chosen = find_available_room(
+                course,
+                start,
+                end,
+                required_capacity=class_group.size,
+            )
+
+        self.assertIsNotNone(chosen)
+        assert chosen is not None
+        self.assertEqual(chosen.id, room_free.id)
+
+        db.session.rollback()
+
     def test_schedule_failure_reports_teacher_reason(self) -> None:
         base_name = CourseName(name="Analyse")
         course = Course(

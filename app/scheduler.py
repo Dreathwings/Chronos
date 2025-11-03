@@ -824,6 +824,11 @@ def find_available_room(
     required_capacity: int | None = None,
 ) -> Optional[Room]:
     rooms = Room.query.order_by(Room.capacity.asc(), Room.name.asc()).all()
+    pending_sessions = [
+        obj
+        for obj in db.session.new
+        if isinstance(obj, Session) and obj.start_time is not None
+    ]
     preferred_rooms: list[Room] = []
     preferred_room_ids: set[int] = set()
     if course.preferred_rooms:
@@ -854,6 +859,13 @@ def find_available_room(
         # (salle, début).  On vérifie explicitement l'existence d'une séance qui
         # commencerait au même instant afin d'éviter une ``IntegrityError`` plus
         # loin lors du ``flush``.
+        pending_duplicate = any(
+            ((candidate.room_id == room.id) or (candidate.room and candidate.room.id == room.id))
+            and candidate.start_time == start
+            for candidate in pending_sessions
+        )
+        if pending_duplicate:
+            continue
         existing_slot = (
             Session.query.filter(
                 Session.room_id == room.id,
@@ -863,6 +875,27 @@ def find_available_room(
             .first()
         )
         if existing_slot:
+            continue
+
+        overlap_exists = (
+            Session.query.filter(
+                Session.room_id == room.id,
+                Session.start_time < end,
+                Session.end_time > start,
+            )
+            .with_entities(Session.id)
+            .first()
+        )
+        if overlap_exists:
+            continue
+
+        pending_overlap = any(
+            ((candidate.room_id == room.id) or (candidate.room and candidate.room.id == room.id))
+            and candidate.start_time < end
+            and candidate.end_time > start
+            for candidate in pending_sessions
+        )
+        if pending_overlap:
             continue
 
         room_equipment_ids = {equipment.id for equipment in room.equipments}
