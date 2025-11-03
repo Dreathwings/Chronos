@@ -15,6 +15,7 @@ from app.models import (
     CourseName,
     CourseScheduleLog,
     CourseTeacherAllocation,
+    CourseAllowedWeek,
     Equipment,
     Room,
     Session,
@@ -22,16 +23,38 @@ from app.models import (
     TeacherAvailability,
     best_teacher_duos,
     recommend_teacher_duos_for_classes,
+    session_attendance,
 )
 from sqlalchemy import text
 from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
+    TeacherAllocationState,
+    _clear_allocation_state,
+    _set_allocation_state,
     generate_schedule,
     has_weekly_course_conflict,
     _relocate_sessions_for_groups,
     _warn_weekly_limit,
+    find_available_room,
+    find_available_teacher,
+    PlacementDiagnostics,
 )
+from app.progress import NullScheduleProgress
+
+
+class PlacementDiagnosticsTestCase(unittest.TestCase):
+    def test_failure_summary_prioritises_teacher_reason(self) -> None:
+        diagnostics = PlacementDiagnostics()
+        diagnostics.add_room("Salle B201 déjà réservée.")
+        diagnostics.add_teacher("Alice est déclaré indisponible sur ce créneau.")
+
+        summary = diagnostics.failure_summary()
+
+        self.assertIsNotNone(summary)
+        assert summary is not None  # for type checkers
+        self.assertTrue(summary.startswith("Enseignant indisponible"))
+        self.assertIn("Alice", summary)
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -187,6 +210,138 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         teachers = event["extendedProps"]["teachers"]
         self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
+
+    def test_td_course_uses_full_class_even_with_half_group_configuration(self) -> None:
+        base_name = CourseName(name="Mathématiques")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=26)
+        link = CourseClassLink(class_group=class_group, group_count=2)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+
+        course.class_links.append(link)
+        db.session.add_all([course, class_group, base_name, teacher_a, teacher_b])
+        db.session.commit()
+
+        link.teacher_a = teacher_a
+        link.teacher_b = teacher_b
+        db.session.commit()
+
+        self.assertFalse(course.uses_half_groups)
+        self.assertEqual(course.session_group_factor, 1)
+        self.assertEqual(course.group_labels_for(class_group), [None])
+        self.assertIsNone(course.subgroup_name_for(class_group, None))
+        self.assertEqual(link.teacher_labels(), [("", teacher_a)])
+        self.assertEqual([t.id for t in link.preferred_teachers(None)], [teacher_a.id])
+        self.assertEqual([t.id for t in link.preferred_teachers("A")], [teacher_a.id])
+        self.assertEqual([t.id for t in link.preferred_teachers("B")], [teacher_a.id])
+
+    def test_find_available_room_skips_duplicate_start_slot(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher = Teacher(name="Camille")
+        room_busy = Room(name="B204", capacity=24)
+        room_free = Room(name="B205", capacity=24)
+        db.session.add_all([teacher, room_busy, room_free])
+        db.session.commit()
+
+        start = datetime(2025, 10, 17, 10, 15, 0)
+        end = datetime(2025, 10, 17, 12, 15, 0)
+        existing = Session(
+            course=course,
+            teacher=teacher,
+            room=room_busy,
+            class_group=class_group,
+            start_time=start,
+            end_time=end,
+        )
+        existing.attendees = [class_group]
+        db.session.add(existing)
+        db.session.commit()
+
+        chosen = find_available_room(
+            course,
+            start,
+            end,
+            required_capacity=class_group.size,
+        )
+
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen.id, room_free.id)
+
+    def test_find_available_room_ignores_pending_conflicts_without_autoflush(self) -> None:
+        course, link, class_group = self._create_tp_course()
+        teacher = Teacher(name="Camille")
+        room_busy = Room(name="B206", capacity=24)
+        room_free = Room(name="B207", capacity=24)
+        db.session.add_all([teacher, room_busy, room_free])
+        db.session.commit()
+
+        start = datetime(2025, 10, 18, 13, 30, 0)
+        end = datetime(2025, 10, 18, 15, 30, 0)
+
+        pending = Session(
+            course=course,
+            teacher=teacher,
+            room=room_busy,
+            class_group=class_group,
+            start_time=start,
+            end_time=end,
+        )
+        pending.attendees = [class_group]
+        db.session.add(pending)
+
+        with db.session.no_autoflush:
+            chosen = find_available_room(
+                course,
+                start,
+                end,
+                required_capacity=class_group.size,
+            )
+
+        self.assertIsNotNone(chosen)
+        assert chosen is not None
+        self.assertEqual(chosen.id, room_free.id)
+
+        db.session.rollback()
+
+    def test_schedule_failure_reports_teacher_reason(self) -> None:
+        base_name = CourseName(name="Analyse")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=24)
+        link = CourseClassLink(course=course, class_group=class_group, group_count=1)
+        teacher = Teacher(name="Alice")
+        room = Room(name="C101", capacity=30)
+        db.session.add_all([base_name, course, class_group, link, teacher, room])
+        db.session.commit()
+
+        course.teachers.append(teacher)
+        link.teacher_a = teacher
+        db.session.commit()
+
+        with self.assertRaises(ValueError) as cm:
+            generate_schedule(
+                course,
+                window_start=date(2025, 9, 1),
+                window_end=date(2025, 9, 5),
+                progress=NullScheduleProgress(),
+            )
+
+        message = str(cm.exception)
+        self.assertIn("Enseignant indisponible", message)
 
     def test_best_teacher_duos_prefers_shared_availability(self) -> None:
         teacher_a = Teacher(name="Alice")
@@ -1486,6 +1641,129 @@ class SchedulerRelocationTestCase(DatabaseTestCase):
         self.assertEqual(per_day_hours[first_start.date()], 0)
         self.assertEqual(weekday_frequencies.get(first_start.weekday(), 0), 0)
 
+    def test_relocate_sessions_handles_missing_attendance_rows(self) -> None:
+        base_name = CourseName(name="Structures")
+        course = Course(
+            name=Course.compose_name("TP", base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO2", size=28)
+        link = CourseClassLink(class_group=class_group)
+        course.class_links.append(link)
+        teacher = Teacher(name="Bob")
+        room = Room(name="Lab1", capacity=30)
+        db.session.add_all([base_name, course, class_group, teacher, room])
+        db.session.commit()
+
+        session_start = datetime(2025, 9, 22, 13, 30)
+        session_end = datetime(2025, 9, 22, 15, 30)
+        existing_session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_group,
+            start_time=session_start,
+            end_time=session_end,
+        )
+        existing_session.attendees = [class_group]
+        db.session.add(existing_session)
+        db.session.commit()
+
+        db.session.execute(
+            session_attendance.delete().where(
+                session_attendance.c.session_id == existing_session.id
+            )
+        )
+        db.session.commit()
+
+        per_day_hours = {session_start.date(): existing_session.duration_hours}
+        weekday_frequencies = Counter({session_start.weekday(): 1})
+        created_sessions: list[Session] = []
+        attempted_weeks: set[date] = set()
+
+        removed = _relocate_sessions_for_groups(
+            course=course,
+            class_groups=[class_group],
+            created_sessions=created_sessions,
+            per_day_hours=per_day_hours,
+            weekday_frequencies=weekday_frequencies,
+            reporter=None,
+            attempted_weeks=attempted_weeks,
+            subgroup_label=None,
+            context_label=class_group.name,
+        )
+
+        self.assertEqual(removed, 2)
+        self.assertEqual(Session.query.filter_by(course=course).count(), 0)
+        self.assertEqual(per_day_hours.get(session_start.date(), 0), 0)
+        self.assertEqual(weekday_frequencies.get(session_start.weekday(), 0), 0)
+
+
+class ScheduleWeekRolloverOptionTestCase(DatabaseTestCase):
+    def test_generate_schedule_skips_week_rollover_when_disabled(self) -> None:
+        base_name = CourseName(name="Probabilités")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO3", size=28)
+        link = CourseClassLink(class_group=class_group)
+        course.class_links.append(link)
+
+        teacher = Teacher(name="Chloé")
+        room = Room(name="C201", capacity=35)
+
+        course.teachers.append(teacher)
+        db.session.add_all([base_name, course, class_group, teacher, room])
+        db.session.commit()
+
+        week_start = date(2025, 9, 8)
+        week_end = week_start + timedelta(days=4)
+        allowed_payload = [(week_start, week_end, 2)]
+
+        class DummyDiagnostics:
+            def failure_summary(self, default: str = "") -> str:
+                return default or "Échec simulé"
+
+        def failing_block(*args, **kwargs):
+            return [], DummyDiagnostics()
+
+        with patch("app.scheduler._schedule_block_for_day", side_effect=failing_block), patch(
+            "app.scheduler._relocate_sessions_for_groups", return_value=0
+        ) as relocate_mock:
+            with self.assertRaises(ValueError):
+                generate_schedule(
+                    course,
+                    window_start=week_start,
+                    window_end=week_end,
+                    allowed_weeks=allowed_payload,
+                    progress=NullScheduleProgress(),
+                    allow_week_rollover=False,
+                )
+            self.assertFalse(relocate_mock.called)
+
+        with patch("app.scheduler._schedule_block_for_day", side_effect=failing_block), patch(
+            "app.scheduler._relocate_sessions_for_groups", return_value=0
+        ) as relocate_mock:
+            with self.assertRaises(ValueError):
+                generate_schedule(
+                    course,
+                    window_start=week_start,
+                    window_end=week_end,
+                    allowed_weeks=allowed_payload,
+                    progress=NullScheduleProgress(),
+                    allow_week_rollover=True,
+                )
+            self.assertTrue(relocate_mock.called)
+
 
 class ScheduleTeacherFallbackTestCase(DatabaseTestCase):
     def test_generate_schedule_switches_when_preferred_quota_spent(self) -> None:
@@ -1495,7 +1773,6 @@ class ScheduleTeacherFallbackTestCase(DatabaseTestCase):
             course_type="TD",
             session_length_hours=2,
             sessions_required=3,
-            sessions_per_week=0,
             semester="S1",
             configured_name=base_name,
         )
@@ -1584,6 +1861,550 @@ class ScheduleGenerationFailureTestCase(DatabaseTestCase):
             "Impossible de générer automatiquement toutes les séances",
             str(context.exception),
         )
+
+
+class ScheduleTemporalPreferenceTestCase(DatabaseTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.teacher = Teacher(name="Alice")
+        self.room = Room(name="B205", capacity=40)
+        self.class_group = ClassGroup(name="INFO1", size=30)
+        db.session.add_all([self.teacher, self.room, self.class_group])
+        db.session.commit()
+
+        availabilities = [
+            TeacherAvailability(
+                teacher=self.teacher,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add_all(availabilities)
+        db.session.commit()
+
+    def _create_course(self, course_type: str) -> Course:
+        base_name = CourseName(name=f"{course_type} de test")
+        course = Course(
+            name=Course.compose_name(course_type, base_name.name, "S1"),
+            course_type=course_type,
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        link = CourseClassLink(
+            class_group=self.class_group,
+            group_count=1,
+        )
+        link.teacher_a = self.teacher
+        course.class_links.append(link)
+        course.teachers.append(self.teacher)
+        db.session.add(course)
+        db.session.commit()
+        return course
+
+    def test_td_prefers_morning_slots_at_week_start(self) -> None:
+        course = self._create_course("TD")
+
+        created = generate_schedule(
+            course,
+            window_start=date(2025, 9, 1),
+            window_end=date(2025, 9, 5),
+        )
+
+        self.assertEqual(len(created), 1)
+        session = created[0]
+        self.assertEqual(session.start_time.date(), date(2025, 9, 1))
+        self.assertEqual(session.start_time.time(), time(8, 0))
+        self.assertEqual(session.end_time.time(), time(10, 0))
+
+    def test_tp_prefers_afternoon_slots_at_week_start(self) -> None:
+        course = self._create_course("TP")
+
+        created = generate_schedule(
+            course,
+            window_start=date(2025, 9, 1),
+            window_end=date(2025, 9, 5),
+        )
+
+        self.assertEqual(len(created), 1)
+        session = created[0]
+        self.assertEqual(session.start_time.date(), date(2025, 9, 1))
+        self.assertEqual(session.start_time.time(), time(13, 30))
+        self.assertEqual(session.end_time.time(), time(15, 30))
+
+
+class TeacherAllocationQuotaTestCase(DatabaseTestCase):
+    def test_course_computes_teacher_session_distribution(self) -> None:
+        base_name = CourseName(name="Analyse")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=6,
+            semester="S1",
+            configured_name=base_name,
+        )
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=4),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=8),
+            ]
+        )
+
+        db.session.add_all([base_name, course, teacher_a, teacher_b])
+        db.session.commit()
+
+        self.assertEqual(course.session_occurrence_goal, 6)
+
+        total_targets = course.teacher_total_session_targets
+        self.assertAlmostEqual(total_targets.get(teacher_a.id, 0.0), 2.0)
+        self.assertAlmostEqual(total_targets.get(teacher_b.id, 0.0), 4.0)
+
+        targets = course.teacher_session_targets
+        self.assertAlmostEqual(targets.get(teacher_a.id, 0.0), 2.0 / 6.0, places=4)
+        self.assertAlmostEqual(targets.get(teacher_b.id, 0.0), 4.0 / 6.0, places=4)
+
+        distribution = course.teacher_session_distribution
+        self.assertAlmostEqual(distribution.get(teacher_a.id, 0.0), 2.0 / 6.0, places=4)
+        self.assertAlmostEqual(distribution.get(teacher_b.id, 0.0), 4.0 / 6.0, places=4)
+
+    def test_course_estimates_weekly_session_targets_per_teacher(self) -> None:
+        base_name = CourseName(name="Probabilités")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=6,
+            semester="S1",
+            configured_name=base_name,
+        )
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        week_one = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=2)
+        week_two = CourseAllowedWeek(week_start=date(2025, 9, 8), sessions_target=4)
+        course.allowed_weeks.extend([week_one, week_two])
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=4),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=8),
+            ]
+        )
+
+        db.session.add_all([base_name, course, teacher_a, teacher_b, week_one, week_two])
+        db.session.commit()
+
+        weekly_targets = course.teacher_weekly_session_targets
+        first_week = week_one.week_start
+        second_week = week_two.week_start
+
+        self.assertIn(first_week, weekly_targets)
+        self.assertIn(second_week, weekly_targets)
+
+        self.assertAlmostEqual(
+            weekly_targets[first_week].get(teacher_a.id, 0.0),
+            2 * (4 / (2 * 6)),
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_targets[first_week].get(teacher_b.id, 0.0),
+            2 * (8 / (2 * 6)),
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_targets[second_week].get(teacher_a.id, 0.0),
+            4 * (4 / (2 * 6)),
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_targets[second_week].get(teacher_b.id, 0.0),
+            4 * (8 / (2 * 6)),
+            places=4,
+        )
+
+    def test_course_estimates_weekly_hour_targets_per_teacher(self) -> None:
+        base_name = CourseName(name="Probabilités")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=6,
+            semester="S1",
+            configured_name=base_name,
+        )
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        week_one = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=2)
+        week_two = CourseAllowedWeek(week_start=date(2025, 9, 8), sessions_target=4)
+        course.allowed_weeks.extend([week_one, week_two])
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=4),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=8),
+            ]
+        )
+
+        db.session.add_all([base_name, course, teacher_a, teacher_b, week_one, week_two])
+        db.session.commit()
+
+        weekly_hours = course.teacher_weekly_hour_targets
+        first_week = week_one.week_start
+        second_week = week_two.week_start
+
+        self.assertIn(first_week, weekly_hours)
+        self.assertIn(second_week, weekly_hours)
+
+        expected_share_a = 4 / (2 * 6)
+        expected_share_b = 8 / (2 * 6)
+
+        self.assertAlmostEqual(
+            weekly_hours[first_week].get(teacher_a.id, 0.0),
+            2 * expected_share_a * 2,
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_hours[first_week].get(teacher_b.id, 0.0),
+            2 * expected_share_b * 2,
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_hours[second_week].get(teacher_a.id, 0.0),
+            4 * expected_share_a * 2,
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_hours[second_week].get(teacher_b.id, 0.0),
+            4 * expected_share_b * 2,
+            places=4,
+        )
+
+    def test_session_occurrence_goal_scales_with_groups_and_teachers(self) -> None:
+        base_name = CourseName(name="Projet SAE")
+        course = Course(
+            name=Course.compose_name("SAE", base_name.name, "S1"),
+            course_type="SAE",
+            session_length_hours=4,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_a = ClassGroup(name="Groupe A", size=28)
+        class_b = ClassGroup(name="Groupe B", size=26)
+        link_a = CourseClassLink(class_group=class_a, group_count=1)
+        link_b = CourseClassLink(class_group=class_b, group_count=1)
+        allowed = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=1)
+        course.class_links.extend([link_a, link_b])
+        course.allowed_weeks.append(allowed)
+
+        db.session.add_all([base_name, course, class_a, class_b, link_a, link_b, allowed])
+        db.session.commit()
+
+        self.assertEqual(course.session_group_factor, 2)
+        self.assertEqual(course.session_teacher_factor, 2)
+        self.assertEqual(course.session_occurrence_goal, 8)
+
+    def test_weekly_targets_scale_with_half_groups(self) -> None:
+        base_name = CourseName(name="TP Réseaux")
+        course = Course(
+            name=Course.compose_name("TP", base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="RT1", size=24)
+        link = CourseClassLink(class_group=class_group, group_count=2)
+        teacher = Teacher(name="Camille")
+        allocation = CourseTeacherAllocation(teacher=teacher, target_hours=4)
+        allowed = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=1)
+
+        course.class_links.append(link)
+        course.teacher_allocations.append(allocation)
+        course.allowed_weeks.append(allowed)
+
+        db.session.add_all([base_name, course, class_group, link, teacher, allocation, allowed])
+        db.session.commit()
+
+        weekly_targets = course.teacher_weekly_session_targets
+        first_week = allowed.week_start
+
+        self.assertIn(first_week, weekly_targets)
+        self.assertAlmostEqual(weekly_targets[first_week].get(teacher.id, 0.0), 2.0)
+
+    def test_weekly_targets_account_for_sae_teacher_pairs(self) -> None:
+        base_name = CourseName(name="SAE Communication")
+        course = Course(
+            name=Course.compose_name("SAE", base_name.name, "S1"),
+            course_type="SAE",
+            session_length_hours=4,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="BUT1", size=30)
+        link = CourseClassLink(class_group=class_group, group_count=1)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        allocation_a = CourseTeacherAllocation(teacher=teacher_a, target_hours=16)
+        allocation_b = CourseTeacherAllocation(teacher=teacher_b, target_hours=16)
+        allowed = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=1)
+
+        course.class_links.append(link)
+        course.teacher_allocations.extend([allocation_a, allocation_b])
+        course.allowed_weeks.append(allowed)
+
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                class_group,
+                link,
+                teacher_a,
+                teacher_b,
+                allocation_a,
+                allocation_b,
+                allowed,
+            ]
+        )
+        db.session.commit()
+
+        weekly_targets = course.teacher_weekly_session_targets
+        first_week = allowed.week_start
+
+        self.assertIn(first_week, weekly_targets)
+        self.assertAlmostEqual(weekly_targets[first_week].get(teacher_a.id, 0.0), 2.0)
+        self.assertAlmostEqual(weekly_targets[first_week].get(teacher_b.id, 0.0), 2.0)
+
+
+class TeacherAllocationStateSessionsTestCase(DatabaseTestCase):
+    def test_allocation_state_tracks_remaining_sessions(self) -> None:
+        base_name = CourseName(name="Algorithmique")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=3,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=30)
+        link = CourseClassLink(class_group=class_group)
+        room = Room(name="B105", capacity=40)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        course.class_links.append(link)
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=4),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=2),
+            ]
+        )
+
+        db.session.add_all([base_name, course, class_group, room, teacher_a, teacher_b])
+        db.session.commit()
+
+        first_session = Session(
+            course=course,
+            teacher=teacher_a,
+            room=room,
+            class_group=class_group,
+            start_time=datetime(2025, 9, 8, 8, 0),
+            end_time=datetime(2025, 9, 8, 10, 0),
+        )
+        first_session.attendees = [class_group]
+        db.session.add(first_session)
+        db.session.commit()
+
+        state = TeacherAllocationState(course)
+
+        remaining_a = state.remaining_sessions(teacher_a.id)
+        remaining_b = state.remaining_sessions(teacher_b.id)
+        share_a = state.session_share(teacher_a.id)
+        share_b = state.session_share(teacher_b.id)
+
+        assert remaining_a is not None and remaining_b is not None
+        assert share_a is not None and share_b is not None
+
+        self.assertAlmostEqual(remaining_a, 1.0)
+        self.assertAlmostEqual(remaining_b, 1.0)
+        self.assertAlmostEqual(share_a, 2.0 / 3.0, places=4)
+        self.assertAlmostEqual(share_b, 1.0 / 3.0, places=4)
+
+    def test_allocation_state_enforces_weekly_group_capacity(self) -> None:
+        base_name = CourseName(name="Logique")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=4,
+            semester="S1",
+            configured_name=base_name,
+        )
+        allowed_week = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=2)
+        class_a = ClassGroup(name="INFO1", size=28)
+        class_b = ClassGroup(name="INFO2", size=30)
+        link_a = CourseClassLink(class_group=class_a)
+        link_b = CourseClassLink(class_group=class_b)
+        course.class_links.extend([link_a, link_b])
+        teacher = Teacher(name="Alice")
+        room = Room(name="B310", capacity=40)
+        course.allowed_weeks.append(allowed_week)
+        course.teacher_allocations.append(
+            CourseTeacherAllocation(teacher=teacher, target_hours=4)
+        )
+
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                class_a,
+                class_b,
+                room,
+                teacher,
+                allowed_week,
+                link_a,
+                link_b,
+            ]
+        )
+        db.session.commit()
+
+        state = TeacherAllocationState(course)
+        week_start = allowed_week.week_start
+        start_time = datetime.combine(week_start, time(8, 0))
+        self.assertTrue(
+            state.can_allocate_weekly_group(
+                teacher.id,
+                start_time,
+                class_group_id=class_a.id,
+            )
+        )
+
+        session = Session(
+            course=course,
+            teacher=teacher,
+            room=room,
+            class_group=class_a,
+            start_time=start_time,
+            end_time=start_time + timedelta(hours=2),
+        )
+        session.attendees = [class_a]
+        db.session.add(session)
+        db.session.flush()
+        state.consume_session(session)
+
+        next_start = datetime.combine(week_start, time(10, 15))
+        self.assertFalse(
+            state.can_allocate_weekly_group(
+                teacher.id,
+                next_start,
+                class_group_id=class_b.id,
+            )
+        )
+
+    def test_find_available_teacher_respects_weekly_group_capacity(self) -> None:
+        base_name = CourseName(name="Structures")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=4,
+            semester="S1",
+            configured_name=base_name,
+        )
+        allowed_week = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=2)
+        class_a = ClassGroup(name="INFO1", size=28)
+        class_b = ClassGroup(name="INFO2", size=28)
+        link_a = CourseClassLink(class_group=class_a)
+        link_b = CourseClassLink(class_group=class_b)
+        course.class_links.extend([link_a, link_b])
+        room = Room(name="C201", capacity=40)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        availabilities = [
+            TeacherAvailability(teacher=teacher_a, weekday=0, start_time=time(8, 0), end_time=time(18, 0)),
+            TeacherAvailability(teacher=teacher_a, weekday=1, start_time=time(8, 0), end_time=time(18, 0)),
+            TeacherAvailability(teacher=teacher_b, weekday=0, start_time=time(8, 0), end_time=time(18, 0)),
+            TeacherAvailability(teacher=teacher_b, weekday=1, start_time=time(8, 0), end_time=time(18, 0)),
+        ]
+        course.allowed_weeks.append(allowed_week)
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=4),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=8),
+            ]
+        )
+        course.teachers.extend([teacher_a, teacher_b])
+        link_a.teacher_a = teacher_a
+        link_b.teacher_a = teacher_a
+        link_b.teacher_b = teacher_b
+
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                class_a,
+                class_b,
+                link_a,
+                link_b,
+                room,
+                teacher_a,
+                teacher_b,
+                allowed_week,
+                *availabilities,
+            ]
+        )
+        db.session.commit()
+
+        state = TeacherAllocationState(course)
+        _set_allocation_state(course, state)
+
+        start_a = datetime.combine(allowed_week.week_start, time(8, 0))
+        end_a = start_a + timedelta(hours=2)
+        teacher_first = find_available_teacher(
+            course,
+            start_a,
+            end_a,
+            link=link_a,
+            target_class_ids={class_a.id},
+        )
+
+        self.assertIsNotNone(teacher_first)
+        assert teacher_first is not None
+        self.assertEqual(teacher_first.id, teacher_a.id)
+
+        session_a = Session(
+            course=course,
+            teacher=teacher_first,
+            room=room,
+            class_group=class_a,
+            start_time=start_a,
+            end_time=end_a,
+        )
+        session_a.attendees = [class_a]
+        db.session.add(session_a)
+        db.session.flush()
+        state.consume_session(session_a)
+
+        start_b = datetime.combine(allowed_week.week_start + timedelta(days=1), time(10, 15))
+        end_b = start_b + timedelta(hours=2)
+        teacher_second = find_available_teacher(
+            course,
+            start_b,
+            end_b,
+            link=link_b,
+            target_class_ids={class_b.id},
+        )
+
+        self.assertIsNotNone(teacher_second)
+        assert teacher_second is not None
+        self.assertEqual(teacher_second.id, teacher_b.id)
+
+        _clear_allocation_state(course)
 
 
 if __name__ == "__main__":

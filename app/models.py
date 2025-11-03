@@ -86,6 +86,10 @@ def default_end_time() -> time:
     return time(18, 0)
 
 
+def _week_start(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
 class TimeStampedModel:
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -256,7 +260,6 @@ class Course(db.Model, TimeStampedModel):
     priority: Mapped[int] = mapped_column(Integer, default=1)
     course_type: Mapped[str] = mapped_column(String(3), default="CM")
     semester: Mapped[str] = mapped_column(String(2), default="S1")
-    sessions_per_week: Mapped[int] = mapped_column(Integer, default=1)
     color: Mapped[Optional[str]] = mapped_column(String(7))
     course_name_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("course_name.id"), nullable=True
@@ -304,7 +307,6 @@ class Course(db.Model, TimeStampedModel):
     __table_args__ = (
         CheckConstraint("session_length_hours > 0", name="chk_session_length_positive"),
         CheckConstraint("sessions_required > 0", name="chk_session_required_positive"),
-        CheckConstraint("sessions_per_week >= 0", name="chk_sessions_per_week_non_negative"),
         CheckConstraint("computers_required >= 0", name="chk_course_computers_non_negative"),
         CheckConstraint(
             "course_type IN ('CM','TD','TP','SAE','Eval')",
@@ -357,6 +359,38 @@ class Course(db.Model, TimeStampedModel):
         return self.course_type == "SAE"
 
     @property
+    def uses_half_groups(self) -> bool:
+        """Return ``True`` when the course must be split into half groups."""
+
+        return self.is_tp
+
+    @property
+    def session_group_factor(self) -> int:
+        """Nombre de classes ou sous-groupes concernés par chaque séance."""
+
+        if self.is_cm:
+            return 1
+        total = 0
+        use_half_groups = self.uses_half_groups
+        for link in self.class_links:
+            if use_half_groups:
+                count = getattr(link, "group_count", 1) or 1
+            else:
+                count = 1
+            try:
+                normalised = int(count)
+            except (TypeError, ValueError):
+                normalised = 1
+            total += max(normalised, 1)
+        return total or 1
+
+    @property
+    def session_teacher_factor(self) -> int:
+        """Nombre d'enseignants mobilisés simultanément par séance."""
+
+        return 2 if self.is_sae else 1
+
+    @property
     def semester_window(self) -> tuple[date, date] | None:
         return semester_date_window(self.semester)
 
@@ -389,7 +423,9 @@ class Course(db.Model, TimeStampedModel):
         link = self.class_link_for(class_group)
         if link is None:
             return [None]
-        return link.group_labels()
+        if self.uses_half_groups:
+            return link.group_labels()
+        return [None]
 
     @property
     def preferred_rooms(self) -> list["Room"]:
@@ -403,7 +439,7 @@ class Course(db.Model, TimeStampedModel):
 
     @property
     def allowed_week_payload(self) -> list[tuple[date, date, int]]:
-        fallback = max(int(self.sessions_per_week or 0), 0)
+        fallback = 0
         payload: list[tuple[date, date, int]] = []
         for entry in self.allowed_weeks:
             payload.append(
@@ -421,6 +457,8 @@ class Course(db.Model, TimeStampedModel):
         link = self.class_link_for(class_group)
         if link is None:
             return None
+        if not self.uses_half_groups:
+            return None
         return link.subgroup_name_for(subgroup_label)
 
     def capacity_needed_for(self, class_group: "ClassGroup" | int) -> int:
@@ -432,7 +470,7 @@ class Course(db.Model, TimeStampedModel):
         if target is None:
             return 1
         baseline = max(target.size, 1)
-        if link and link.group_count > 1:
+        if link and link.group_count > 1 and self.uses_half_groups:
             return max(1, ceil(baseline / link.group_count))
         return max(1, baseline)
 
@@ -452,25 +490,22 @@ class Course(db.Model, TimeStampedModel):
 
     @property
     def total_required_hours(self) -> int:
-        group_total = sum(link.group_count for link in self.class_links)
-        if self.is_cm:
-            multiplier = 1
-        else:
-            multiplier = group_total or 1
-        per_week_goal = max(int(self.sessions_per_week or 0), 0)
+        multiplier = self.session_group_factor
+        base_sessions = max(int(self.sessions_required or 0), 0)
+        occurrences = base_sessions
         if self.allowed_weeks:
-            occurrences = sum(
-                entry.effective_sessions(per_week_goal)
-                for entry in self.allowed_weeks
-            )
-            if occurrences <= 0:
-                occurrences = max(int(self.sessions_required or 0), 1)
-        else:
-            occurrences = max(
-                int(self.sessions_required or 0),
-                per_week_goal,
-                1,
-            )
+            specified = 0
+            for entry in self.allowed_weeks:
+                value = entry.sessions_target
+                if value is None:
+                    continue
+                try:
+                    specified += max(int(value), 0)
+                except (TypeError, ValueError):
+                    continue
+            if specified > 0:
+                occurrences = specified
+        occurrences = max(occurrences, 1)
         return occurrences * self.session_length_hours * multiplier
 
     @property
@@ -485,6 +520,151 @@ class Course(db.Model, TimeStampedModel):
                 continue
             mapping[allocation.teacher_id] = max(allocation.target_hours or 0, 0)
         return mapping
+
+    @property
+    def _requested_weekly_session_total(self) -> int:
+        total = 0
+        for entry in self.allowed_weeks:
+            value = entry.sessions_target
+            if value is None:
+                continue
+            try:
+                total += max(int(value), 0)
+            except (TypeError, ValueError):
+                continue
+        requested = max(int(self.sessions_required or 0), 0)
+        return max(requested, total)
+
+    @property
+    def session_occurrence_goal(self) -> int:
+        """Nombre total d'occurrences visées pour ce cours."""
+
+        per_group_goal = self._requested_weekly_session_total
+        return per_group_goal * self.session_group_factor * self.session_teacher_factor
+
+    @property
+    def teacher_total_session_targets(self) -> dict[int, float]:
+        """Nombre total de séances à générer pour chaque enseignant."""
+
+        session_length = float(self.session_length_hours or 0.0)
+        totals: dict[int, float] = {}
+        if session_length <= 0:
+            return {teacher_id: 0.0 for teacher_id in self.teacher_allocation_map}
+
+        for teacher_id, hours in self.teacher_allocation_map.items():
+            hours_value = max(float(hours), 0.0)
+            totals[teacher_id] = hours_value / session_length
+        return totals
+
+    @property
+    def teacher_session_targets(self) -> dict[int, float]:
+        """Part de séances à assurer par enseignant sur l'ensemble du cours."""
+
+        totals = self.teacher_total_session_targets
+        total_occurrences = max(float(self.session_occurrence_goal or 0), 0.0)
+        if total_occurrences <= 0:
+            return {teacher_id: 0.0 for teacher_id in totals}
+
+        shares: dict[int, float] = {}
+        for teacher_id, total in totals.items():
+            share = max(float(total), 0.0) / total_occurrences
+            shares[teacher_id] = share
+        return shares
+
+    @property
+    def teacher_session_distribution(self) -> dict[int, float]:
+        """Part de séances par enseignant en fonction de leur quota horaire."""
+
+        distribution: dict[int, float] = {}
+        for teacher_id, share in self.teacher_session_targets.items():
+            distribution[teacher_id] = max(float(share), 0.0)
+        return distribution
+
+    @property
+    def teacher_weekly_session_targets(self) -> dict[date, dict[int, float]]:
+        """Répartition hebdomadaire estimée des séances par enseignant."""
+
+        distribution = self.teacher_session_targets
+        if not distribution:
+            return {}
+
+        weekly_payload = list(self.allowed_week_payload)
+        if not weekly_payload:
+            semester_start = self.semester_start
+            if semester_start is None:
+                today = date.today()
+                reference_year = today.year if today.month >= 9 else today.year - 1
+                semester_start = date(reference_year, 9, 1)
+            weekly_goal = max(int(self.sessions_required or 0), 0)
+            if weekly_goal <= 0:
+                return {}
+            weekly_payload = [
+                (semester_start, semester_start + timedelta(days=6), weekly_goal)
+            ]
+
+        weekly_targets: dict[date, dict[int, float]] = {}
+        for week_start, week_end, weekly_goal in weekly_payload:
+            if week_start is None:
+                continue
+            canonical_week = _week_start(week_start)
+            goal = max(int(weekly_goal or 0), 0)
+            if goal <= 0:
+                continue
+            per_teacher: dict[int, float] = {}
+            multiplier = self.session_group_factor * self.session_teacher_factor
+            adjusted_goal = max(goal, 0) * multiplier
+            for teacher_id, share in distribution.items():
+                value = max(float(share), 0.0) * adjusted_goal
+                if value <= 0:
+                    continue
+                per_teacher[teacher_id] = value
+            if per_teacher:
+                weekly_targets[canonical_week] = per_teacher
+        return weekly_targets
+
+    @property
+    def teacher_weekly_hour_targets(self) -> dict[date, dict[int, float]]:
+        """Volume horaire hebdomadaire estimé pour chaque enseignant."""
+
+        session_length = float(self.session_length_hours or 0.0)
+        if session_length <= 0:
+            return {}
+
+        weekly_sessions = self.teacher_weekly_session_targets
+        weekly_hours: dict[date, dict[int, float]] = {}
+        for week_start, session_map in weekly_sessions.items():
+            hour_map: dict[int, float] = {}
+            for teacher_id, session_count in session_map.items():
+                hours = max(float(session_count), 0.0) * session_length
+                if hours <= 0:
+                    continue
+                hour_map[teacher_id] = hours
+            if hour_map:
+                weekly_hours[week_start] = hour_map
+        return weekly_hours
+
+    @property
+    def average_weekly_sessions(self) -> float:
+        """Nombre moyen de séances prévues par semaine sur l'ensemble du cours."""
+
+        multiplier = self.session_group_factor * self.session_teacher_factor
+        weekly_values = [
+            max(int(goal or 0), 0) * multiplier
+            for _, _, goal in self.allowed_week_payload
+            if goal is not None
+        ]
+        positive_values = [value for value in weekly_values if value > 0]
+        if positive_values:
+            return float(sum(positive_values)) / len(positive_values)
+
+        requested = max(int(self.sessions_required or 0), 0) * multiplier
+        if requested <= 0:
+            return 0.0
+
+        allowed_weeks = [span for span in self.allowed_week_ranges if span]
+        if allowed_weeks:
+            return requested / len(allowed_weeks)
+        return 1.0 if requested > 0 else 0.0
 
 
 class Session(db.Model, TimeStampedModel):
@@ -1345,6 +1525,8 @@ class CourseClassLink(db.Model):
         course_type = getattr(course, "course_type", None)
         if course_type == "SAE":
             return teachers
+        if course_type != "TP":
+            return teachers[:1] if teachers else []
         if self.group_count == 2:
             label = (subgroup_label or "").strip().upper()
             ordered: list[Teacher] = []
@@ -1388,7 +1570,7 @@ class CourseClassLink(db.Model):
                 ("Enseignant 2", self.teacher_b),
             ]
         teacher = self.teacher_a or self.teacher_b
-        if self.group_count == 2:
+        if course_type == "TP" and self.group_count == 2:
             return [
                 (self.subgroup_name_for("A"), self.teacher_for_label("A")),
                 (self.subgroup_name_for("B"), self.teacher_for_label("B")),

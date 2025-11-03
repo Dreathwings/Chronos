@@ -61,8 +61,12 @@
     const etaLabel = modalEl.querySelector('[data-chronos-progress-eta]');
     const detailLabel = modalEl.querySelector('[data-chronos-progress-detail]');
     const stateLabel = modalEl.querySelector('[data-chronos-progress-state]');
+    const weekPanel = modalEl.querySelector('[data-chronos-week-panel]');
+    const weekLabel = modalEl.querySelector('[data-chronos-week-label]');
+    const weekBody = modalEl.querySelector('[data-chronos-week-body]');
+    const cancelButton = modalEl.querySelector('[data-chronos-progress-cancel]');
     if (!progressBar || !percentLabel || !etaLabel || !detailLabel || !stateLabel) {
-      return null;
+        return null;
     }
 
     const bootstrapLib = window.bootstrap || null;
@@ -96,6 +100,83 @@
         detailLabel.textContent = '';
         detailLabel.classList.add('d-none');
       }
+    }
+
+    function clearWeekTable() {
+      if (!weekPanel || !weekLabel || !weekBody) {
+        return;
+      }
+      weekLabel.textContent = '';
+      weekBody.innerHTML = '';
+      weekPanel.classList.add('d-none');
+    }
+
+    function renderWeekTable(snapshot) {
+      if (!weekPanel || !weekLabel || !weekBody) {
+        return;
+      }
+      const label = snapshot && typeof snapshot.current_week_label === 'string'
+        ? snapshot.current_week_label.trim()
+        : '';
+      const entries = snapshot && Array.isArray(snapshot.current_week_sessions)
+        ? snapshot.current_week_sessions
+        : [];
+      if (!label || entries.length === 0) {
+        clearWeekTable();
+        return;
+      }
+      weekLabel.textContent = label;
+      weekBody.innerHTML = '';
+      entries.forEach(function(entry) {
+        const row = document.createElement('tr');
+        const status = (entry.status || '').toString().toLowerCase();
+        if (status === 'success') {
+          row.classList.add('table-success');
+        } else if (status === 'error') {
+          row.classList.add('table-danger');
+        }
+        const errorText = typeof entry.error_message === 'string'
+          ? entry.error_message.trim()
+          : '';
+        const fields = [
+          { value: entry.course },
+          { value: entry.class_label },
+          { value: entry.subgroup },
+          { value: entry.teacher },
+          { value: entry.time },
+          { value: entry.type },
+          { value: errorText, isError: true },
+        ];
+        fields.forEach(function(field, index) {
+          const cell = document.createElement('td');
+          let content = '';
+          if (typeof field.value === 'string') {
+            content = field.value.trim();
+          } else if (field.value !== null && field.value !== undefined) {
+            content = String(field.value);
+          }
+          if (!content) {
+            content = '—';
+          }
+          cell.textContent = content;
+          if (index === 2 && content === '—') {
+            cell.classList.add('text-muted');
+          }
+          if (field.isError) {
+            if (content === '—') {
+              cell.classList.add('text-muted');
+            } else {
+              cell.classList.add('small');
+              if (status === 'error') {
+                cell.classList.add('text-danger');
+              }
+            }
+          }
+          row.appendChild(cell);
+        });
+        weekBody.appendChild(row);
+      });
+      weekPanel.classList.remove('d-none');
     }
 
     function updateTimer() {
@@ -138,6 +219,7 @@
         mode = initialMode;
         detailFallback = (options && options.detailText) || '';
         estimatedSeconds = options && options.estimatedSeconds ? options.estimatedSeconds : 0;
+        clearWeekTable();
 
         setPercent(1);
         stateLabel.textContent = 'Initialisation…';
@@ -175,21 +257,35 @@
         }
 
         if (snapshot.state === 'running') {
-          stateLabel.textContent = 'Génération en cours…';
+          if (snapshot.cancel_requested) {
+            stateLabel.textContent = 'Arrêt en cours…';
+          } else {
+            stateLabel.textContent = 'Génération en cours…';
+          }
         } else if (snapshot.state === 'success') {
           stateLabel.textContent = snapshot.message || 'Génération terminée';
+        } else if (snapshot.state === 'cancelled') {
+          stateLabel.textContent = snapshot.message || 'Génération interrompue';
         } else if (snapshot.state === 'error') {
           stateLabel.textContent = 'Erreur lors de la génération';
         } else {
           stateLabel.textContent = 'Initialisation…';
         }
 
-        if (Number.isFinite(snapshot.eta_seconds) && snapshot.state === 'running') {
+        if (
+          Number.isFinite(snapshot.eta_seconds)
+          && snapshot.state === 'running'
+          && !snapshot.cancel_requested
+        ) {
           etaLabel.textContent = formatDuration(snapshot.eta_seconds);
         } else if (snapshot.state === 'success') {
           etaLabel.textContent = 'Terminé';
+        } else if (snapshot.state === 'cancelled') {
+          etaLabel.textContent = 'Interrompue';
         } else if (snapshot.state === 'error') {
           etaLabel.textContent = 'Erreur';
+        } else if (snapshot.cancel_requested && snapshot.state === 'running') {
+          etaLabel.textContent = 'Arrêt en cours';
         } else {
           etaLabel.textContent = 'Calcul en cours';
         }
@@ -198,6 +294,7 @@
           ? snapshot.detail
           : detailFallback;
         applyDetail(detail);
+        renderWeekTable(snapshot);
       },
       finish(message) {
         stopTimer();
@@ -208,6 +305,20 @@
         if (message && message.trim().length > 0) {
           applyDetail(message);
         }
+      },
+      cancel(message) {
+        stopTimer();
+        mode = 'idle';
+        const text = message && message.trim().length > 0
+          ? message
+          : 'Génération interrompue';
+        stateLabel.textContent = text;
+        etaLabel.textContent = 'Interrompue';
+        detailFallback = text;
+        applyDetail(text);
+        window.setTimeout(function() {
+          modal.hide();
+        }, 400);
       },
       fail(message) {
         stopTimer();
@@ -244,14 +355,42 @@
       return;
     }
 
+    const cancelButton = modalEl.querySelector('[data-chronos-progress-cancel]');
     let activeJob = null;
+    let cancelPending = false;
+
+    function updateCancelButtonState() {
+      if (!cancelButton) {
+        return;
+      }
+      let label = 'Arrêter la génération';
+      let disabled = true;
+      if (cancelPending) {
+        label = 'Arrêt en cours…';
+      } else if (activeJob && !activeJob.finished) {
+        if (activeJob.cancelRequested) {
+          label = 'Arrêt demandé';
+        } else if (activeJob.cancelUrl) {
+          disabled = false;
+        }
+        if (activeJob.cancelRequested) {
+          disabled = true;
+        }
+      }
+      cancelButton.disabled = disabled;
+      cancelButton.textContent = label;
+    }
 
     function clearActiveJob() {
       if (activeJob && activeJob.timeoutId) {
         window.clearTimeout(activeJob.timeoutId);
       }
       activeJob = null;
+      cancelPending = false;
+      updateCancelButtonState();
     }
+
+    updateCancelButtonState();
 
     function scheduleNextPoll(job) {
       job.timeoutId = window.setTimeout(function() {
@@ -261,6 +400,7 @@
 
     function pollJob(job) {
       activeJob = job;
+      updateCancelButtonState();
       fetch(job.statusUrl, {
         headers: {
           Accept: 'application/json',
@@ -276,6 +416,9 @@
         })
         .then(function(snapshot) {
           overlay.update(snapshot);
+          job.cancelRequested = Boolean(snapshot.cancel_requested);
+          job.finished = Boolean(snapshot.finished);
+          updateCancelButtonState();
           if (!snapshot.finished) {
             scheduleNextPoll(job);
             return;
@@ -286,6 +429,11 @@
             window.setTimeout(function() {
               window.location.assign(job.redirectUrl || window.location.href);
             }, 600);
+          } else if (snapshot.state === 'cancelled') {
+            if (job.submitter) {
+              job.submitter.disabled = false;
+            }
+            overlay.cancel(snapshot.message || 'Génération interrompue.');
           } else {
             if (job.submitter) {
               job.submitter.disabled = false;
@@ -312,6 +460,8 @@
         detailText: estimate.detailText || estimate.labelText,
         estimatedSeconds: estimate.estimatedSeconds,
       });
+      cancelPending = false;
+      updateCancelButtonState();
 
       const action = form.getAttribute('action') || window.location.href;
       const method = (form.getAttribute('method') || 'POST').toUpperCase();
@@ -344,13 +494,20 @@
             statusUrl: payload.status_url,
             redirectUrl: payload.redirect_url || window.location.href,
             submitter: submitter || null,
+            cancelUrl: payload.cancel_url || null,
+            cancelRequested: false,
+            finished: false,
           };
+          activeJob = job;
+          updateCancelButtonState();
           pollJob(job);
         })
         .catch(function(error) {
           if (submitter) {
             submitter.disabled = false;
           }
+          cancelPending = false;
+          updateCancelButtonState();
           overlay.fail(`Impossible de lancer la génération : ${error.message}`);
         });
     }
@@ -374,6 +531,50 @@
         });
       }
     });
+
+    if (cancelButton) {
+      cancelButton.addEventListener('click', function() {
+        if (
+          !activeJob
+          || cancelPending
+          || activeJob.cancelRequested
+          || !activeJob.cancelUrl
+        ) {
+          return;
+        }
+        cancelPending = true;
+        updateCancelButtonState();
+        fetch(activeJob.cancelUrl, {
+          method: 'POST',
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            Accept: 'application/json',
+          },
+          credentials: 'same-origin',
+        })
+          .then(function(response) {
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json().catch(function() {
+              return {};
+            });
+          })
+          .then(function() {
+            cancelPending = false;
+            if (activeJob) {
+              activeJob.cancelRequested = true;
+            }
+            overlay.setLabel('Arrêt de la génération en cours…');
+            updateCancelButtonState();
+          })
+          .catch(function(error) {
+            cancelPending = false;
+            updateCancelButtonState();
+            window.alert(`Impossible d'interrompre la génération : ${error.message}`);
+          });
+      });
+    }
 
     window.addEventListener('pageshow', function() {
       overlay.hide();
