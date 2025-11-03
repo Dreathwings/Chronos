@@ -27,9 +27,13 @@ from sqlalchemy import text
 from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
+    TeacherAllocationState,
+    find_available_teacher,
     generate_schedule,
     has_weekly_course_conflict,
+    _clear_allocation_state,
     _relocate_sessions_for_groups,
+    _set_allocation_state,
     _warn_weekly_limit,
 )
 
@@ -1487,25 +1491,20 @@ class SchedulerRelocationTestCase(DatabaseTestCase):
         self.assertEqual(weekday_frequencies.get(first_start.weekday(), 0), 0)
 
 
-class ScheduleTeacherFallbackTestCase(DatabaseTestCase):
-    def test_generate_schedule_switches_when_preferred_quota_spent(self) -> None:
+class FindAvailableTeacherPriorityTestCase(DatabaseTestCase):
+    def test_prefers_teacher_with_more_remaining_slots(self) -> None:
         base_name = CourseName(name="Analyse")
         course = Course(
             name=Course.compose_name("TD", base_name.name, "S1"),
             course_type="TD",
             session_length_hours=2,
-            sessions_required=3,
-            sessions_per_week=0,
+            sessions_required=4,
             semester="S1",
             configured_name=base_name,
         )
-        class_group = ClassGroup(name="INFO2", size=28)
-        link = CourseClassLink(class_group=class_group)
-        course.class_links.append(link)
 
         teacher_a = Teacher(name="Alice")
         teacher_b = Teacher(name="Bruno")
-        room = Room(name="B103", capacity=40)
 
         course.teachers.extend([teacher_a, teacher_b])
         course.teacher_allocations.extend(
@@ -1514,10 +1513,9 @@ class ScheduleTeacherFallbackTestCase(DatabaseTestCase):
                 CourseTeacherAllocation(teacher=teacher_b, target_hours=6),
             ]
         )
-        link.teacher_a = teacher_a
 
         availabilities = []
-        for weekday in (0, 1, 2):
+        for weekday in range(4):
             availabilities.append(
                 TeacherAvailability(
                     teacher=teacher_a,
@@ -1539,8 +1537,6 @@ class ScheduleTeacherFallbackTestCase(DatabaseTestCase):
             [
                 base_name,
                 course,
-                class_group,
-                room,
                 teacher_a,
                 teacher_b,
                 *availabilities,
@@ -1548,12 +1544,27 @@ class ScheduleTeacherFallbackTestCase(DatabaseTestCase):
         )
         db.session.commit()
 
-        created = generate_schedule(course)
+        start = datetime(2025, 9, 1, 8, 0, 0)
+        end = datetime(2025, 9, 1, 10, 0, 0)
 
-        self.assertEqual(len(created), 3)
-        teacher_counts = Counter(session.teacher_id for session in created)
-        self.assertLessEqual(teacher_counts.get(teacher_a.id, 0), 1)
-        self.assertGreaterEqual(teacher_counts.get(teacher_b.id, 0), 2)
+        allocation_state = TeacherAllocationState(course)
+        _set_allocation_state(course, allocation_state)
+        try:
+            selections: list[int] = []
+            for day_offset in range(4):
+                segment_start = start + timedelta(days=day_offset)
+                segment_end = end + timedelta(days=day_offset)
+                chosen = find_available_teacher(course, segment_start, segment_end)
+                self.assertIsNotNone(chosen)
+                selections.append(chosen.id)  # type: ignore[arg-type]
+                allocation_state.consume(chosen.id, course.session_length_hours)
+
+            self.assertEqual(selections[0], teacher_b.id)
+            self.assertEqual(selections[1], teacher_b.id)
+            self.assertEqual(selections.count(teacher_b.id), 3)
+            self.assertEqual(selections.count(teacher_a.id), 1)
+        finally:
+            _clear_allocation_state(course)
 
 
 class ScheduleGenerationFailureTestCase(DatabaseTestCase):
