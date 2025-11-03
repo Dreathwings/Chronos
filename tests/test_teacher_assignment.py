@@ -1928,6 +1928,62 @@ class TeacherAllocationQuotaTestCase(DatabaseTestCase):
             places=4,
         )
 
+    def test_course_estimates_weekly_hour_targets_per_teacher(self) -> None:
+        base_name = CourseName(name="Probabilités")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=6,
+            semester="S1",
+            configured_name=base_name,
+        )
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        week_one = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=2)
+        week_two = CourseAllowedWeek(week_start=date(2025, 9, 8), sessions_target=4)
+        course.allowed_weeks.extend([week_one, week_two])
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=4),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=8),
+            ]
+        )
+
+        db.session.add_all([base_name, course, teacher_a, teacher_b, week_one, week_two])
+        db.session.commit()
+
+        weekly_hours = course.teacher_weekly_hour_targets
+        first_week = week_one.week_start
+        second_week = week_two.week_start
+
+        self.assertIn(first_week, weekly_hours)
+        self.assertIn(second_week, weekly_hours)
+
+        expected_share_a = 4 / (2 * 6)
+        expected_share_b = 8 / (2 * 6)
+
+        self.assertAlmostEqual(
+            weekly_hours[first_week].get(teacher_a.id, 0.0),
+            2 * expected_share_a * 2,
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_hours[first_week].get(teacher_b.id, 0.0),
+            2 * expected_share_b * 2,
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_hours[second_week].get(teacher_a.id, 0.0),
+            4 * expected_share_a * 2,
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_hours[second_week].get(teacher_b.id, 0.0),
+            4 * expected_share_b * 2,
+            places=4,
+        )
+
     def test_session_occurrence_goal_scales_with_groups_and_teachers(self) -> None:
         base_name = CourseName(name="Projet SAE")
         course = Course(

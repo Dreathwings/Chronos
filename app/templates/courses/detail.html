@@ -222,7 +222,7 @@
                   <div class="fw-semibold small mb-1">{{ week.label }}</div>
                   <ul class="list-unstyled mb-0 small">
                     {% for entry in week.entries %}
-                    <li>{{ entry.name }} : {{ '%.2f' % entry.value }} séance(s)</li>
+                    <li>{{ entry.name }} : {{ '%.2f' % entry.sessions }} séance(s) — {{ '%.2f' % entry.hours }} h</li>
                     {% endfor %}
                   </ul>
                 </div>

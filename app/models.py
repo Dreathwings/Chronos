@@ -623,6 +623,27 @@ class Course(db.Model, TimeStampedModel):
         return weekly_targets
 
     @property
+    def teacher_weekly_hour_targets(self) -> dict[date, dict[int, float]]:
+        """Volume horaire hebdomadaire estimé pour chaque enseignant."""
+
+        session_length = float(self.session_length_hours or 0.0)
+        if session_length <= 0:
+            return {}
+
+        weekly_sessions = self.teacher_weekly_session_targets
+        weekly_hours: dict[date, dict[int, float]] = {}
+        for week_start, session_map in weekly_sessions.items():
+            hour_map: dict[int, float] = {}
+            for teacher_id, session_count in session_map.items():
+                hours = max(float(session_count), 0.0) * session_length
+                if hours <= 0:
+                    continue
+                hour_map[teacher_id] = hours
+            if hour_map:
+                weekly_hours[week_start] = hour_map
+        return weekly_hours
+
+    @property
     def average_weekly_sessions(self) -> float:
         """Nombre moyen de séances prévues par semaine sur l'ensemble du cours."""
 

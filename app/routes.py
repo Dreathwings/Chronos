@@ -2693,6 +2693,8 @@ def course_detail(course_id: int):
         ] = allowed.effective_sessions(default_week_target)
 
     teacher_weekly_targets_map = course.teacher_weekly_session_targets
+    teacher_weekly_hours_map = course.teacher_weekly_hour_targets
+    session_length = float(course.session_length_hours or 0.0)
     teacher_name_map = {
         teacher.id: teacher.name
         for teacher in teachers
@@ -2708,7 +2710,18 @@ def course_detail(course_id: int):
             teacher_name = teacher_name_map.get(teacher_id)
             if not teacher_name:
                 continue
-            entries.append({"name": teacher_name, "value": float(value)})
+            sessions_value = float(value)
+            hours_map = teacher_weekly_hours_map.get(week_start, {})
+            hours_value = hours_map.get(teacher_id)
+            if hours_value is None and session_length > 0:
+                hours_value = sessions_value * session_length
+            entries.append(
+                {
+                    "name": teacher_name,
+                    "sessions": sessions_value,
+                    "hours": float(hours_value) if hours_value is not None else 0.0,
+                }
+            )
         if entries:
             week_end = week_start + timedelta(days=6)
             teacher_weekly_targets_display.append(
