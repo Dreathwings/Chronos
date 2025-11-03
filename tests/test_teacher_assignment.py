@@ -2407,5 +2407,114 @@ class TeacherAllocationStateSessionsTestCase(DatabaseTestCase):
         _clear_allocation_state(course)
 
 
+class HalfGroupTeacherPreferenceTestCase(DatabaseTestCase):
+    def test_prefers_same_teacher_for_sibling_half_groups(self) -> None:
+        base_name = CourseName(name="Programmation")
+        course = Course(
+            name=Course.compose_name("TP", base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=4,
+            semester="S1",
+            configured_name=base_name,
+        )
+        allowed_week = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=2)
+        class_group = ClassGroup(name="INFO1", size=32)
+        link = CourseClassLink(class_group=class_group, group_count=2)
+        room = Room(name="Labo 101", capacity=18)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            ),
+        ]
+
+        course.allowed_weeks.append(allowed_week)
+        course.class_links.append(link)
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=12),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=8),
+            ]
+        )
+        course.teachers.extend([teacher_a, teacher_b])
+        link.teacher_a = teacher_a
+        link.teacher_b = teacher_b
+
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                class_group,
+                link,
+                room,
+                teacher_a,
+                teacher_b,
+                allowed_week,
+                *availabilities,
+            ]
+        )
+        db.session.commit()
+
+        state = TeacherAllocationState(course)
+        _set_allocation_state(course, state)
+
+        start_a = datetime.combine(allowed_week.week_start, time(8, 0))
+        end_a = start_a + timedelta(hours=2)
+        teacher_first = find_available_teacher(
+            course,
+            start_a,
+            end_a,
+            link=link,
+            subgroup_label="A",
+            target_class_ids={class_group.id},
+        )
+
+        self.assertIsNotNone(teacher_first)
+        assert teacher_first is not None
+        self.assertEqual(teacher_first.id, teacher_a.id)
+
+        session_a = Session(
+            course=course,
+            teacher=teacher_first,
+            room=room,
+            class_group=class_group,
+            subgroup_label="A",
+            start_time=start_a,
+            end_time=end_a,
+        )
+        session_a.attendees = [class_group]
+        db.session.add(session_a)
+        db.session.flush()
+        state.consume_session(session_a)
+
+        start_b = datetime.combine(allowed_week.week_start, time(13, 30))
+        end_b = start_b + timedelta(hours=2)
+        teacher_second = find_available_teacher(
+            course,
+            start_b,
+            end_b,
+            link=link,
+            subgroup_label="B",
+            target_class_ids={class_group.id},
+        )
+
+        self.assertIsNotNone(teacher_second)
+        assert teacher_second is not None
+        self.assertEqual(teacher_second.id, teacher_a.id)
+
+        _clear_allocation_state(course)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1560,6 +1560,7 @@ def find_available_teacher(
                 seen.add(teacher_id)
 
     candidates: list[Teacher] = []
+    canonical_week = TeacherAllocationState._canonical_week(start)
     if target_class_ids:
         target_label = _normalise_label(subgroup_label)
         existing_teachers: list[Teacher] = []
@@ -1582,6 +1583,39 @@ def find_available_teacher(
             existing_teachers.append(teacher)
             seen_existing.add(teacher.id)
         _append_unique(candidates, existing_teachers)
+
+        if (
+            course.uses_half_groups
+            and target_label
+            and len(target_class_ids) == 1
+        ):
+            sibling_teachers: list[Teacher] = []
+            seen_sibling: set[int] = set()
+            for session in sorted(
+                course.sessions,
+                key=lambda s: (s.start_time, s.id or 0),
+            ):
+                if session.teacher is None:
+                    continue
+                if _session_attendee_ids(session) != target_class_ids:
+                    continue
+                session_label = _normalise_label(session.subgroup_label)
+                if not session_label or session_label == target_label:
+                    continue
+                if canonical_week is not None:
+                    session_week = TeacherAllocationState._canonical_week(
+                        session.start_time
+                    )
+                    if session_week != canonical_week:
+                        continue
+                teacher = session.teacher
+                teacher_id = teacher.id
+                if teacher_id is None or teacher_id in seen_existing or teacher_id in seen_sibling:
+                    continue
+                sibling_teachers.append(teacher)
+                seen_sibling.add(teacher_id)
+            if sibling_teachers:
+                _append_unique(candidates, sibling_teachers)
 
     def _candidate_priority(teacher: Teacher) -> tuple[float, float, str]:
         if allocation_state:
