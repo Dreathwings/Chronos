@@ -1831,9 +1831,13 @@ class TeacherAllocationQuotaTestCase(DatabaseTestCase):
 
         self.assertEqual(course.session_occurrence_goal, 6)
 
+        total_targets = course.teacher_total_session_targets
+        self.assertAlmostEqual(total_targets.get(teacher_a.id, 0.0), 2.0)
+        self.assertAlmostEqual(total_targets.get(teacher_b.id, 0.0), 4.0)
+
         targets = course.teacher_session_targets
-        self.assertAlmostEqual(targets.get(teacher_a.id, 0.0), 2.0)
-        self.assertAlmostEqual(targets.get(teacher_b.id, 0.0), 4.0)
+        self.assertAlmostEqual(targets.get(teacher_a.id, 0.0), 2.0 / 6.0, places=4)
+        self.assertAlmostEqual(targets.get(teacher_b.id, 0.0), 4.0 / 6.0, places=4)
 
         distribution = course.teacher_session_distribution
         self.assertAlmostEqual(distribution.get(teacher_a.id, 0.0), 2.0 / 6.0, places=4)

@@ -315,11 +315,13 @@ class TeacherAllocationState:
         self.course = course
         self.targets = dict(course.teacher_allocation_map)
         self.remaining = {teacher_id: float(hours) for teacher_id, hours in self.targets.items()}
-        self.session_targets = dict(course.teacher_session_targets)
-        self.session_distribution = dict(course.teacher_session_distribution)
+        self.session_share_map = dict(course.teacher_session_targets)
+        self.session_distribution = dict(self.session_share_map)
+        total_session_targets = dict(course.teacher_total_session_targets)
+        self.session_targets = dict(total_session_targets)
         self.session_remaining = {
             teacher_id: float(target)
-            for teacher_id, target in self.session_targets.items()
+            for teacher_id, target in total_session_targets.items()
         }
         self.weekly_session_average = max(float(course.average_weekly_sessions or 0.0), 0.0)
         group_factor = float(getattr(course, "session_group_factor", 1) or 1)

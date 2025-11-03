@@ -508,54 +508,69 @@ class Course(db.Model, TimeStampedModel):
         return mapping
 
     @property
-    def session_occurrence_goal(self) -> int:
-        """Nombre total d'occurrences visées pour ce cours."""
-
-        requested = max(int(self.sessions_required or 0), 0)
-        weekly_total = 0
+    def _requested_weekly_session_total(self) -> int:
+        total = 0
         for entry in self.allowed_weeks:
             value = entry.sessions_target
             if value is None:
                 continue
             try:
-                weekly_total += max(int(value), 0)
+                total += max(int(value), 0)
             except (TypeError, ValueError):
                 continue
-        per_group_goal = max(requested, weekly_total)
+        requested = max(int(self.sessions_required or 0), 0)
+        return max(requested, total)
+
+    @property
+    def session_occurrence_goal(self) -> int:
+        """Nombre total d'occurrences visées pour ce cours."""
+
+        per_group_goal = self._requested_weekly_session_total
         return per_group_goal * self.session_group_factor * self.session_teacher_factor
 
     @property
-    def teacher_session_targets(self) -> dict[int, float]:
-        """Nombre de séances à générer pour chaque enseignant."""
+    def teacher_total_session_targets(self) -> dict[int, float]:
+        """Nombre total de séances à générer pour chaque enseignant."""
 
         session_length = float(self.session_length_hours or 0.0)
-        targets: dict[int, float] = {}
+        totals: dict[int, float] = {}
         if session_length <= 0:
             return {teacher_id: 0.0 for teacher_id in self.teacher_allocation_map}
 
         for teacher_id, hours in self.teacher_allocation_map.items():
             hours_value = max(float(hours), 0.0)
-            targets[teacher_id] = hours_value / session_length
-        return targets
+            totals[teacher_id] = hours_value / session_length
+        return totals
+
+    @property
+    def teacher_session_targets(self) -> dict[int, float]:
+        """Part de séances à assurer par enseignant sur l'ensemble du cours."""
+
+        totals = self.teacher_total_session_targets
+        total_occurrences = max(float(self.session_occurrence_goal or 0), 0.0)
+        if total_occurrences <= 0:
+            return {teacher_id: 0.0 for teacher_id in totals}
+
+        shares: dict[int, float] = {}
+        for teacher_id, total in totals.items():
+            share = max(float(total), 0.0) / total_occurrences
+            shares[teacher_id] = share
+        return shares
 
     @property
     def teacher_session_distribution(self) -> dict[int, float]:
         """Part de séances par enseignant en fonction de leur quota horaire."""
 
-        occurrences = self.session_occurrence_goal
-        if occurrences <= 0:
-            return {teacher_id: 0.0 for teacher_id in self.teacher_allocation_map}
-
         distribution: dict[int, float] = {}
-        for teacher_id, target in self.teacher_session_targets.items():
-            distribution[teacher_id] = max(target, 0.0) / occurrences
+        for teacher_id, share in self.teacher_session_targets.items():
+            distribution[teacher_id] = max(float(share), 0.0)
         return distribution
 
     @property
     def teacher_weekly_session_targets(self) -> dict[date, dict[int, float]]:
         """Répartition hebdomadaire estimée des séances par enseignant."""
 
-        distribution = self.teacher_session_distribution
+        distribution = self.teacher_session_targets
         if not distribution:
             return {}
 

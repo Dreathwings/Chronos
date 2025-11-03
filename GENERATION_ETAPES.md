@@ -24,7 +24,7 @@
      - SAE : une occurrence par classe mobilisant deux enseignants en simultané.
      - TD : une occurrence par classe.
      - TP : une occurrence par demi-groupe de chaque classe.
-   - Conversion des heures cibles en nombre de séances à assurer par enseignant : volume horaire ÷ durée d'une séance ÷ occurrences visées en tenant compte de ces multiplicateurs.
+   - Conversion des heures cibles en nombre de séances à assurer par enseignant : volume horaire ÷ durée d'une séance ÷ somme de toutes les séances prévues sur les semaines sélectionnées (après application des multiplicateurs groupes/enseignants).
    - Projection de cette répartition sur chaque semaine déclarée afin d'estimer le volume de séances attendu par enseignant.
    - Détermination du nombre maximal de groupes hebdomadaires supportables par enseignant (volume horaire ÷ durée d'une séance ÷ objectif hebdomadaire) et exclusion des candidats dépassant ce plafond pour la semaine considérée.
    - Respect des allocations d'heures et de séances par enseignant et bascule automatique vers un autre intervenant lorsque le quota est atteint.
