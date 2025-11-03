@@ -6,7 +6,27 @@ from datetime import datetime, timedelta
 from math import ceil
 from typing import Any, Iterable, Mapping, MutableMapping
 
-from ortools.sat.python import cp_model
+COURSE_TYPE_PRIORITY: dict[str, int] = {
+    "TD": 0,
+    "TP": 1,
+    "SAE": 1,
+}
+
+
+def _course_type_priority(course_type: Any) -> int | None:
+    if not course_type:
+        return None
+    return COURSE_TYPE_PRIORITY.get(str(course_type).upper())
+
+
+def _normalise_chronology_key(key: Any) -> tuple[Any, ...] | None:
+    if key is None:
+        return None
+    if isinstance(key, tuple):
+        return key
+    if isinstance(key, list):
+        return tuple(key)
+    return (key,)
 
 
 def to_slots(
@@ -50,6 +70,8 @@ def build_incremental_model(
 ) -> cp_model.CpModel:
     """Build a CP-SAT model for incremental schedule generation."""
 
+    from ortools.sat.python import cp_model
+
     model = cp_model.CpModel()
     slot_minutes = int(params.get("slot_minutes", 30))
     day0 = params.get("day0")
@@ -62,6 +84,9 @@ def build_incremental_model(
     group_intervals: defaultdict[int, list[cp_model.IntervalVar]] = defaultdict(list)
     room_intervals: defaultdict[int, list[cp_model.IntervalVar]] = defaultdict(list)
     objective_terms: list[cp_model.LinearExpr] = []
+    chronology_buckets: defaultdict[
+        tuple[int, tuple[Any, ...]], list[dict[str, Any]]
+    ] = defaultdict(list)
 
     # Register locked sessions as immutable intervals.
     for index, session in enumerate(locked_sessions):
@@ -85,6 +110,14 @@ def build_incremental_model(
         group_intervals[int(group_id)].append(interval)
         if freeze_room and room_id is not None:
             room_intervals[int(room_id)].append(interval)
+
+        chronology_key = _normalise_chronology_key(session.get("chronology_key"))
+        priority = _course_type_priority(session.get("course_type"))
+        if chronology_key is not None and priority is not None:
+            bucket_key = (int(group_id), chronology_key)
+            chronology_buckets[bucket_key].append(
+                {"priority": priority, "start": start_var}
+            )
 
     # Create variables for sessions to be scheduled.
     for index, session in enumerate(new_sessions):
@@ -173,6 +206,18 @@ def build_incremental_model(
             if penalty_value:
                 objective_terms.append(penalty_value * (1 - keep_room))
 
+        chronology_key = _normalise_chronology_key(session.get("chronology_key"))
+        priority = _course_type_priority(session.get("course_type"))
+        if (
+            chronology_key is not None
+            and priority is not None
+            and group_id is not None
+        ):
+            bucket_key = (int(group_id), chronology_key)
+            chronology_buckets[bucket_key].append(
+                {"priority": priority, "start": start_var}
+            )
+
     for teacher_id, intervals in teacher_intervals.items():
         if len(intervals) > 1:
             model.AddNoOverlap(intervals)
@@ -182,6 +227,15 @@ def build_incremental_model(
     for room_id, intervals in room_intervals.items():
         if len(intervals) > 1:
             model.AddNoOverlap(intervals)
+
+    for entries in chronology_buckets.values():
+        if len(entries) < 2:
+            continue
+        sorted_entries = sorted(entries, key=lambda item: item["priority"])
+        for idx, earlier in enumerate(sorted_entries):
+            for later in sorted_entries[idx + 1 :]:
+                if earlier["priority"] < later["priority"]:
+                    model.Add(earlier["start"] <= later["start"])
 
     if objective_terms:
         model.Minimize(cp_model.LinearExpr.Sum(objective_terms))
@@ -198,6 +252,8 @@ def solve_model(
     seed: int | None = None,
 ) -> tuple[cp_model.CpSolver, int]:
     """Solve the given model with CP-SAT."""
+
+    from ortools.sat.python import cp_model
 
     solver = cp_model.CpSolver()
     if time_limit_s is not None:

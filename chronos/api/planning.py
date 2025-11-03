@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Iterable, MutableMapping
+from typing import Any, Iterable, Mapping, MutableMapping
 
 from flask import current_app, jsonify, request
-from ortools.sat.python import cp_model
 from sqlalchemy import func
 
 from app import db
@@ -21,14 +20,32 @@ from chronos.solver.incremental import (
 
 WEEK_MINUTES = 7 * 24 * 60
 
-_STATUS_LABELS = {
-    cp_model.OPTIMAL: "OPTIMAL",
-    cp_model.FEASIBLE: "FEASIBLE",
-    cp_model.INFEASIBLE: "INFEASIBLE",
-    cp_model.MODEL_INVALID: "MODEL_INVALID",
-    cp_model.UNKNOWN: "UNKNOWN",
-}
 
+def _normalise_semester(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = value.strip().upper()
+    return cleaned or None
+
+
+def _chronology_key_for_course(course: Any) -> tuple[Any, Any, Any] | None:
+    if course is None:
+        return None
+    semester = _normalise_semester(getattr(course, "semester", None))
+    course_name_id = getattr(course, "course_name_id", None)
+    if course_name_id is not None:
+        return ("course-name-id", int(course_name_id), semester)
+    configured = getattr(course, "configured_name", None)
+    configured_name = getattr(configured, "name", None) if configured is not None else None
+    if configured_name:
+        return ("course-name", configured_name.lower(), semester)
+    course_id = getattr(course, "id", None)
+    if course_id is not None:
+        return ("course-id", int(course_id), semester)
+    course_name = (getattr(course, "name", "") or "").strip().lower()
+    if course_name:
+        return ("course-name", course_name, semester)
+    return None
 
 def _parse_week_label(label: str) -> datetime:
     try:
@@ -101,6 +118,7 @@ def _build_new_session_payload(
     total_slots: int,
     soft_lock: bool,
 ) -> MutableMapping[str, Any]:
+    course = getattr(session_obj, "course", None)
     start_dt = getattr(session_obj, "start_dt", None) or getattr(
         session_obj, "start_time", None
     )
@@ -127,6 +145,8 @@ def _build_new_session_payload(
         "room_id": getattr(session_obj, "room_id", None),
         "original_start_dt": start_dt,
         "original_end_dt": end_dt,
+        "course_type": (getattr(course, "course_type", None) or None),
+        "chronology_key": _chronology_key_for_course(course),
     }
 
     room_id = getattr(session_obj, "room_id", None)
@@ -142,8 +162,8 @@ def _build_new_session_payload(
     return payload
 
 
-def _status_label(status: int) -> str:
-    return _STATUS_LABELS.get(status, f"STATUS_{status}")
+def _status_label(status: int, mapping: Mapping[int, str]) -> str:
+    return mapping.get(status, f"STATUS_{status}")
 
 
 @api_bp.post("/generate")
@@ -151,6 +171,8 @@ def generate_planning() -> tuple[Any, int]:
     mode = request.args.get("mode")
     if mode != "incremental":
         return jsonify({"error": "Unsupported mode"}), 400
+
+    from ortools.sat.python import cp_model
 
     base_version_label = request.args.get("base_version")
     if not base_version_label:
@@ -246,6 +268,8 @@ def generate_planning() -> tuple[Any, int]:
             "teacher_id": session.teacher_id,
             "group_id": session.group_id,
             "room_id": session.room_id,
+            "course_type": getattr(getattr(session, "course", None), "course_type", None),
+            "chronology_key": _chronology_key_for_course(getattr(session, "course", None)),
         }
         for session in locked_sessions
     ]
@@ -264,7 +288,14 @@ def generate_planning() -> tuple[Any, int]:
         return jsonify({"error": str(exc)}), 400
 
     solver, status = solve_model(model, time_limit_s, workers, seed)
-    status_label = _status_label(status)
+    status_labels = {
+        cp_model.OPTIMAL: "OPTIMAL",
+        cp_model.FEASIBLE: "FEASIBLE",
+        cp_model.INFEASIBLE: "INFEASIBLE",
+        cp_model.MODEL_INVALID: "MODEL_INVALID",
+        cp_model.UNKNOWN: "UNKNOWN",
+    }
+    status_label = _status_label(status, status_labels)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return jsonify({"status": status_label, "error": "No feasible solution"}), 409
