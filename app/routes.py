@@ -4,7 +4,6 @@ import json
 import math
 import threading
 from collections import OrderedDict
-from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, List, MutableSequence
 
@@ -45,22 +44,16 @@ from .models import (
     SEMESTER_CHOICES,
     semester_date_window,
 )
-from .progress import (
-    progress_registry,
-    ScheduleProgressSlice,
-    ScheduleProgressTracker,
-)
+from .progress import progress_registry, ScheduleProgressTracker
 from .scheduler import (
     SCHEDULE_SLOTS,
     START_TIMES,
-    GenerationCancelled,
     fits_in_windows,
     format_class_label,
     generate_schedule,
     has_weekly_course_conflict,
     overlaps,
     respects_weekly_chronology,
-    _week_start_for,
 )
 from .utils import (
     parse_unavailability_ranges,
@@ -878,7 +871,7 @@ def dashboard():
             options.append({"value": "ALL", "label": option_label})
         else:
             for link in links:
-                for subgroup_label in course.group_labels_for(link.class_group):
+                for subgroup_label in link.group_labels():
                     value_suffix = subgroup_label or ""
                     option_value = f"{link.class_group_id}:{value_suffix}"
                     base_label = (
@@ -1010,17 +1003,9 @@ def dashboard():
                 if link is None:
                     flash("Associez la classe au cours avant de planifier", "danger")
                     return redirect(url_for("main.dashboard"))
-                valid_labels = {
-                    label or None for label in course.group_labels_for(class_group)
-                }
+                valid_labels = {label or None for label in link.group_labels()}
                 if subgroup_label not in valid_labels:
-                    if course.uses_half_groups:
-                        message = (
-                            "Choisissez un groupe A ou B correspondant à la configuration"
-                        )
-                    else:
-                        message = "Sélectionnez la classe entière pour ce cours"
-                    flash(message, "danger")
+                    flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
                     return redirect(url_for("main.dashboard"))
                 class_groups = [class_group]
                 primary_class = class_group
@@ -1060,9 +1045,6 @@ def dashboard():
                     "job_id": tracker.job_id,
                     "status_url": url_for(
                         "main.schedule_progress_status", job_id=tracker.job_id
-                    ),
-                    "cancel_url": url_for(
-                        "main.schedule_progress_cancel", job_id=tracker.job_id
                     ),
                     "redirect_url": url_for("main.dashboard"),
                     "label": "Génération globale",
@@ -2051,9 +2033,6 @@ def generation_overview():
                     "status_url": url_for(
                         "main.schedule_progress_status", job_id=tracker.job_id
                     ),
-                    "cancel_url": url_for(
-                        "main.schedule_progress_cancel", job_id=tracker.job_id
-                    ),
                     "redirect_url": url_for("main.generation_overview"),
                     "label": "Génération globale",
                 }
@@ -2171,8 +2150,7 @@ def generation_overview():
                     continue
                 errors.append(str(entry.get("message", "")).strip())
                 suggestions.extend(entry.get("suggestions", []) or [])
-        error_list = _unique(errors)
-        
+
         class_group_ids = [
             link.class_group_id
             for link in course.class_links
@@ -2183,8 +2161,7 @@ def generation_overview():
                 "course": course,
                 "status": status,
                 "latest_log": latest_log,
-                "errors": error_list,
-                "error_count": len(error_list),
+                "errors": _unique(errors),
                 "suggestions": _unique(suggestions),
                 "sessions_count": len(course.sessions),
                 "scheduled_hours": scheduled_hours,
@@ -2316,20 +2293,8 @@ def schedule_progress_status(job_id: str):
             "message": snapshot.message,
             "detail": detail_text,
             "finished": snapshot.finished,
-            "current_week_label": snapshot.current_week_label,
-            "current_week_sessions": snapshot.current_week_sessions,
-            "cancel_requested": snapshot.cancel_requested,
         }
     )
-
-
-@bp.post("/generation/progress/<string:job_id>/cancel")
-def schedule_progress_cancel(job_id: str):
-    tracker = progress_registry.get(job_id)
-    if tracker is None:
-        return jsonify({"error": "Progression introuvable"}), 404
-    tracker.request_cancel("Arrêt de la génération en cours…")
-    return jsonify({"status": "accepted", "cancel_requested": True})
 
 
 @bp.route("/matiere/<int:course_id>", methods=["GET", "POST"])
@@ -2366,6 +2331,13 @@ def course_detail(course_id: int):
             course.session_length_hours = int(request.form.get("session_length_hours", course.session_length_hours))
             course.course_type = _normalise_course_type(request.form.get("course_type"))
             course.semester = _normalise_semester(request.form.get("semester"))
+            session_goal = max(
+                _parse_non_negative_int(
+                    request.form.get("sessions_per_week"), course.sessions_per_week
+                ),
+                1,
+            )
+            course.sessions_per_week = session_goal
             raw_color = (request.form.get("color") or "").strip()
             course.color = raw_color if raw_color else None
             course.configured_name = selected_course_name
@@ -2410,10 +2382,6 @@ def course_detail(course_id: int):
                     request.form.get(f"teacher_hours_{teacher.id}"),
                     current_default,
                 )
-            session_goal = _parse_non_negative_int(
-                request.form.get("sessions_required"),
-                max(int(course.sessions_required or 0), 0),
-            )
             existing_week_targets = {
                 allowed.week_start: allowed.effective_sessions(session_goal)
                 for allowed in course.allowed_weeks
@@ -2460,9 +2428,6 @@ def course_detail(course_id: int):
                     "job_id": tracker.job_id,
                     "status_url": url_for(
                         "main.schedule_progress_status", job_id=tracker.job_id
-                    ),
-                    "cancel_url": url_for(
-                        "main.schedule_progress_cancel", job_id=tracker.job_id
                     ),
                     "redirect_url": url_for("main.course_detail", course_id=course.id),
                     "label": course.name,
@@ -2522,17 +2487,9 @@ def course_detail(course_id: int):
                 if link is None:
                     flash("Associez d'abord la classe au cours", "danger")
                     return redirect(url_for("main.course_detail", course_id=course_id))
-                valid_labels = {
-                    label or None for label in course.group_labels_for(class_group)
-                }
+                valid_labels = {label or None for label in link.group_labels()}
                 if subgroup_label not in valid_labels:
-                    if course.uses_half_groups:
-                        message = (
-                            "Choisissez un sous-groupe correspondant à la configuration"
-                        )
-                    else:
-                        message = "Sélectionnez la classe entière pour ce cours"
-                    flash(message, "danger")
+                    flash("Choisissez un sous-groupe correspondant à la configuration", "danger")
                     return redirect(url_for("main.course_detail", course_id=course_id))
                 class_groups = [class_group]
                 primary_class = class_group
@@ -2671,7 +2628,7 @@ def course_detail(course_id: int):
 
     week_ranges.sort(key=lambda span: span[0])
 
-    default_week_target = max(int(course.sessions_required or 0), 0)
+    default_week_target = max(int(course.sessions_per_week or 0), 0)
     course_week_session_map = {
         start.isoformat(): default_week_target for start, _ in week_ranges
     }
@@ -2691,42 +2648,6 @@ def course_detail(course_id: int):
         course_week_session_map[
             allowed.week_start.isoformat()
         ] = allowed.effective_sessions(default_week_target)
-
-    teacher_weekly_targets_map = course.teacher_weekly_session_targets
-    teacher_weekly_hours_map = course.teacher_weekly_hour_targets
-    session_length = float(course.session_length_hours or 0.0)
-    teacher_name_map = {
-        teacher.id: teacher.name
-        for teacher in teachers
-        if teacher.id is not None and teacher.name
-    }
-    teacher_weekly_targets_display: list[dict[str, object]] = []
-    for week_start in sorted(teacher_weekly_targets_map.keys()):
-        entries = []
-        for teacher_id, value in sorted(
-            teacher_weekly_targets_map[week_start].items(),
-            key=lambda item: teacher_name_map.get(item[0], "").lower(),
-        ):
-            teacher_name = teacher_name_map.get(teacher_id)
-            if not teacher_name:
-                continue
-            sessions_value = float(value)
-            hours_map = teacher_weekly_hours_map.get(week_start, {})
-            hours_value = hours_map.get(teacher_id)
-            if hours_value is None and session_length > 0:
-                hours_value = sessions_value * session_length
-            entries.append(
-                {
-                    "name": teacher_name,
-                    "sessions": sessions_value,
-                    "hours": float(hours_value) if hours_value is not None else 0.0,
-                }
-            )
-        if entries:
-            week_end = week_start + timedelta(days=6)
-            teacher_weekly_targets_display.append(
-                {"label": _week_label(week_start, week_end), "entries": entries}
-            )
 
     remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
     generation_display_status = _effective_generation_status(
@@ -2762,7 +2683,6 @@ def course_detail(course_id: int):
         course_week_session_map=course_week_session_map,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
-        teacher_weekly_targets=teacher_weekly_targets_display,
     )
 
 
@@ -2869,10 +2789,6 @@ def _run_course_schedule_job(
             if course is None:
                 tracker.fail("Cours introuvable.")
                 return
-            if tracker.cancel_requested():
-                tracker.mark_cancelled("Génération interrompue par l'utilisateur.")
-                db.session.rollback()
-                return
             created_sessions = generate_schedule(
                 course,
                 window_start=window_start,
@@ -2888,9 +2804,6 @@ def _run_course_schedule_job(
         except ValueError as exc:
             db.session.rollback()
             tracker.fail(str(exc))
-        except GenerationCancelled:
-            db.session.rollback()
-            tracker.mark_cancelled("Génération interrompue par l'utilisateur.")
         except Exception:  # pragma: no cover - defensive logging
             db.session.rollback()
             tracker.fail("Erreur inattendue lors de la génération.")
@@ -2920,86 +2833,6 @@ def _enqueue_course_schedule(
     return tracker
 
 
-def _default_academic_week_start(reference: date | None) -> date:
-    if reference is None:
-        today = date.today()
-    else:
-        today = reference
-    year = today.year if today.month >= 9 else today.year - 1
-    base = date(year, 9, 1)
-    return _week_start_for(base)
-
-
-def _build_course_week_plan(course: Course) -> list[tuple[date, date, int]]:
-    payload = course.allowed_week_payload
-    week_map: dict[date, tuple[date, int]] = {}
-    if payload:
-        for week_start, week_end, weekly_goal in payload:
-            if week_start is None:
-                continue
-            canonical_start = _week_start_for(week_start)
-            end = week_end or (canonical_start + timedelta(days=6))
-            try:
-                goal = max(int(weekly_goal), 0)
-            except (TypeError, ValueError):
-                goal = 0
-            if canonical_start in week_map:
-                existing_end, existing_goal = week_map[canonical_start]
-                merged_end = max(existing_end, end)
-                week_map[canonical_start] = (merged_end, existing_goal + goal)
-            else:
-                week_map[canonical_start] = (end, goal)
-    else:
-        semester_window = course.semester_window
-        if semester_window is not None:
-            base_start, base_end = semester_window
-        else:
-            base_start = _default_academic_week_start(None)
-            base_end = base_start + timedelta(days=6)
-        goal = max(int(course.sessions_required or 0), 0)
-        week_map[_week_start_for(base_start)] = (max(base_end, base_start), goal)
-
-    ordered = []
-    for week_start, (week_end, goal) in week_map.items():
-        canonical_end = max(week_end, week_start + timedelta(days=6))
-        ordered.append((week_start, canonical_end, goal))
-    ordered.sort(key=lambda entry: entry[0])
-    return ordered
-
-
-@dataclass
-class _CourseWeekState:
-    course: Course
-    plan: list[tuple[date, date, int]]
-    pointer: int
-    active_payload: list[tuple[date, date, int]]
-    cumulative_goal: int
-    total_goal: int
-    progress_slice: ScheduleProgressSlice
-
-    def next_week_start(self) -> date | None:
-        if self.cumulative_goal >= self.total_goal:
-            return None
-        if self.pointer >= len(self.plan):
-            return None
-        return self.plan[self.pointer][0]
-
-    def advance(self) -> tuple[tuple[date, date, int], int] | None:
-        if self.pointer >= len(self.plan):
-            return None
-        entry = self.plan[self.pointer]
-        self.pointer += 1
-        self.active_payload.append(entry)
-        _, _, weekly_goal = entry
-        previous = self.cumulative_goal
-        updated = previous + max(weekly_goal, 0)
-        if updated > self.total_goal:
-            updated = self.total_goal
-        self.cumulative_goal = updated
-        delta = updated - previous
-        return entry, delta
-
-
 def _run_bulk_schedule_job(app, tracker_id: str) -> None:
     with app.app_context():
         tracker = progress_registry.get(tracker_id)
@@ -3023,86 +2856,29 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
             total_created = 0
             errors: list[str] = []
 
-            course_states: list[_CourseWeekState] = []
             for course in courses:
-                if tracker.cancel_requested():
-                    tracker.mark_cancelled("Génération interrompue par l'utilisateur.")
-                    db.session.rollback()
-                    return
-                plan = _build_course_week_plan(course)
-                if not plan:
-                    continue
-                specified_total = sum(goal for _, _, goal in plan)
-                base_occurrences = max(int(course.sessions_required or 0), 0)
-                if specified_total > 0:
-                    total_goal = specified_total
-                else:
-                    total_goal = base_occurrences
-                if total_goal <= 0:
-                    continue
+                allowed_ranges = course.allowed_week_ranges
+                window_start = allowed_ranges[0][0] if allowed_ranges else None
+                window_end = allowed_ranges[-1][1] if allowed_ranges else None
+                allowed_payload = course.allowed_week_payload or None
                 slice_progress = tracker.create_slice(
                     label=f"Planification de {course.name}"
                 )
-                state = _CourseWeekState(
-                    course=course,
-                    plan=plan,
-                    pointer=0,
-                    active_payload=[],
-                    cumulative_goal=0,
-                    total_goal=total_goal,
-                    progress_slice=slice_progress,
-                )
-                course_states.append(state)
-
-            while True:
-                if tracker.cancel_requested():
-                    tracker.mark_cancelled("Génération interrompue par l'utilisateur.")
-                    db.session.rollback()
-                    return
-                pending_starts = [
-                    state.next_week_start()
-                    for state in course_states
-                    if state.next_week_start() is not None
-                ]
-                if not pending_starts:
-                    break
-                current_week = min(pending_starts)
-                for state in course_states:
-                    if state.next_week_start() != current_week:
-                        continue
-                    result = state.advance()
-                    if result is None:
-                        continue
-                    (week_start, week_end, weekly_goal), delta = result
-                    if delta <= 0:
-                        continue
-                    course = state.course
-                    window_start = state.active_payload[0][0]
-                    window_end = state.active_payload[-1][1]
-                    allowed_payload = list(state.active_payload)
-                    try:
-                        created_sessions = generate_schedule(
-                            course,
-                            window_start=window_start,
-                            window_end=window_end,
-                            allowed_weeks=allowed_payload,
-                            progress=state.progress_slice,
-                            occurrence_limit=state.cumulative_goal,
-                            current_week=week_start,
-                        )
-                    except GenerationCancelled:
-                        tracker.mark_cancelled(
-                            "Génération interrompue par l'utilisateur."
-                        )
-                        db.session.rollback()
-                        return
-                    except ValueError as exc:
-                        errors.append(f"{course.name} : {exc}")
-                        tracker.set_current_label(None)
-                        db.session.commit()
-                        continue
-                    total_created += len(created_sessions)
+                try:
+                    created_sessions = generate_schedule(
+                        course,
+                        window_start=window_start,
+                        window_end=window_end,
+                        allowed_weeks=allowed_payload,
+                        progress=slice_progress,
+                    )
+                except ValueError as exc:
+                    errors.append(f"{course.name} : {exc}")
+                    tracker.set_current_label(None)
                     db.session.commit()
+                    continue
+                total_created += len(created_sessions)
+                db.session.commit()
 
             if errors:
                 current_app.logger.warning(
@@ -3115,6 +2891,9 @@ def _run_bulk_schedule_job(app, tracker_id: str) -> None:
                 summary = (
                     "Aucune séance n'a pu être générée avec les contraintes actuelles."
                 )
+
+            if errors:
+                summary = f"{summary} — {len(errors)} cours en erreur"
 
             tracker.complete(summary)
         except Exception:
