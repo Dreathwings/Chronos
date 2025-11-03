@@ -359,14 +359,24 @@ class Course(db.Model, TimeStampedModel):
         return self.course_type == "SAE"
 
     @property
+    def uses_half_groups(self) -> bool:
+        """Return ``True`` when the course must be split into half groups."""
+
+        return self.is_tp
+
+    @property
     def session_group_factor(self) -> int:
         """Nombre de classes ou sous-groupes concernés par chaque séance."""
 
         if self.is_cm:
             return 1
         total = 0
+        use_half_groups = self.uses_half_groups
         for link in self.class_links:
-            count = getattr(link, "group_count", 1) or 1
+            if use_half_groups:
+                count = getattr(link, "group_count", 1) or 1
+            else:
+                count = 1
             try:
                 normalised = int(count)
             except (TypeError, ValueError):
@@ -413,7 +423,9 @@ class Course(db.Model, TimeStampedModel):
         link = self.class_link_for(class_group)
         if link is None:
             return [None]
-        return link.group_labels()
+        if self.uses_half_groups:
+            return link.group_labels()
+        return [None]
 
     @property
     def preferred_rooms(self) -> list["Room"]:
@@ -445,6 +457,8 @@ class Course(db.Model, TimeStampedModel):
         link = self.class_link_for(class_group)
         if link is None:
             return None
+        if not self.uses_half_groups:
+            return None
         return link.subgroup_name_for(subgroup_label)
 
     def capacity_needed_for(self, class_group: "ClassGroup" | int) -> int:
@@ -456,7 +470,7 @@ class Course(db.Model, TimeStampedModel):
         if target is None:
             return 1
         baseline = max(target.size, 1)
-        if link and link.group_count > 1:
+        if link and link.group_count > 1 and self.uses_half_groups:
             return max(1, ceil(baseline / link.group_count))
         return max(1, baseline)
 
@@ -1490,6 +1504,8 @@ class CourseClassLink(db.Model):
         course_type = getattr(course, "course_type", None)
         if course_type == "SAE":
             return teachers
+        if course_type != "TP":
+            return teachers[:1] if teachers else []
         if self.group_count == 2:
             label = (subgroup_label or "").strip().upper()
             ordered: list[Teacher] = []
@@ -1533,7 +1549,7 @@ class CourseClassLink(db.Model):
                 ("Enseignant 2", self.teacher_b),
             ]
         teacher = self.teacher_a or self.teacher_b
-        if self.group_count == 2:
+        if course_type == "TP" and self.group_count == 2:
             return [
                 (self.subgroup_name_for("A"), self.teacher_for_label("A")),
                 (self.subgroup_name_for("B"), self.teacher_for_label("B")),

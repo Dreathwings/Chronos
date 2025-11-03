@@ -570,9 +570,9 @@
                 </option>
               {% else %}
                 {% for link in course.class_links %}
-                  {% for subgroup_label in link.group_labels() %}
+                  {% for subgroup_label in course.group_labels_for(link.class_group) %}
                   {% set value = link.class_group.id ~ ':' ~ (subgroup_label if subgroup_label else '') %}
-                  {% set subgroup_display = link.subgroup_name_for(subgroup_label) %}
+                  {% set subgroup_display = course.subgroup_name_for(link.class_group, subgroup_label) %}
                   <option value="{{ value }}">
                     {{ link.class_group.name }} — {% if subgroup_label %}{{ subgroup_display }}{% else %}classe entière{% endif %}
                   </option>

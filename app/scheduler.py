@@ -3269,7 +3269,7 @@ def generate_schedule(
         total_hours_needed = 0.0
         for link in links:
             _abort_if_cancelled(progress)
-            for subgroup_label in link.group_labels():
+            for subgroup_label in course.group_labels_for(link.class_group):
                 amount = _class_hours_needed(
                     course,
                     link.class_group,
@@ -3285,7 +3285,7 @@ def generate_schedule(
             _abort_if_cancelled(progress)
             class_group = link.class_group
             display_label = class_group.name
-            for subgroup_label in link.group_labels():
+            for subgroup_label in course.group_labels_for(class_group):
                 subgroup_display = (
                     course.subgroup_name_for(class_group, subgroup_label)
                     or subgroup_label
@@ -3318,7 +3318,7 @@ def generate_schedule(
         for link in links:
             _abort_if_cancelled(progress)
             class_group = link.class_group
-            for subgroup_label in link.group_labels():
+            for subgroup_label in course.group_labels_for(class_group):
                 _abort_if_cancelled(progress)
                 hours_needed = hours_needed_map.get((class_group.id, subgroup_label or None), 0)
                 if hours_needed == 0:
@@ -3779,7 +3779,7 @@ def generate_schedule(
         if not placement_failures:
             for link in links:
                 class_group = link.class_group
-                for subgroup_label in link.group_labels():
+                for subgroup_label in course.group_labels_for(class_group):
                     _report_one_hour_alignment(
                         course=course,
                         class_group=class_group,

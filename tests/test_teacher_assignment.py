@@ -211,6 +211,38 @@ class TeacherAssignmentTestCase(DatabaseTestCase):
         self.assertEqual([entry["id"] for entry in teachers], [teacher_b.id])
         self.assertEqual(event["extendedProps"]["teacher"], teacher_b.name)
 
+    def test_td_course_uses_full_class_even_with_half_group_configuration(self) -> None:
+        base_name = CourseName(name="Mathématiques")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=26)
+        link = CourseClassLink(class_group=class_group, group_count=2)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+
+        course.class_links.append(link)
+        db.session.add_all([course, class_group, base_name, teacher_a, teacher_b])
+        db.session.commit()
+
+        link.teacher_a = teacher_a
+        link.teacher_b = teacher_b
+        db.session.commit()
+
+        self.assertFalse(course.uses_half_groups)
+        self.assertEqual(course.session_group_factor, 1)
+        self.assertEqual(course.group_labels_for(class_group), [None])
+        self.assertIsNone(course.subgroup_name_for(class_group, None))
+        self.assertEqual(link.teacher_labels(), [("", teacher_a)])
+        self.assertEqual([t.id for t in link.preferred_teachers(None)], [teacher_a.id])
+        self.assertEqual([t.id for t in link.preferred_teachers("A")], [teacher_a.id])
+        self.assertEqual([t.id for t in link.preferred_teachers("B")], [teacher_a.id])
+
     def test_find_available_room_skips_duplicate_start_slot(self) -> None:
         course, link, class_group = self._create_tp_course()
         teacher = Teacher(name="Camille")

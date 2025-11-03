@@ -878,7 +878,7 @@ def dashboard():
             options.append({"value": "ALL", "label": option_label})
         else:
             for link in links:
-                for subgroup_label in link.group_labels():
+                for subgroup_label in course.group_labels_for(link.class_group):
                     value_suffix = subgroup_label or ""
                     option_value = f"{link.class_group_id}:{value_suffix}"
                     base_label = (
@@ -1010,9 +1010,17 @@ def dashboard():
                 if link is None:
                     flash("Associez la classe au cours avant de planifier", "danger")
                     return redirect(url_for("main.dashboard"))
-                valid_labels = {label or None for label in link.group_labels()}
+                valid_labels = {
+                    label or None for label in course.group_labels_for(class_group)
+                }
                 if subgroup_label not in valid_labels:
-                    flash("Choisissez un groupe A ou B correspondant à la configuration", "danger")
+                    if course.uses_half_groups:
+                        message = (
+                            "Choisissez un groupe A ou B correspondant à la configuration"
+                        )
+                    else:
+                        message = "Sélectionnez la classe entière pour ce cours"
+                    flash(message, "danger")
                     return redirect(url_for("main.dashboard"))
                 class_groups = [class_group]
                 primary_class = class_group
@@ -2514,9 +2522,17 @@ def course_detail(course_id: int):
                 if link is None:
                     flash("Associez d'abord la classe au cours", "danger")
                     return redirect(url_for("main.course_detail", course_id=course_id))
-                valid_labels = {label or None for label in link.group_labels()}
+                valid_labels = {
+                    label or None for label in course.group_labels_for(class_group)
+                }
                 if subgroup_label not in valid_labels:
-                    flash("Choisissez un sous-groupe correspondant à la configuration", "danger")
+                    if course.uses_half_groups:
+                        message = (
+                            "Choisissez un sous-groupe correspondant à la configuration"
+                        )
+                    else:
+                        message = "Sélectionnez la classe entière pour ce cours"
+                    flash(message, "danger")
                     return redirect(url_for("main.course_detail", course_id=course_id))
                 class_groups = [class_group]
                 primary_class = class_group
