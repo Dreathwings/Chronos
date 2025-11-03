@@ -85,6 +85,7 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     migrate.init_app(app, db)
 
     from . import models  # noqa: F401  # Ensure models registered for migrations
+    from chronos import models as chronos_models  # noqa: F401
 
     with app.app_context():
         db.create_all()
@@ -110,8 +111,11 @@ def create_app(config_class: type[Config] = Config) -> Flask:
             )
 
     from .routes import bp as main_bp
+    from chronos.api import bp as chronos_api_bp
 
     app.register_blueprint(main_bp, url_prefix=url_prefix or None)
+    api_url_prefix = f"{url_prefix}/api/chronos" if url_prefix else "/api/chronos"
+    app.register_blueprint(chronos_api_bp, url_prefix=api_url_prefix)
 
     @app.cli.command("seed")
     @with_appcontext
