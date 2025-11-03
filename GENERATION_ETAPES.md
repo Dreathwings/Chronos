@@ -34,6 +34,7 @@
    - Réservation de la salle la plus adaptée et création des séances dans la base.
    - Mise à jour du tableau hebdomadaire de progression et du pourcentage global.
    - En cas d'échec persistant en fin de semaine, déplanification ciblée des TD/TP déjà posés sur la semaine concernée pour libérer les créneaux bloquants avant une nouvelle tentative.
+   - Possibilité de désactiver le report automatique sur la semaine suivante via une option du planificateur pour conserver les erreurs sur la période courante.
 
 6. **Finalisation**
    - Vérification des heures restantes et émission d'éventuels avertissements (capacités, chronologie, indisponibilités).

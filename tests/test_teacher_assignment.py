@@ -1703,6 +1703,68 @@ class SchedulerRelocationTestCase(DatabaseTestCase):
         self.assertEqual(weekday_frequencies.get(session_start.weekday(), 0), 0)
 
 
+class ScheduleWeekRolloverOptionTestCase(DatabaseTestCase):
+    def test_generate_schedule_skips_week_rollover_when_disabled(self) -> None:
+        base_name = CourseName(name="Probabilités")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO3", size=28)
+        link = CourseClassLink(class_group=class_group)
+        course.class_links.append(link)
+
+        teacher = Teacher(name="Chloé")
+        room = Room(name="C201", capacity=35)
+
+        course.teachers.append(teacher)
+        db.session.add_all([base_name, course, class_group, teacher, room])
+        db.session.commit()
+
+        week_start = date(2025, 9, 8)
+        week_end = week_start + timedelta(days=4)
+        allowed_payload = [(week_start, week_end, 2)]
+
+        class DummyDiagnostics:
+            def failure_summary(self, default: str = "") -> str:
+                return default or "Échec simulé"
+
+        def failing_block(*args, **kwargs):
+            return [], DummyDiagnostics()
+
+        with patch("app.scheduler._schedule_block_for_day", side_effect=failing_block), patch(
+            "app.scheduler._relocate_sessions_for_groups", return_value=0
+        ) as relocate_mock:
+            with self.assertRaises(ValueError):
+                generate_schedule(
+                    course,
+                    window_start=week_start,
+                    window_end=week_end,
+                    allowed_weeks=allowed_payload,
+                    progress=NullScheduleProgress(),
+                    allow_week_rollover=False,
+                )
+            self.assertFalse(relocate_mock.called)
+
+        with patch("app.scheduler._schedule_block_for_day", side_effect=failing_block), patch(
+            "app.scheduler._relocate_sessions_for_groups", return_value=0
+        ) as relocate_mock:
+            with self.assertRaises(ValueError):
+                generate_schedule(
+                    course,
+                    window_start=week_start,
+                    window_end=week_end,
+                    allowed_weeks=allowed_payload,
+                    progress=NullScheduleProgress(),
+                    allow_week_rollover=True,
+                )
+            self.assertTrue(relocate_mock.called)
+
+
 class ScheduleTeacherFallbackTestCase(DatabaseTestCase):
     def test_generate_schedule_switches_when_preferred_quota_spent(self) -> None:
         base_name = CourseName(name="Analyse")

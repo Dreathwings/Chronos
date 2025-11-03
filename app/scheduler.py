@@ -2679,6 +2679,7 @@ def generate_schedule(
     progress: ScheduleProgress | None = None,
     occurrence_limit: int | None = None,
     current_week: date | None = None,
+    allow_week_rollover: bool = True,
 ) -> list[Session]:
     progress = progress or NullScheduleProgress()
     _abort_if_cancelled(progress)
@@ -3180,6 +3181,8 @@ def generate_schedule(
 
                         if not placed:
                             def _simulate_cm_relocation() -> bool:
+                                if not allow_week_rollover:
+                                    return False
                                 backup_created = list(created_sessions)
                                 backup_day_hours = dict(per_day_hours)
                                 backup_weekdays = Counter(weekday_frequencies)
@@ -3223,7 +3226,7 @@ def generate_schedule(
                                     weekday_frequencies.clear()
                                     weekday_frequencies.update(backup_weekdays)
 
-                            if _simulate_cm_relocation():
+                            if allow_week_rollover and _simulate_cm_relocation():
                                 relocated_hours = _relocate_sessions_for_groups(
                                     course=course,
                                     class_groups=class_groups,
@@ -3630,6 +3633,8 @@ def generate_schedule(
 
                         def _simulate_relocation_attempt() -> bool:
                             nonlocal successful_relocation_plan
+                            if not allow_week_rollover:
+                                return False
                             backup_created = list(created_sessions)
                             backup_day_hours = dict(per_day_hours)
                             backup_weekdays = Counter(weekday_frequencies)
@@ -3703,7 +3708,11 @@ def generate_schedule(
                                     return True
                             return False
 
-                        if _simulate_relocation_attempt() and successful_relocation_plan:
+                        if (
+                            allow_week_rollover
+                            and _simulate_relocation_attempt()
+                            and successful_relocation_plan
+                        ):
                             require_exact, candidate_day, base_offset = (
                                 successful_relocation_plan
                             )
@@ -3762,7 +3771,8 @@ def generate_schedule(
                                     default="Aucune option compatible trouvée."
                                 )
                         if (
-                            not week_relocation_attempted
+                            allow_week_rollover
+                            and not week_relocation_attempted
                             and canonical_week_reference is not None
                             and (course.course_type or "").upper() in {"TD", "TP"}
                         ):
