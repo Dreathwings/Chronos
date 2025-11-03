@@ -21,6 +21,7 @@
    - Recherche d'un enseignant disponible en privilégiant la continuité pour une même classe ou sous-groupe.
    - Conversion des heures cibles en nombre de séances à assurer par enseignant : volume horaire ÷ durée d'une séance ÷ occurrences visées.
    - Projection de cette répartition sur chaque semaine déclarée afin d'estimer le volume de séances attendu par enseignant.
+   - Détermination du nombre maximal de groupes hebdomadaires supportables par enseignant (volume horaire ÷ durée d'une séance ÷ objectif hebdomadaire) et exclusion des candidats dépassant ce plafond pour la semaine considérée.
    - Respect des allocations d'heures et de séances par enseignant et bascule automatique vers un autre intervenant lorsque le quota est atteint.
 
 5. **Placement définitif**

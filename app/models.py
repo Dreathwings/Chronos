@@ -572,6 +572,28 @@ class Course(db.Model, TimeStampedModel):
                 weekly_targets[canonical_week] = per_teacher
         return weekly_targets
 
+    @property
+    def average_weekly_sessions(self) -> float:
+        """Nombre moyen de séances prévues par semaine sur l'ensemble du cours."""
+
+        weekly_values = [
+            max(int(goal or 0), 0)
+            for _, _, goal in self.allowed_week_payload
+            if goal is not None
+        ]
+        positive_values = [value for value in weekly_values if value > 0]
+        if positive_values:
+            return float(sum(positive_values)) / len(positive_values)
+
+        requested = max(int(self.sessions_required or 0), 0)
+        if requested <= 0:
+            return 0.0
+
+        allowed_weeks = [span for span in self.allowed_week_ranges if span]
+        if allowed_weeks:
+            return requested / len(allowed_weeks)
+        return 1.0 if requested > 0 else 0.0
+
 
 class Session(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)

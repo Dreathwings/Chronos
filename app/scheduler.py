@@ -321,18 +321,20 @@ class TeacherAllocationState:
             teacher_id: float(target)
             for teacher_id, target in self.session_targets.items()
         }
+        self.weekly_session_average = max(float(course.average_weekly_sessions or 0.0), 0.0)
+        self.weekly_group_capacity: dict[int, float] = {}
+        self.weekly_group_assignments: dict[date, dict[int, set[tuple[int, str]]]] = defaultdict(dict)
+        for teacher_id, target in self.session_targets.items():
+            target_value = max(float(target), 0.0)
+            if self.weekly_session_average > 0:
+                capacity = target_value / self.weekly_session_average
+            elif target_value > 0:
+                capacity = math.inf
+            else:
+                capacity = 0.0
+            self.weekly_group_capacity[teacher_id] = capacity
         for session in course.sessions:
-            teacher_id = session.teacher_id
-            if teacher_id is None:
-                continue
-            duration = float(session.duration_hours)
-            if teacher_id in self.remaining:
-                self.remaining[teacher_id] = max(self.remaining[teacher_id] - duration, 0.0)
-            if teacher_id in self.session_remaining:
-                self.session_remaining[teacher_id] = max(
-                    self.session_remaining[teacher_id] - 1.0,
-                    0.0,
-                )
+            self.consume_session(session)
 
     def remaining_hours(self, teacher_id: int | None) -> float | None:
         if teacher_id is None:
@@ -378,6 +380,94 @@ class TeacherAllocationState:
                 0.0,
             )
 
+    def can_allocate_weekly_group(
+        self,
+        teacher_id: int | None,
+        start: datetime,
+        *,
+        class_group_id: int | None = None,
+        subgroup_label: str | None = None,
+        target_class_ids: Set[int] | None = None,
+    ) -> bool:
+        if teacher_id is None:
+            return False
+        if class_group_id is None and target_class_ids and len(target_class_ids) == 1:
+            class_group_id = next(iter(target_class_ids))
+        if class_group_id is None:
+            return True
+        capacity = self.weekly_group_capacity.get(teacher_id)
+        if capacity is None or math.isinf(capacity):
+            return True
+        canonical_week = self._canonical_week(start)
+        if canonical_week is None:
+            return True
+        weekly = self.weekly_group_assignments.get(canonical_week)
+        groups = weekly.get(teacher_id) if weekly else None
+        normalised = _normalise_label(subgroup_label)
+        group_key = (int(class_group_id), normalised)
+        if groups and group_key in groups:
+            return True
+        if capacity <= 0:
+            return False
+        current = len(groups) if groups else 0
+        return current + 1 <= capacity + 1e-6
+
+    def consume_session(self, session: Session) -> None:
+        teacher_id = session.teacher_id
+        if teacher_id is None:
+            return
+        duration = float(getattr(session, "duration_hours", 0.0))
+        self.consume(teacher_id, duration)
+        canonical_week = self._canonical_week(session.start_time)
+        class_group_id = self._extract_class_group_id(session)
+        if canonical_week is None or class_group_id is None:
+            return
+        self._record_weekly_assignment(
+            canonical_week,
+            teacher_id,
+            class_group_id,
+            session.subgroup_label,
+        )
+
+    @staticmethod
+    def _canonical_week(start: datetime | date | None) -> date | None:
+        if start is None:
+            return None
+        if isinstance(start, datetime):
+            base = start.date()
+        else:
+            base = start
+        return _week_start_for(base)
+
+    def _record_weekly_assignment(
+        self,
+        week_start: date | None,
+        teacher_id: int,
+        class_group_id: int,
+        subgroup_label: str | None,
+    ) -> None:
+        if week_start is None:
+            return
+        bucket = self.weekly_group_assignments.setdefault(week_start, {})
+        groups = bucket.setdefault(teacher_id, set())
+        groups.add((int(class_group_id), _normalise_label(subgroup_label)))
+
+    @staticmethod
+    def _extract_class_group_id(session: Session) -> int | None:
+        if session.class_group_id is not None:
+            return session.class_group_id
+        class_group = getattr(session, "class_group", None)
+        if class_group is not None and getattr(class_group, "id", None) is not None:
+            return class_group.id
+        attendees = getattr(session, "attendees", None)
+        if attendees:
+            candidate_ids = [
+                getattr(group, "id", None) for group in attendees if getattr(group, "id", None) is not None
+            ]
+            if len(candidate_ids) == 1:
+                return candidate_ids[0]
+        return None
+
 
 _ALLOCATION_STATE: dict[int, TeacherAllocationState] = {}
 
@@ -402,7 +492,7 @@ def _register_created_sessions(
     if not allocation_state:
         return
     for session in sessions:
-        allocation_state.consume(session.teacher_id, float(session.duration_hours))
+        allocation_state.consume_session(session)
 
 
 def _course_type_priority(course_type: str | None) -> int | None:
@@ -1466,15 +1556,31 @@ def find_available_teacher(
         return (-share_priority, -remaining_priority, teacher.name.lower())
 
     _append_unique(candidates, preferred)
-    if not candidates:
-        fallback_candidates = [
-            teacher for teacher in fallback_pool if teacher not in preferred
-        ]
-        fallback_candidates.sort(key=_candidate_priority)
-        _append_unique(candidates, fallback_candidates)
+    fallback_candidates = [
+        teacher for teacher in fallback_pool if teacher not in preferred
+    ]
+    fallback_candidates.sort(key=_candidate_priority)
+    _append_unique(candidates, fallback_candidates)
 
     for teacher in candidates:
         segments_to_check = segments or [(start, end)]
+        teacher_id = teacher.id
+        anchor_start = min(
+            (segment_start for segment_start, _ in segments_to_check),
+            default=start,
+        )
+        if (
+            allocation_state
+            and teacher_id is not None
+            and not allocation_state.can_allocate_weekly_group(
+                teacher_id,
+                anchor_start,
+                class_group_id=link.class_group_id if link is not None else None,
+                subgroup_label=subgroup_label,
+                target_class_ids=target_class_ids,
+            )
+        ):
+            continue
         if not all(
             teacher.is_available_during(segment_start, segment_end)
             for segment_start, segment_end in segments_to_check
