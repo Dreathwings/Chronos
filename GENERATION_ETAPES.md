@@ -19,6 +19,7 @@
 
 4. **Affectation des intervenants**
    - Recherche d'un enseignant disponible en privilégiant la continuité pour une même classe ou sous-groupe.
+   - Maintien du même enseignant tant que son quota de séances n'est pas épuisé avant d'envisager une réaffectation.
    - Interprétation d'une séance hebdomadaire selon le type de cours :
      - CM : une occurrence unique pour l'ensemble des classes inscrites.
      - SAE : une occurrence par classe mobilisant deux enseignants en simultané.

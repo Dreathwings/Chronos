@@ -330,6 +330,7 @@ class TeacherAllocationState:
         self.weekly_group_requirement = self.weekly_session_average / group_factor
         self.weekly_group_capacity: dict[int, float] = {}
         self.weekly_group_assignments: dict[date, dict[int, set[tuple[int, str]]]] = defaultdict(dict)
+        self._active_teacher_id: int | None = None
         for teacher_id, target in self.session_targets.items():
             target_value = max(float(target), 0.0)
             if self.weekly_group_requirement > 0:
@@ -339,7 +340,14 @@ class TeacherAllocationState:
             else:
                 capacity = 0.0
             self.weekly_group_capacity[teacher_id] = capacity
-        for session in course.sessions:
+        existing_sessions = sorted(
+            course.sessions,
+            key=lambda s: (
+                s.start_time or datetime.min,
+                s.id or 0,
+            ),
+        )
+        for session in existing_sessions:
             self.consume_session(session)
 
     def remaining_hours(self, teacher_id: int | None) -> float | None:
@@ -424,6 +432,7 @@ class TeacherAllocationState:
             return
         duration = float(getattr(session, "duration_hours", 0.0))
         self.consume(teacher_id, duration)
+        self._sync_active_teacher(teacher_id)
         canonical_week = self._canonical_week(session.start_time)
         class_group_id = self._extract_class_group_id(session)
         if canonical_week is None or class_group_id is None:
@@ -434,6 +443,51 @@ class TeacherAllocationState:
             class_group_id,
             session.subgroup_label,
         )
+
+    def has_session_capacity(self, teacher_id: int | None) -> bool:
+        if teacher_id is None:
+            return False
+        sessions = self.session_remaining.get(teacher_id)
+        if sessions is None:
+            return False
+        if sessions <= 1e-6:
+            return False
+        hours = self.remaining.get(teacher_id)
+        if hours is not None and hours <= 1e-6:
+            return False
+        return True
+
+    def active_teacher_candidate(self, duration_hours: float) -> int | None:
+        teacher_id = self._active_teacher_id
+        if teacher_id is None:
+            return None
+        if not self.has_session_capacity(teacher_id):
+            return None
+        if not self.can_allocate(teacher_id, duration_hours):
+            return None
+        return teacher_id
+
+    def _sync_active_teacher(self, teacher_id: int | None) -> None:
+        if teacher_id is None:
+            return
+        sessions = self.session_remaining.get(teacher_id)
+        if sessions is None:
+            if self._active_teacher_id == teacher_id:
+                self._active_teacher_id = None
+            return
+        if self._active_teacher_id is None:
+            if self.has_session_capacity(teacher_id):
+                self._active_teacher_id = teacher_id
+            return
+        if self._active_teacher_id == teacher_id:
+            if not self.has_session_capacity(teacher_id):
+                self._active_teacher_id = None
+            return
+        if not self.has_session_capacity(self._active_teacher_id):
+            if self.has_session_capacity(teacher_id):
+                self._active_teacher_id = teacher_id
+            else:
+                self._active_teacher_id = None
 
     @staticmethod
     def _canonical_week(start: datetime | date | None) -> date | None:
@@ -1520,10 +1574,22 @@ def find_available_teacher(
     allocation_state = _get_allocation_state(course)
     preferred: list[Teacher] = []
     allowed_ids: set[int] | None = None
+    known_teachers: dict[int, Teacher] = {}
+
+    def _remember(teacher: Teacher | None) -> None:
+        if teacher is None:
+            return
+        teacher_id = teacher.id
+        if teacher_id is None:
+            return
+        if teacher_id not in known_teachers:
+            known_teachers[teacher_id] = teacher
+
     if link is not None:
         for assigned in link.preferred_teachers(subgroup_label):
             if assigned is not None and assigned not in preferred:
                 preferred.append(assigned)
+                _remember(assigned)
 
     link_teachers = link.assigned_teachers() if link is not None else []
     course_teachers = [
@@ -1534,11 +1600,15 @@ def find_available_teacher(
         for teacher in course_teachers:
             if teacher not in fallback_pool:
                 fallback_pool.append(teacher)
+        for teacher in fallback_pool:
+            _remember(teacher)
         allowed_ids = {
             teacher.id for teacher in fallback_pool if teacher.id is not None
         } or None
     else:
         fallback_pool = Teacher.query.all()
+        for teacher in fallback_pool:
+            _remember(teacher)
 
     def _append_unique(target: list[Teacher], items: Iterable[Teacher]) -> None:
         seen = {teacher.id for teacher in target if teacher.id is not None}
@@ -1560,6 +1630,15 @@ def find_available_teacher(
                 seen.add(teacher_id)
 
     candidates: list[Teacher] = []
+    if allocation_state:
+        active_id = allocation_state.active_teacher_candidate(duration_hours)
+        if active_id is not None:
+            active_teacher = known_teachers.get(active_id)
+            if active_teacher is None:
+                active_teacher = db.session.get(Teacher, active_id)
+                _remember(active_teacher)
+            if active_teacher is not None:
+                _append_unique(candidates, [active_teacher])
     canonical_week = TeacherAllocationState._canonical_week(start)
     if target_class_ids:
         target_label = _normalise_label(subgroup_label)

@@ -2407,6 +2407,157 @@ class TeacherAllocationStateSessionsTestCase(DatabaseTestCase):
         _clear_allocation_state(course)
 
 
+    def test_find_available_teacher_sticks_until_sessions_depleted(self) -> None:
+        base_name = CourseName(name="Probabilités")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=4,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="INFO1", size=30)
+        link = CourseClassLink(class_group=class_group)
+        room = Room(name="D201", capacity=40)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        availabilities = [
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=1,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_a,
+                weekday=2,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=0,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=1,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+            TeacherAvailability(
+                teacher=teacher_b,
+                weekday=2,
+                start_time=time(8, 0),
+                end_time=time(12, 0),
+            ),
+        ]
+        course.class_links.append(link)
+        course.teachers.extend([teacher_a, teacher_b])
+        link.teacher_a = teacher_a
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=4),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=4),
+            ]
+        )
+
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                class_group,
+                link,
+                room,
+                teacher_a,
+                teacher_b,
+                *availabilities,
+            ]
+        )
+        db.session.commit()
+
+        state = TeacherAllocationState(course)
+        _set_allocation_state(course, state)
+
+        first_start = datetime(2025, 9, 1, 8, 0)
+        first_end = first_start + timedelta(hours=2)
+        teacher_first = find_available_teacher(
+            course,
+            first_start,
+            first_end,
+            link=link,
+            target_class_ids={class_group.id},
+        )
+
+        self.assertIsNotNone(teacher_first)
+        assert teacher_first is not None
+        self.assertEqual(teacher_first.id, teacher_a.id)
+
+        session_first = Session(
+            course=course,
+            teacher=teacher_first,
+            room=room,
+            class_group=class_group,
+            start_time=first_start,
+            end_time=first_end,
+        )
+        session_first.attendees = [class_group]
+        db.session.add(session_first)
+        db.session.flush()
+        state.consume_session(session_first)
+
+        second_start = datetime(2025, 9, 2, 8, 0)
+        second_end = second_start + timedelta(hours=2)
+        teacher_second = find_available_teacher(
+            course,
+            second_start,
+            second_end,
+            link=link,
+            target_class_ids={class_group.id},
+        )
+
+        self.assertIsNotNone(teacher_second)
+        assert teacher_second is not None
+        self.assertEqual(teacher_second.id, teacher_a.id)
+
+        session_second = Session(
+            course=course,
+            teacher=teacher_second,
+            room=room,
+            class_group=class_group,
+            start_time=second_start,
+            end_time=second_end,
+        )
+        session_second.attendees = [class_group]
+        db.session.add(session_second)
+        db.session.flush()
+        state.consume_session(session_second)
+
+        third_start = datetime(2025, 9, 3, 8, 0)
+        third_end = third_start + timedelta(hours=2)
+        teacher_third = find_available_teacher(
+            course,
+            third_start,
+            third_end,
+            link=link,
+            target_class_ids={class_group.id},
+        )
+
+        self.assertIsNotNone(teacher_third)
+        assert teacher_third is not None
+        self.assertEqual(teacher_third.id, teacher_b.id)
+
+        _clear_allocation_state(course)
+
+
 class HalfGroupTeacherPreferenceTestCase(DatabaseTestCase):
     def test_prefers_same_teacher_for_sibling_half_groups(self) -> None:
         base_name = CourseName(name="Programmation")
