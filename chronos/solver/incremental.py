@@ -84,9 +84,26 @@ def build_incremental_model(
     group_intervals: defaultdict[int, list[cp_model.IntervalVar]] = defaultdict(list)
     room_intervals: defaultdict[int, list[cp_model.IntervalVar]] = defaultdict(list)
     objective_terms: list[cp_model.LinearExpr] = []
-    chronology_buckets: defaultdict[
+    chronology_buckets_group: defaultdict[
         tuple[int, tuple[Any, ...]], list[dict[str, Any]]
     ] = defaultdict(list)
+    chronology_buckets_global: defaultdict[tuple[Any, ...], list[dict[str, Any]]] = (
+        defaultdict(list)
+    )
+
+    def register_chronology_entry(
+        *,
+        group_id: int | None,
+        chronology_key: tuple[Any, ...] | None,
+        priority: int | None,
+        start_expr: Any,
+    ) -> None:
+        if chronology_key is None or priority is None:
+            return
+        entry = {"priority": priority, "start": start_expr}
+        chronology_buckets_global[chronology_key].append(entry)
+        if group_id is not None:
+            chronology_buckets_group[(group_id, chronology_key)].append(entry)
 
     # Register locked sessions as immutable intervals.
     for index, session in enumerate(locked_sessions):
@@ -113,11 +130,12 @@ def build_incremental_model(
 
         chronology_key = _normalise_chronology_key(session.get("chronology_key"))
         priority = _course_type_priority(session.get("course_type"))
-        if chronology_key is not None and priority is not None:
-            bucket_key = (int(group_id), chronology_key)
-            chronology_buckets[bucket_key].append(
-                {"priority": priority, "start": start_var}
-            )
+        register_chronology_entry(
+            group_id=int(group_id) if group_id is not None else None,
+            chronology_key=chronology_key,
+            priority=priority,
+            start_expr=start_var,
+        )
 
     # Create variables for sessions to be scheduled.
     for index, session in enumerate(new_sessions):
@@ -208,14 +226,12 @@ def build_incremental_model(
 
         chronology_key = _normalise_chronology_key(session.get("chronology_key"))
         priority = _course_type_priority(session.get("course_type"))
-        if (
-            chronology_key is not None
-            and priority is not None
-            and group_id is not None
-        ):
-            bucket_key = (int(group_id), chronology_key)
-            chronology_buckets[bucket_key].append(
-                {"priority": priority, "start": start_var}
+        if chronology_key is not None and priority is not None:
+            register_chronology_entry(
+                group_id=int(group_id) if group_id is not None else None,
+                chronology_key=chronology_key,
+                priority=priority,
+                start_expr=start_var,
             )
 
     for teacher_id, intervals in teacher_intervals.items():
@@ -228,14 +244,20 @@ def build_incremental_model(
         if len(intervals) > 1:
             model.AddNoOverlap(intervals)
 
-    for entries in chronology_buckets.values():
-        if len(entries) < 2:
-            continue
-        sorted_entries = sorted(entries, key=lambda item: item["priority"])
-        for idx, earlier in enumerate(sorted_entries):
-            for later in sorted_entries[idx + 1 :]:
-                if earlier["priority"] < later["priority"]:
-                    model.Add(earlier["start"] <= later["start"])
+    def apply_chronology_constraints(
+        buckets: Mapping[Any, list[dict[str, Any]]]
+    ) -> None:
+        for entries in buckets.values():
+            if len(entries) < 2:
+                continue
+            sorted_entries = sorted(entries, key=lambda item: item["priority"])
+            for idx, earlier in enumerate(sorted_entries):
+                for later in sorted_entries[idx + 1 :]:
+                    if earlier["priority"] < later["priority"]:
+                        model.Add(earlier["start"] <= later["start"])
+
+    apply_chronology_constraints(chronology_buckets_group)
+    apply_chronology_constraints(chronology_buckets_global)
 
     if objective_terms:
         model.Minimize(cp_model.LinearExpr.Sum(objective_terms))
