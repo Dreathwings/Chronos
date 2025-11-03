@@ -211,6 +211,25 @@
               </div>
               {% endfor %}
             </div>
+            {% if teacher_weekly_targets %}
+            <div class="mt-3">
+              <div class="text-uppercase text-muted small fw-semibold mb-2">
+                Répartition hebdomadaire estimée
+              </div>
+              <div class="vstack gap-2">
+                {% for week in teacher_weekly_targets %}
+                <div class="border rounded p-2 bg-light">
+                  <div class="fw-semibold small mb-1">{{ week.label }}</div>
+                  <ul class="list-unstyled mb-0 small">
+                    {% for entry in week.entries %}
+                    <li>{{ entry.name }} : {{ '%.2f' % entry.value }} séance(s)</li>
+                    {% endfor %}
+                  </ul>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% endif %}
           </div>
           <div>
             <label class="form-label">Classes associées</label>

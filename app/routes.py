@@ -2676,6 +2676,29 @@ def course_detail(course_id: int):
             allowed.week_start.isoformat()
         ] = allowed.effective_sessions(default_week_target)
 
+    teacher_weekly_targets_map = course.teacher_weekly_session_targets
+    teacher_name_map = {
+        teacher.id: teacher.name
+        for teacher in teachers
+        if teacher.id is not None and teacher.name
+    }
+    teacher_weekly_targets_display: list[dict[str, object]] = []
+    for week_start in sorted(teacher_weekly_targets_map.keys()):
+        entries = []
+        for teacher_id, value in sorted(
+            teacher_weekly_targets_map[week_start].items(),
+            key=lambda item: teacher_name_map.get(item[0], "").lower(),
+        ):
+            teacher_name = teacher_name_map.get(teacher_id)
+            if not teacher_name:
+                continue
+            entries.append({"name": teacher_name, "value": float(value)})
+        if entries:
+            week_end = week_start + timedelta(days=6)
+            teacher_weekly_targets_display.append(
+                {"label": _week_label(week_start, week_end), "entries": entries}
+            )
+
     remaining_hours = max(course.total_required_hours - course.scheduled_hours, 0)
     generation_display_status = _effective_generation_status(
         course,
@@ -2710,6 +2733,7 @@ def course_detail(course_id: int):
         course_week_session_map=course_week_session_map,
         course_remaining_hours=remaining_hours,
         generation_display_status=generation_display_status,
+        teacher_weekly_targets=teacher_weekly_targets_display,
     )
 
 

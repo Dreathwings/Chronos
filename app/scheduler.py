@@ -104,7 +104,7 @@ def _slot_priority_indices(course: Course, desired_hours: int) -> list[int]:
             morning_bias = 0 if start < time(12, 0) else 1
             return (morning_bias, hour_rank, minute_rank, index)
         if course_type == "TP":
-            afternoon_bias = 0 if start >= time(12, 0) else 1
+            afternoon_bias = 0 if start >= time(13, 30) else 1
             return (afternoon_bias, hour_rank, minute_rank, index)
         return (0, hour_rank, minute_rank, index)
 
@@ -1653,6 +1653,7 @@ def _relocate_sessions_for_groups(
     subgroup_label: str | None = None,
     context_label: str | None = None,
     require_exact_attendees: bool = False,
+    target_week: date | None = None,
 ) -> int:
     matches = _matching_sessions_for_groups(
         course,
@@ -1669,8 +1670,13 @@ def _relocate_sessions_for_groups(
         week_start = _week_start_for(session.start_time.date())
         sessions_by_week[week_start].append(session)
 
-    for week_start in sorted(sessions_by_week.keys(), reverse=True):
-        if week_start in attempted_weeks:
+    candidate_weeks = sorted(sessions_by_week.keys(), reverse=True)
+    canonical_target = _week_start_for(target_week) if target_week else None
+
+    for week_start in candidate_weeks:
+        if canonical_target is not None and week_start != canonical_target:
+            continue
+        if canonical_target is None and week_start in attempted_weeks:
             continue
         targeted = sessions_by_week[week_start]
         if not targeted:
@@ -3223,6 +3229,12 @@ def generate_schedule(
                 block_index = 0
                 hours_remaining = hours_needed
                 relocation_weeks: set[date] = set()
+                canonical_week_reference = (
+                    _week_start_for(plan_week_reference)
+                    if plan_week_reference is not None
+                    else None
+                )
+                week_relocation_attempted = False
 
                 while hours_remaining > 0:
                     _abort_if_cancelled(progress)
@@ -3587,6 +3599,34 @@ def generate_schedule(
                                 last_failure_reason = attempt_diagnostics.failure_summary(
                                     default="Aucune option compatible trouvée."
                                 )
+                        if (
+                            not week_relocation_attempted
+                            and canonical_week_reference is not None
+                            and (course.course_type or "").upper() in {"TD", "TP"}
+                        ):
+                            fallback_hours = _relocate_sessions_for_groups(
+                                course=course,
+                                class_groups=[class_group],
+                                created_sessions=created_sessions,
+                                per_day_hours=per_day_hours,
+                                weekday_frequencies=weekday_frequencies,
+                                reporter=reporter,
+                                attempted_weeks=set(),
+                                subgroup_label=subgroup_label,
+                                context_label=format_class_label(
+                                    class_group, link=link, subgroup_label=subgroup_label
+                                ),
+                                require_exact_attendees=(course.course_type or "").upper()
+                                == "TP",
+                                target_week=canonical_week_reference,
+                            )
+                            if fallback_hours:
+                                hours_remaining += fallback_hours
+                                relocation_weeks.clear()
+                                week_relocation_attempted = True
+                                block_index = max(block_index - 1, 0)
+                                continue
+
                         _warn_weekly_limit(reporter, weekly_limit_weeks)
                         for week_start in sorted(chronology_weeks):
                             reporter.warning(

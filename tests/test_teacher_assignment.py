@@ -15,6 +15,7 @@ from app.models import (
     CourseName,
     CourseScheduleLog,
     CourseTeacherAllocation,
+    CourseAllowedWeek,
     Equipment,
     Room,
     Session,
@@ -1772,6 +1773,59 @@ class TeacherAllocationQuotaTestCase(DatabaseTestCase):
         distribution = course.teacher_session_distribution
         self.assertAlmostEqual(distribution.get(teacher_a.id, 0.0), 2.0 / 6.0, places=4)
         self.assertAlmostEqual(distribution.get(teacher_b.id, 0.0), 4.0 / 6.0, places=4)
+
+    def test_course_estimates_weekly_session_targets_per_teacher(self) -> None:
+        base_name = CourseName(name="Probabilités")
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=6,
+            semester="S1",
+            configured_name=base_name,
+        )
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        week_one = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=2)
+        week_two = CourseAllowedWeek(week_start=date(2025, 9, 8), sessions_target=4)
+        course.allowed_weeks.extend([week_one, week_two])
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_a, target_hours=4),
+                CourseTeacherAllocation(teacher=teacher_b, target_hours=8),
+            ]
+        )
+
+        db.session.add_all([base_name, course, teacher_a, teacher_b, week_one, week_two])
+        db.session.commit()
+
+        weekly_targets = course.teacher_weekly_session_targets
+        first_week = week_one.week_start
+        second_week = week_two.week_start
+
+        self.assertIn(first_week, weekly_targets)
+        self.assertIn(second_week, weekly_targets)
+
+        self.assertAlmostEqual(
+            weekly_targets[first_week].get(teacher_a.id, 0.0),
+            2 * (4 / (2 * 6)),
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_targets[first_week].get(teacher_b.id, 0.0),
+            2 * (8 / (2 * 6)),
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_targets[second_week].get(teacher_a.id, 0.0),
+            4 * (4 / (2 * 6)),
+            places=4,
+        )
+        self.assertAlmostEqual(
+            weekly_targets[second_week].get(teacher_b.id, 0.0),
+            4 * (8 / (2 * 6)),
+            places=4,
+        )
 
 
 class TeacherAllocationStateSessionsTestCase(DatabaseTestCase):

@@ -86,6 +86,10 @@ def default_end_time() -> time:
     return time(18, 0)
 
 
+def _week_start(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
 class TimeStampedModel:
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -527,6 +531,46 @@ class Course(db.Model, TimeStampedModel):
         for teacher_id, target in self.teacher_session_targets.items():
             distribution[teacher_id] = max(target, 0.0) / occurrences
         return distribution
+
+    @property
+    def teacher_weekly_session_targets(self) -> dict[date, dict[int, float]]:
+        """Répartition hebdomadaire estimée des séances par enseignant."""
+
+        distribution = self.teacher_session_distribution
+        if not distribution:
+            return {}
+
+        weekly_payload = list(self.allowed_week_payload)
+        if not weekly_payload:
+            semester_start = self.semester_start
+            if semester_start is None:
+                today = date.today()
+                reference_year = today.year if today.month >= 9 else today.year - 1
+                semester_start = date(reference_year, 9, 1)
+            weekly_goal = max(int(self.sessions_required or 0), 0)
+            if weekly_goal <= 0:
+                return {}
+            weekly_payload = [
+                (semester_start, semester_start + timedelta(days=6), weekly_goal)
+            ]
+
+        weekly_targets: dict[date, dict[int, float]] = {}
+        for week_start, week_end, weekly_goal in weekly_payload:
+            if week_start is None:
+                continue
+            canonical_week = _week_start(week_start)
+            goal = max(int(weekly_goal or 0), 0)
+            if goal <= 0:
+                continue
+            per_teacher: dict[int, float] = {}
+            for teacher_id, share in distribution.items():
+                value = max(float(share), 0.0) * goal
+                if value <= 0:
+                    continue
+                per_teacher[teacher_id] = value
+            if per_teacher:
+                weekly_targets[canonical_week] = per_teacher
+        return weekly_targets
 
 
 class Session(db.Model, TimeStampedModel):
