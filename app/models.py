@@ -359,6 +359,28 @@ class Course(db.Model, TimeStampedModel):
         return self.course_type == "SAE"
 
     @property
+    def session_group_factor(self) -> int:
+        """Nombre de classes ou sous-groupes concernés par chaque séance."""
+
+        if self.is_cm:
+            return 1
+        total = 0
+        for link in self.class_links:
+            count = getattr(link, "group_count", 1) or 1
+            try:
+                normalised = int(count)
+            except (TypeError, ValueError):
+                normalised = 1
+            total += max(normalised, 1)
+        return total or 1
+
+    @property
+    def session_teacher_factor(self) -> int:
+        """Nombre d'enseignants mobilisés simultanément par séance."""
+
+        return 2 if self.is_sae else 1
+
+    @property
     def semester_window(self) -> tuple[date, date] | None:
         return semester_date_window(self.semester)
 
@@ -454,11 +476,7 @@ class Course(db.Model, TimeStampedModel):
 
     @property
     def total_required_hours(self) -> int:
-        group_total = sum(link.group_count for link in self.class_links)
-        if self.is_cm:
-            multiplier = 1
-        else:
-            multiplier = group_total or 1
+        multiplier = self.session_group_factor
         base_sessions = max(int(self.sessions_required or 0), 0)
         occurrences = base_sessions
         if self.allowed_weeks:
@@ -503,7 +521,8 @@ class Course(db.Model, TimeStampedModel):
                 weekly_total += max(int(value), 0)
             except (TypeError, ValueError):
                 continue
-        return max(requested, weekly_total)
+        per_group_goal = max(requested, weekly_total)
+        return per_group_goal * self.session_group_factor * self.session_teacher_factor
 
     @property
     def teacher_session_targets(self) -> dict[int, float]:
@@ -563,8 +582,10 @@ class Course(db.Model, TimeStampedModel):
             if goal <= 0:
                 continue
             per_teacher: dict[int, float] = {}
+            multiplier = self.session_group_factor * self.session_teacher_factor
+            adjusted_goal = max(goal, 0) * multiplier
             for teacher_id, share in distribution.items():
-                value = max(float(share), 0.0) * goal
+                value = max(float(share), 0.0) * adjusted_goal
                 if value <= 0:
                     continue
                 per_teacher[teacher_id] = value
@@ -576,8 +597,9 @@ class Course(db.Model, TimeStampedModel):
     def average_weekly_sessions(self) -> float:
         """Nombre moyen de séances prévues par semaine sur l'ensemble du cours."""
 
+        multiplier = self.session_group_factor * self.session_teacher_factor
         weekly_values = [
-            max(int(goal or 0), 0)
+            max(int(goal or 0), 0) * multiplier
             for _, _, goal in self.allowed_week_payload
             if goal is not None
         ]
@@ -585,7 +607,7 @@ class Course(db.Model, TimeStampedModel):
         if positive_values:
             return float(sum(positive_values)) / len(positive_values)
 
-        requested = max(int(self.sessions_required or 0), 0)
+        requested = max(int(self.sessions_required or 0), 0) * multiplier
         if requested <= 0:
             return 0.0
 

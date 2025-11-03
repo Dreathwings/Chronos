@@ -1892,6 +1892,104 @@ class TeacherAllocationQuotaTestCase(DatabaseTestCase):
             places=4,
         )
 
+    def test_session_occurrence_goal_scales_with_groups_and_teachers(self) -> None:
+        base_name = CourseName(name="Projet SAE")
+        course = Course(
+            name=Course.compose_name("SAE", base_name.name, "S1"),
+            course_type="SAE",
+            session_length_hours=4,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_a = ClassGroup(name="Groupe A", size=28)
+        class_b = ClassGroup(name="Groupe B", size=26)
+        link_a = CourseClassLink(class_group=class_a, group_count=1)
+        link_b = CourseClassLink(class_group=class_b, group_count=1)
+        allowed = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=1)
+        course.class_links.extend([link_a, link_b])
+        course.allowed_weeks.append(allowed)
+
+        db.session.add_all([base_name, course, class_a, class_b, link_a, link_b, allowed])
+        db.session.commit()
+
+        self.assertEqual(course.session_group_factor, 2)
+        self.assertEqual(course.session_teacher_factor, 2)
+        self.assertEqual(course.session_occurrence_goal, 8)
+
+    def test_weekly_targets_scale_with_half_groups(self) -> None:
+        base_name = CourseName(name="TP Réseaux")
+        course = Course(
+            name=Course.compose_name("TP", base_name.name, "S1"),
+            course_type="TP",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="RT1", size=24)
+        link = CourseClassLink(class_group=class_group, group_count=2)
+        teacher = Teacher(name="Camille")
+        allocation = CourseTeacherAllocation(teacher=teacher, target_hours=4)
+        allowed = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=1)
+
+        course.class_links.append(link)
+        course.teacher_allocations.append(allocation)
+        course.allowed_weeks.append(allowed)
+
+        db.session.add_all([base_name, course, class_group, link, teacher, allocation, allowed])
+        db.session.commit()
+
+        weekly_targets = course.teacher_weekly_session_targets
+        first_week = allowed.week_start
+
+        self.assertIn(first_week, weekly_targets)
+        self.assertAlmostEqual(weekly_targets[first_week].get(teacher.id, 0.0), 2.0)
+
+    def test_weekly_targets_account_for_sae_teacher_pairs(self) -> None:
+        base_name = CourseName(name="SAE Communication")
+        course = Course(
+            name=Course.compose_name("SAE", base_name.name, "S1"),
+            course_type="SAE",
+            session_length_hours=4,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        class_group = ClassGroup(name="BUT1", size=30)
+        link = CourseClassLink(class_group=class_group, group_count=1)
+        teacher_a = Teacher(name="Alice")
+        teacher_b = Teacher(name="Bruno")
+        allocation_a = CourseTeacherAllocation(teacher=teacher_a, target_hours=16)
+        allocation_b = CourseTeacherAllocation(teacher=teacher_b, target_hours=16)
+        allowed = CourseAllowedWeek(week_start=date(2025, 9, 1), sessions_target=1)
+
+        course.class_links.append(link)
+        course.teacher_allocations.extend([allocation_a, allocation_b])
+        course.allowed_weeks.append(allowed)
+
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                class_group,
+                link,
+                teacher_a,
+                teacher_b,
+                allocation_a,
+                allocation_b,
+                allowed,
+            ]
+        )
+        db.session.commit()
+
+        weekly_targets = course.teacher_weekly_session_targets
+        first_week = allowed.week_start
+
+        self.assertIn(first_week, weekly_targets)
+        self.assertAlmostEqual(weekly_targets[first_week].get(teacher_a.id, 0.0), 2.0)
+        self.assertAlmostEqual(weekly_targets[first_week].get(teacher_b.id, 0.0), 2.0)
+
 
 class TeacherAllocationStateSessionsTestCase(DatabaseTestCase):
     def test_allocation_state_tracks_remaining_sessions(self) -> None:

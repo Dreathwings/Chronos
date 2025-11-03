@@ -322,12 +322,16 @@ class TeacherAllocationState:
             for teacher_id, target in self.session_targets.items()
         }
         self.weekly_session_average = max(float(course.average_weekly_sessions or 0.0), 0.0)
+        group_factor = float(getattr(course, "session_group_factor", 1) or 1)
+        if group_factor <= 0:
+            group_factor = 1.0
+        self.weekly_group_requirement = self.weekly_session_average / group_factor
         self.weekly_group_capacity: dict[int, float] = {}
         self.weekly_group_assignments: dict[date, dict[int, set[tuple[int, str]]]] = defaultdict(dict)
         for teacher_id, target in self.session_targets.items():
             target_value = max(float(target), 0.0)
-            if self.weekly_session_average > 0:
-                capacity = target_value / self.weekly_session_average
+            if self.weekly_group_requirement > 0:
+                capacity = target_value / self.weekly_group_requirement
             elif target_value > 0:
                 capacity = math.inf
             else:
