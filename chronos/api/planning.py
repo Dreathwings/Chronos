@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Any, Dict, List, MutableMapping
 
 from flask import current_app, jsonify, request
-from ortools.sat.python import cp_model
 from sqlalchemy import func
 from werkzeug.exceptions import BadRequest, NotFound
 
@@ -16,18 +15,10 @@ from chronos.models import PlanningVersion, SessionValidated
 from chronos.solver.incremental import (
     build_incremental_model,
     from_slot,
+    get_cp_model,
     solve_model,
     to_slots,
 )
-
-
-STATUS_LABELS = {
-    cp_model.OPTIMAL: "OPTIMAL",
-    cp_model.FEASIBLE: "FEASIBLE",
-    cp_model.INFEASIBLE: "INFEASIBLE",
-    cp_model.MODEL_INVALID: "MODEL_INVALID",
-    cp_model.UNKNOWN: "UNKNOWN",
-}
 
 
 def _parse_week_start(label: str) -> datetime:
@@ -147,7 +138,14 @@ def generate_planning() -> Any:
         payload.get("seed"),
     )
 
-    status_label = STATUS_LABELS.get(status, f"STATUS_{int(status)}")
+    cp_model = get_cp_model()
+    status_label = {
+        cp_model.OPTIMAL: "OPTIMAL",
+        cp_model.FEASIBLE: "FEASIBLE",
+        cp_model.INFEASIBLE: "INFEASIBLE",
+        cp_model.MODEL_INVALID: "MODEL_INVALID",
+        cp_model.UNKNOWN: "UNKNOWN",
+    }.get(status, f"STATUS_{int(status)}")
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return jsonify({"status": status_label, "message": "No feasible solution"}), 409

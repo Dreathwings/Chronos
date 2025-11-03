@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
+import importlib
 from datetime import datetime, timedelta
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
+from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
-from ortools.sat.python import cp_model
+if TYPE_CHECKING:  # pragma: no cover - only evaluated by type checkers
+    from ortools.sat.python import cp_model
 
 
 DEFAULT_SLOT_MINUTES = 30
+
+_CP_MODEL: "cp_model" | None = None
+
+
+def get_cp_model() -> "cp_model":
+    """Load and cache the OR-Tools cp_model module."""
+
+    global _CP_MODEL
+    if _CP_MODEL is None:
+        module = importlib.import_module("ortools.sat.python.cp_model")
+        _CP_MODEL = module  # type: ignore[assignment]
+    return _CP_MODEL  # type: ignore[return-value]
 
 
 class IncrementalModelError(RuntimeError):
@@ -47,7 +61,8 @@ def from_slot(
     return day0 + timedelta(minutes=slot_index * slot_minutes)
 
 
-def _extract_start_domain(session: Mapping[str, object]) -> cp_model.Domain:
+def _extract_start_domain(session: Mapping[str, object]) -> "cp_model.Domain":
+    cp_model = get_cp_model()
     domain_values: Sequence[int] | None = session.get("start_domain")  # type: ignore[assignment]
     if domain_values:
         return cp_model.Domain.FromValues(sorted(int(v) for v in domain_values))
@@ -85,7 +100,7 @@ def build_incremental_model(
     locked_sessions: Sequence[Mapping[str, object]],
     new_sessions: MutableMapping[str, Mapping[str, object]] | Sequence[MutableMapping[str, object]],
     params: Mapping[str, object],
-) -> cp_model.CpModel:
+) -> "cp_model.CpModel":
     """Build the CP-SAT model for incremental planning."""
 
     day0 = params.get("day0")
@@ -95,14 +110,20 @@ def build_incremental_model(
     freeze_room = bool(params.get("freeze_room", True))
     soft_lock_penalty = int(params.get("soft_lock_penalty", 1000))
 
+    cp_model = get_cp_model()
+
     model = cp_model.CpModel()
 
-    teacher_intervals: Dict[int, List[cp_model.IntervalVar]] = {}
-    room_intervals: Dict[int, List[cp_model.IntervalVar]] = {}
-    group_intervals: Dict[int, List[cp_model.IntervalVar]] = {}
-    penalty_terms: List[cp_model.LinearExpr] = []
+    teacher_intervals: Dict[int, List["cp_model.IntervalVar"]] = {}
+    room_intervals: Dict[int, List["cp_model.IntervalVar"]] = {}
+    group_intervals: Dict[int, List["cp_model.IntervalVar"]] = {}
+    penalty_terms: List["cp_model.LinearExpr"] = []
 
-    def _register_interval(mapping: Dict[int, List[cp_model.IntervalVar]], key: int, interval: cp_model.IntervalVar) -> None:
+    def _register_interval(
+        mapping: Dict[int, List["cp_model.IntervalVar"]],
+        key: int,
+        interval: "cp_model.IntervalVar",
+    ) -> None:
         mapping.setdefault(key, []).append(interval)
 
     for locked in locked_sessions:
@@ -181,7 +202,7 @@ def build_incremental_model(
         if room_ids is None and session.get("room_id") is not None:
             room_ids = [int(session.get("room_id"))]
 
-        room_literals: Dict[int, cp_model.IntVar] = {}
+        room_literals: Dict[int, "cp_model.IntVar"] = {}
         if room_ids:
             room_ids = [int(rid) for rid in room_ids]
             if len(room_ids) == 1:
@@ -200,8 +221,8 @@ def build_incremental_model(
                     f"room_choice_{session.get('id', 'session')}",
                 )
                 cp_info["room_choice"] = room_choice
-                literals: List[cp_model.IntVar] = []
-                room_interval_map: Dict[int, cp_model.IntervalVar] = {}
+                literals: List["cp_model.IntVar"] = []
+                room_interval_map: Dict[int, "cp_model.IntervalVar"] = {}
                 for rid in room_ids:
                     lit = model.NewBoolVar(f"use_room_{rid}_{session.get('id', 'session')}")
                     literals.append(lit)
@@ -277,12 +298,14 @@ def build_incremental_model(
 
 
 def solve_model(
-    model: cp_model.CpModel,
+    model: "cp_model.CpModel",
     time_limit_s: float | int | None = None,
     workers: int | None = None,
     seed: int | None = None,
-) -> tuple[cp_model.CpSolver, cp_model.OptStatus]:
+) -> tuple["cp_model.CpSolver", "cp_model.OptStatus"]:
     """Solve the provided model with CP-SAT."""
+
+    cp_model = get_cp_model()
 
     solver = cp_model.CpSolver()
     if time_limit_s is not None:
@@ -300,4 +323,5 @@ __all__ = [
     "solve_model",
     "to_slots",
     "from_slot",
+    "get_cp_model",
 ]
