@@ -27,7 +27,7 @@ from .scheduler import (
 @dataclass
 class _CourseContext:
     teacher_lookup: dict[str, Teacher]
-    group_lookup: dict[str, ClassGroup]
+    group_lookup: dict[str, tuple[ClassGroup, Optional[str]]]
     room_lookup: dict[str, Room]
 
 
@@ -162,24 +162,27 @@ def _build_course_payload(
             "Aucun enseignant n'est disponible sur les créneaux proposés."
         )
 
-    group_entries: list[dict[str, object]] = []
-    group_lookup: dict[str, ClassGroup] = {}
-    group_slots: list[set[str]] = []
-    for link in course.class_links:
+    group_entries: dict[str, dict[str, object]] = {}
+    group_lookup: dict[str, tuple[ClassGroup, Optional[str]]] = {}
+    group_slot_map: dict[str, set[str]] = {}
+    ordered_links = sorted(
+        (link for link in course.class_links if link.class_group and link.class_group.id),
+        key=lambda link: link.class_group.name.lower(),
+    )
+    for link in ordered_links:
         group = link.class_group
         if group is None or group.id is None:
             continue
         group_id = str(group.id)
-        group_lookup[group_id] = group
-        group_entries.append(
-            {
+        if group_id not in group_entries:
+            group_entries[group_id] = {
                 "group_id": group_id,
                 "name": group.name,
                 "size": group.size or 0,
                 "incompatible_with": [],
             }
-        )
-        available = set()
+            group_lookup[group_id] = (group, None)
+        available: set[str] = set()
         for slot in time_grid:
             slot_day = slot["day"]
             slot_start = slot["start"]
@@ -192,16 +195,10 @@ def _build_course_payload(
             raise ValueError(
                 f"La classe {group.name} n'a aucun créneau disponible sur la période."
             )
-        group_slots.append(available)
+        group_slot_map[group_id] = available
 
     if not group_entries:
         raise ValueError("Aucune classe n'est associée à ce cours.")
-
-    allowed_slot_set = set.intersection(*group_slots) if group_slots else set()
-    if not allowed_slot_set:
-        raise ValueError(
-            "Aucun créneau commun n'est disponible pour toutes les classes associées."
-        )
 
     required_equipment = {equipment.name for equipment in course.equipments}
     capacity_needed = 0
@@ -247,27 +244,56 @@ def _build_course_payload(
     if total_units <= 0:
         raise ValueError("Le volume de séances à planifier est nul.")
 
-    course_entry = {
-        "course_id": str(course.id),
-        "module_id": str(course.id),
-        "type": course_type,
-        "duration_minutes": duration_minutes,
-        "total_units": total_units,
-        "groups": [entry["group_id"] for entry in group_entries],
-        "allowed_time_slots": sorted(allowed_slot_set),
-        "precedence": [],
-        "preferred_slots": [],
-        "forbidden_slots": [],
-        "required_equipment": sorted(required_equipment),
-    }
+    course_entries: list[dict[str, object]] = []
+    if course_type == "CM":
+        allowed_slot_set = set.intersection(*group_slot_map.values()) if group_slot_map else set()
+        if not allowed_slot_set:
+            raise ValueError(
+                "Aucun créneau commun n'est disponible pour toutes les classes associées."
+            )
+        course_entries.append(
+            {
+                "course_id": str(course.id),
+                "module_id": str(course.id),
+                "type": course_type,
+                "duration_minutes": duration_minutes,
+                "total_units": total_units,
+                "groups": list(group_entries.keys()),
+                "allowed_time_slots": sorted(allowed_slot_set),
+                "precedence": [],
+                "preferred_slots": [],
+                "forbidden_slots": [],
+                "required_equipment": sorted(required_equipment),
+            }
+        )
+    else:
+        for group_id, allowed_slots in group_slot_map.items():
+            course_entries.append(
+                {
+                    "course_id": f"{course.id}:{group_id}",
+                    "module_id": str(course.id),
+                    "type": course_type,
+                    "duration_minutes": duration_minutes,
+                    "total_units": total_units,
+                    "groups": [group_id],
+                    "allowed_time_slots": sorted(allowed_slots),
+                    "precedence": [],
+                    "preferred_slots": [],
+                    "forbidden_slots": [],
+                    "required_equipment": sorted(required_equipment),
+                }
+            )
+
+    if not course_entries:
+        raise ValueError("Aucune séance n'a pu être construite pour ce cours.")
 
     solver_config = DEFAULT_CONFIG.solver
     payload = {
         "time_grid": time_grid,
         "teachers": teacher_entries,
-        "groups": group_entries,
+        "groups": list(group_entries.values()),
         "rooms": rooms,
-        "courses": [course_entry],
+        "courses": course_entries,
         "global_rules": {
             "forbidden_slots": [],
             "lunch_start": time(hour=12),
@@ -315,14 +341,22 @@ def _persist_sessions(
                 return False
         return True
 
+    course_prefix = f"{course.id}:"
+    target_course_id = str(course.id)
+
     for entry in result.get("sessions", []):
-        if entry.get("course_id") != str(course.id):
+        raw_identifier = entry.get("course_id")
+        if raw_identifier is None:
+            continue
+        course_identifier = str(raw_identifier)
+        if course_identifier != target_course_id and not course_identifier.startswith(course_prefix):
             continue
         teacher = context.teacher_lookup.get(str(entry.get("teacher_id")))
-        group = context.group_lookup.get(str(entry.get("group_id")))
+        group_data = context.group_lookup.get(str(entry.get("group_id")))
         room = context.room_lookup.get(str(entry.get("room_id")))
-        if not teacher or not group or not room:
+        if not teacher or not group_data or not room:
             continue
+        group, subgroup_label = group_data
         session_date = entry.get("date")
         start_time = entry.get("start")
         end_time = entry.get("end")
@@ -340,6 +374,7 @@ def _persist_sessions(
             teacher=teacher,
             room=room,
             class_group=group,
+            subgroup_label=subgroup_label,
             start_time=start_dt,
             end_time=end_dt,
         )
@@ -386,7 +421,6 @@ def generate_schedule(
         allowed_weeks=allowed_weeks,
     )
 
-    total_units = payload["courses"][0]["total_units"]
     if occurrence_limit is not None:
         try:
             limit_value = max(int(occurrence_limit), 0)
@@ -396,7 +430,8 @@ def generate_schedule(
             reporter.info("Aucune séance supplémentaire demandée.")
             reporter.finalise(0)
             return []
-        payload["courses"][0]["total_units"] = min(total_units, limit_value)
+        for entry in payload["courses"]:
+            entry["total_units"] = min(entry["total_units"], limit_value)
 
     try:
         output = run_cp_solver(payload)
