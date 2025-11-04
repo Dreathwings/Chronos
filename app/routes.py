@@ -37,6 +37,7 @@ from .models import (
     CourseName,
     Equipment,
     Room,
+    PlanningVersion,
     Session,
     Student,
     Software,
@@ -2251,6 +2252,29 @@ def generation_overview():
         ("none", GENERATION_STATUS_LABELS["none"]),
     ]
 
+    version_rows = (
+        PlanningVersion.query.options(selectinload(PlanningVersion.sessions))
+        .order_by(PlanningVersion.label.desc(), PlanningVersion.revision.desc())
+        .all()
+    )
+    incremental_versions: list[dict[str, object]] = []
+    seen_labels: set[str] = set()
+    for version in version_rows:
+        if version.label in seen_labels:
+            continue
+        seen_labels.add(version.label)
+        incremental_versions.append(
+            {
+                "label": version.label,
+                "revision": version.revision,
+                "display_label": version.label_with_revision(),
+                "created_at": version.created_at,
+                "session_count": len(version.sessions),
+            }
+        )
+
+    incremental_api_url = url_for("chronos_api.generate_planning")
+
     return render_template(
         "generation/index.html",
         course_rows=filtered_rows,
@@ -2272,6 +2296,8 @@ def generation_overview():
         selected_class_id=selected_class_id,
         has_active_filters=has_active_filters,
         status_filter_options=status_filter_options,
+        incremental_versions=incremental_versions,
+        incremental_api_url=incremental_api_url,
     )
 
 

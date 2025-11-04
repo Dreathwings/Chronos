@@ -1014,6 +1014,49 @@ class CourseName(db.Model, TimeStampedModel):
         return f"CourseName<{self.name}>"
 
 
+class PlanningVersion(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    label: Mapped[str] = mapped_column(String(32), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    sessions: Mapped[List["SessionValidated"]] = relationship(
+        "SessionValidated",
+        back_populates="version",
+        cascade="all, delete-orphan",
+        order_by="SessionValidated.start_dt",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("label", "revision", name="uq_planning_version_label_revision"),
+    )
+
+    def label_with_revision(self) -> str:
+        return f"{self.label}-r{self.revision}"
+
+
+class SessionValidated(db.Model, TimeStampedModel):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("course.id"), nullable=False)
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("teacher.id"), nullable=False)
+    group_id: Mapped[int] = mapped_column(ForeignKey("class_group.id"), nullable=False)
+    room_id: Mapped[Optional[int]] = mapped_column(ForeignKey("room.id"))
+    start_dt: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    end_dt: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("planning_version.id"), nullable=False
+    )
+
+    version: Mapped[PlanningVersion] = relationship(back_populates="sessions")
+    course: Mapped[Course] = relationship()
+    teacher: Mapped[Teacher] = relationship()
+    group: Mapped[ClassGroup] = relationship()
+    room: Mapped[Optional[Room]] = relationship()
+
+    __table_args__ = (
+        CheckConstraint("end_dt > start_dt", name="chk_session_validated_time_order"),
+    )
+
+
 class TeacherAvailability(db.Model, TimeStampedModel):
     id: Mapped[int] = mapped_column(primary_key=True)
     teacher_id: Mapped[int] = mapped_column(ForeignKey("teacher.id"), nullable=False)

@@ -112,6 +112,11 @@ def create_app(config_class: type[Config] = Config) -> Flask:
 
     app.register_blueprint(main_bp, url_prefix=url_prefix or None)
 
+    from chronos.api import api_bp as chronos_api_bp
+
+    api_prefix = f"{url_prefix}/api/chronos" if url_prefix else "/api/chronos"
+    app.register_blueprint(chronos_api_bp, url_prefix=api_prefix)
+
     @app.cli.command("seed")
     @with_appcontext
     def seed() -> None:
