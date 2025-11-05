@@ -476,6 +476,69 @@ def find_available_room(
     return best_room
 
 
+def _shared_availability_hours_for_day(
+    *,
+    course: Course,
+    day: date,
+    class_groups: Iterable[ClassGroup],
+    link: CourseClassLink | None,
+    subgroup_label: str | None,
+) -> float:
+    groups = [group for group in class_groups if group is not None]
+    if not groups:
+        return 0.0
+
+    effective_label = subgroup_label if len(groups) == 1 else None
+    required_capacity = sum(course.capacity_needed_for(group) for group in groups)
+    target_class_ids = {
+        group.id for group in groups if getattr(group, "id", None) is not None
+    }
+
+    total_hours = 0.0
+    for slot_start, slot_end in SCHEDULE_SLOTS:
+        start_dt = datetime.combine(day, slot_start)
+        end_dt = datetime.combine(day, slot_end)
+        if not fits_in_windows(start_dt.time(), end_dt.time()):
+            continue
+
+        availability_kwargs = {}
+        if effective_label is not None:
+            availability_kwargs["subgroup_label"] = effective_label
+        if any(
+            not group.is_available_during(start_dt, end_dt, **availability_kwargs)
+            for group in groups
+        ):
+            continue
+
+        teacher = find_available_teacher(
+            course,
+            start_dt,
+            end_dt,
+            link=link,
+            subgroup_label=effective_label,
+            target_class_ids=target_class_ids or None,
+        )
+        if not teacher:
+            continue
+
+        room = find_available_room(
+            course,
+            start_dt,
+            end_dt,
+            required_capacity=required_capacity,
+        )
+        if not room:
+            continue
+
+        slot_hours = (
+            datetime.combine(date.min, slot_end)
+            - datetime.combine(date.min, slot_start)
+        ).total_seconds() / 3600.0
+        total_hours += slot_hours
+
+    return total_hours
+
+
 def _format_session_label(session: Session) -> str:
     start_label = session.start_time.strftime("%d/%m %H:%M")
     end_label = session.end_time.strftime("%H:%M")
@@ -2497,7 +2560,20 @@ def generate_schedule(
                         next_offset = max(week_offsets, default=0) + 1
                         continuity_target_date = base_date + timedelta(days=7 * next_offset)
 
-                    def _cm_day_sort_key(d: date) -> tuple[int, int, int, int, int, int, int]:
+                    shared_hours_by_day = {
+                        day: _shared_availability_hours_for_day(
+                            course=course,
+                            day=day,
+                            class_groups=class_groups,
+                            link=primary_link,
+                            subgroup_label=None,
+                        )
+                        for day in available_days
+                    }
+
+                    def _cm_day_sort_key(d: date) -> tuple[
+                        float, int, int, int, int, int, int
+                    ]:
                         anchor_distance = abs(day_indices[d] - anchor_index)
                         continuity_flag = 1
                         future_bias = 0
@@ -2509,7 +2585,9 @@ def generate_schedule(
                                 continuity_distance = abs((d - continuity_target_date).days)
                             else:
                                 continuity_distance = 0
+                        shared_hours = shared_hours_by_day.get(d, float("inf"))
                         return (
+                            shared_hours,
                             continuity_flag,
                             future_bias,
                             continuity_distance,
@@ -2838,7 +2916,18 @@ def generate_schedule(
                         next_offset = max(week_offsets, default=0) + 1
                         continuity_target_date = base_date + timedelta(days=7 * next_offset)
 
-                    def _day_sort_key(d: date) -> tuple[int, int, int, int, int, int, int]:
+                    shared_hours_by_day = {
+                        day: _shared_availability_hours_for_day(
+                            course=course,
+                            day=day,
+                            class_groups=[class_group],
+                            link=link,
+                            subgroup_label=subgroup_label,
+                        )
+                        for day in available_days
+                    }
+
+                    def _day_sort_key(d: date) -> tuple[float, int, int, int, int, int, int]:
                         anchor_distance = abs(day_indices[d] - anchor_index)
                         continuity_flag = 1
                         future_bias = 0
@@ -2850,7 +2939,9 @@ def generate_schedule(
                                 continuity_distance = abs((d - continuity_target_date).days)
                             else:
                                 continuity_distance = 0
+                        shared_hours = shared_hours_by_day.get(d, float("inf"))
                         return (
+                            shared_hours,
                             continuity_flag,
                             future_bias,
                             continuity_distance,
