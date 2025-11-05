@@ -1,0 +1,148 @@
+{
+  "time_grid": [
+    {"slot_id": "d1s1", "day": "2024-09-02", "start": "08:00", "end": "09:00"},
+    {"slot_id": "d1s2", "day": "2024-09-02", "start": "09:00", "end": "10:00"},
+    {"slot_id": "d1s3", "day": "2024-09-02", "start": "10:00", "end": "11:00"},
+    {"slot_id": "d1s4", "day": "2024-09-02", "start": "11:00", "end": "12:00"},
+    {"slot_id": "d1s5", "day": "2024-09-02", "start": "12:00", "end": "13:00"},
+    {"slot_id": "d1s6", "day": "2024-09-02", "start": "13:00", "end": "14:00"},
+    {"slot_id": "d1s7", "day": "2024-09-02", "start": "14:00", "end": "15:00"},
+    {"slot_id": "d1s8", "day": "2024-09-02", "start": "15:00", "end": "16:00"},
+    {"slot_id": "d2s1", "day": "2024-09-03", "start": "08:00", "end": "09:00"},
+    {"slot_id": "d2s2", "day": "2024-09-03", "start": "09:00", "end": "10:00"},
+    {"slot_id": "d2s3", "day": "2024-09-03", "start": "10:00", "end": "11:00"},
+    {"slot_id": "d2s4", "day": "2024-09-03", "start": "11:00", "end": "12:00"},
+    {"slot_id": "d2s5", "day": "2024-09-03", "start": "12:00", "end": "13:00"},
+    {"slot_id": "d2s6", "day": "2024-09-03", "start": "13:00", "end": "14:00"},
+    {"slot_id": "d2s7", "day": "2024-09-03", "start": "14:00", "end": "15:00"},
+    {"slot_id": "d2s8", "day": "2024-09-03", "start": "15:00", "end": "16:00"}
+  ],
+  "teachers": [
+    {
+      "teacher_id": "T1",
+      "name": "Alice",
+      "can_teach": [
+        {"module_id": "MATH101", "types": ["CM"]},
+        {"module_id": "PHYS201", "types": ["CM"]}
+      ],
+      "availability": ["d1s1", "d1s2", "d1s3", "d1s4", "d2s1", "d2s2", "d2s3", "d2s4"],
+      "hard_unavailability": ["d1s5", "d2s5"],
+      "preferred_slots": ["d1s2", "d2s2"],
+      "disliked_slots": ["d1s8", "d2s8"],
+      "max_per_day": 3
+    },
+    {
+      "teacher_id": "T2",
+      "name": "Bob",
+      "can_teach": [{"module_id": "MATH101", "types": ["TD", "TP"]}],
+      "availability": ["d1s3", "d1s4", "d1s6", "d1s7", "d2s3", "d2s4", "d2s6", "d2s7"],
+      "hard_unavailability": ["d1s5", "d2s5"],
+      "preferred_slots": ["d1s6", "d2s6"],
+      "disliked_slots": ["d1s1"],
+      "max_per_day": 3
+    },
+    {
+      "teacher_id": "T3",
+      "name": "Carla",
+      "can_teach": [{"module_id": "PHYS201", "types": ["TD", "TP"]}],
+      "availability": ["d1s6", "d1s7", "d1s8", "d2s6", "d2s7", "d2s8"],
+      "hard_unavailability": ["d1s5", "d2s5"],
+      "preferred_slots": ["d1s7", "d2s7"],
+      "disliked_slots": ["d1s1", "d2s1"],
+      "max_per_day": 3
+    }
+  ],
+  "groups": [
+    {"group_id": "G1", "name": "Group 1", "size": 30, "incompatible_with": ["G2"]},
+    {"group_id": "G2", "name": "Group 2", "size": 28, "incompatible_with": ["G1"]},
+    {"group_id": "G3", "name": "Group 3", "size": 18, "incompatible_with": []}
+  ],
+  "rooms": [
+    {"room_id": "R1", "name": "Room 101", "capacity": 60, "equipment": ["projector"]},
+    {"room_id": "R2", "name": "Room 102", "capacity": 40, "equipment": ["projector"]},
+    {"room_id": "Lab1", "name": "Physics Lab", "capacity": 32, "equipment": ["computers", "lab"]}
+  ],
+  "courses": [
+    {
+      "course_id": "C1",
+      "module_id": "MATH101",
+      "type": "CM",
+      "duration_minutes": 120,
+      "total_units": 1,
+      "groups": ["G1", "G2"],
+      "required_equipment": ["projector"],
+      "preferred_slots": ["d1s1", "d1s2", "d2s1", "d2s2"],
+      "forbidden_slots": ["d1s5", "d2s5"]
+    },
+    {
+      "course_id": "C2",
+      "module_id": "MATH101",
+      "type": "TD",
+      "duration_minutes": 60,
+      "total_units": 2,
+      "groups": ["G1"],
+      "required_equipment": ["projector"],
+      "precedence": ["C1"],
+      "allowed_time_slots": ["d1s3", "d1s4", "d1s6", "d1s7", "d2s3", "d2s4", "d2s6", "d2s7"],
+      "forbidden_slots": ["d1s1"]
+    },
+    {
+      "course_id": "C3",
+      "module_id": "MATH101",
+      "type": "TP",
+      "duration_minutes": 60,
+      "total_units": 1,
+      "groups": ["G2"],
+      "required_equipment": ["computers"],
+      "precedence": ["C2"],
+      "allowed_time_slots": ["d1s6", "d1s7", "d2s6", "d2s7"],
+      "forbidden_slots": ["d1s1", "d2s1"]
+    },
+    {
+      "course_id": "C4",
+      "module_id": "PHYS201",
+      "type": "CM",
+      "duration_minutes": 120,
+      "total_units": 1,
+      "groups": ["G3"],
+      "required_equipment": ["projector"],
+      "preferred_slots": ["d1s6", "d1s7"],
+      "forbidden_slots": ["d1s5"]
+    },
+    {
+      "course_id": "C5",
+      "module_id": "PHYS201",
+      "type": "TD",
+      "duration_minutes": 60,
+      "total_units": 1,
+      "groups": ["G3"],
+      "required_equipment": ["lab"],
+      "precedence": ["C4"],
+      "allowed_time_slots": ["d1s7", "d1s8", "d2s7", "d2s8"],
+      "forbidden_slots": ["d1s1", "d2s1"]
+    }
+  ],
+  "global_rules": {
+    "forbidden_slots": [],
+    "lunch_start": "12:00",
+    "lunch_end": "13:00",
+    "lunch_break_minutes": 60,
+    "daily_amplitude_minutes": 300
+  },
+  "weights": {
+    "teacher_compactness": 1,
+    "group_compactness": 1,
+    "early_slot_penalty": 2,
+    "late_slot_penalty": 2,
+    "room_change_penalty": 1,
+    "teacher_overload_penalty": 5,
+    "group_overload_penalty": 5,
+    "preference_miss_penalty": 3
+  },
+  "limits": {
+    "time_limit_seconds": 20,
+    "random_seed": 2,
+    "num_solutions": 1,
+    "num_search_workers": 0
+  }
+}

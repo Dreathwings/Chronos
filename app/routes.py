@@ -56,12 +56,12 @@ from .scheduler import (
     GenerationCancelled,
     fits_in_windows,
     format_class_label,
-    generate_schedule,
     has_weekly_course_conflict,
     overlaps,
     respects_weekly_chronology,
     _week_start_for,
 )
+from .cp_scheduler import generate_schedule
 from .utils import (
     parse_unavailability_ranges,
     ranges_as_payload,

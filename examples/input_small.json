@@ -1,0 +1,88 @@
+{
+  "time_grid": [
+    {"slot_id": "slot1", "day": "2024-09-02", "start": "08:00", "end": "09:00"},
+    {"slot_id": "slot2", "day": "2024-09-02", "start": "09:00", "end": "10:00"},
+    {"slot_id": "slot3", "day": "2024-09-02", "start": "10:00", "end": "11:00"},
+    {"slot_id": "slot4", "day": "2024-09-02", "start": "11:00", "end": "12:00"},
+    {"slot_id": "slot5", "day": "2024-09-02", "start": "12:00", "end": "13:00"},
+    {"slot_id": "slot6", "day": "2024-09-02", "start": "13:00", "end": "14:00"},
+    {"slot_id": "slot7", "day": "2024-09-02", "start": "14:00", "end": "15:00"}
+  ],
+  "teachers": [
+    {
+      "teacher_id": "T1",
+      "name": "Alice",
+      "can_teach": [{"module_id": "MATH101", "types": ["CM"]}],
+      "availability": ["slot1", "slot2", "slot3", "slot4", "slot6", "slot7"],
+      "hard_unavailability": ["slot5"],
+      "preferred_slots": ["slot2", "slot3"],
+      "disliked_slots": ["slot7"],
+      "max_per_day": 3
+    },
+    {
+      "teacher_id": "T2",
+      "name": "Bob",
+      "can_teach": [{"module_id": "MATH101", "types": ["TD"]}],
+      "availability": ["slot3", "slot4", "slot6", "slot7"],
+      "hard_unavailability": ["slot5"],
+      "disliked_slots": ["slot1"],
+      "max_per_day": 2
+    }
+  ],
+  "groups": [
+    {"group_id": "G1", "name": "Group 1", "size": 30, "incompatible_with": ["G2"]},
+    {"group_id": "G2", "name": "Group 2", "size": 28, "incompatible_with": ["G1"]}
+  ],
+  "rooms": [
+    {"room_id": "R1", "name": "Room 101", "capacity": 50, "equipment": ["projector"]},
+    {"room_id": "R2", "name": "Lab 1", "capacity": 25, "equipment": ["computers"]}
+  ],
+  "courses": [
+    {
+      "course_id": "C1",
+      "module_id": "MATH101",
+      "type": "CM",
+      "duration_minutes": 120,
+      "total_units": 1,
+      "groups": ["G1"],
+      "required_equipment": ["projector"],
+      "preferred_slots": ["slot1", "slot2", "slot3", "slot4"],
+      "forbidden_slots": ["slot5"]
+    },
+    {
+      "course_id": "C2",
+      "module_id": "MATH101",
+      "type": "TD",
+      "duration_minutes": 60,
+      "total_units": 1,
+      "groups": ["G1"],
+      "required_equipment": ["projector"],
+      "precedence": ["C1"],
+      "forbidden_slots": ["slot1"],
+      "allowed_time_slots": ["slot3", "slot4", "slot6", "slot7"]
+    }
+  ],
+  "global_rules": {
+    "forbidden_slots": [],
+    "lunch_start": "12:00",
+    "lunch_end": "13:00",
+    "lunch_break_minutes": 60,
+    "daily_amplitude_minutes": 240
+  },
+  "weights": {
+    "teacher_compactness": 1,
+    "group_compactness": 1,
+    "early_slot_penalty": 2,
+    "late_slot_penalty": 2,
+    "room_change_penalty": 1,
+    "teacher_overload_penalty": 5,
+    "group_overload_penalty": 5,
+    "preference_miss_penalty": 3
+  },
+  "limits": {
+    "time_limit_seconds": 10,
+    "random_seed": 1,
+    "num_solutions": 1,
+    "num_search_workers": 0
+  }
+}
