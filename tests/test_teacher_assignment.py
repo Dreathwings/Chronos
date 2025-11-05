@@ -1833,6 +1833,71 @@ class ScheduleTeacherFallbackTestCase(DatabaseTestCase):
         self.assertGreaterEqual(teacher_counts.get(teacher_b.id, 0), 2)
 
 
+class ScheduleOrderingTestCase(DatabaseTestCase):
+    def test_generate_schedule_prioritises_low_availability_groups(self) -> None:
+        base_name = CourseName(name="Méthodes")
+        limited_group = ClassGroup(name="Groupe restreint", size=24)
+        flexible_group = ClassGroup(name="Groupe large", size=24)
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=1,
+            semester="S1",
+            configured_name=base_name,
+        )
+        link_limited = CourseClassLink(class_group=limited_group, group_count=1)
+        link_flexible = CourseClassLink(class_group=flexible_group, group_count=1)
+        course.class_links.extend([link_limited, link_flexible])
+
+        teacher_limited = Teacher(name="Alice")
+        teacher_flexible = Teacher(name="Bernard")
+        room = Room(name="B301", capacity=40)
+
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                limited_group,
+                flexible_group,
+                teacher_limited,
+                teacher_flexible,
+                room,
+            ]
+        )
+        db.session.commit()
+
+        link_limited.teacher_a = teacher_limited
+        link_flexible.teacher_a = teacher_flexible
+        course.teachers.extend([teacher_limited, teacher_flexible])
+        db.session.commit()
+
+        limited_availability = TeacherAvailability(
+            teacher=teacher_limited,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(10, 0),
+        )
+        flexible_availabilities = [
+            TeacherAvailability(
+                teacher=teacher_flexible,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add(limited_availability)
+        db.session.add_all(flexible_availabilities)
+        db.session.commit()
+
+        created = generate_schedule(course)
+
+        self.assertEqual(len(created), 2)
+        self.assertEqual(created[0].class_group_id, limited_group.id)
+        self.assertEqual(created[1].class_group_id, flexible_group.id)
+
+
 class ScheduleGenerationFailureTestCase(DatabaseTestCase):
     def test_generate_schedule_raises_when_no_room_available(self) -> None:
         course, link, _ = self._create_tp_course()

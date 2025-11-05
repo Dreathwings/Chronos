@@ -923,6 +923,144 @@ def find_available_room(
     return best_room
 
 
+def _teacher_candidates_for_link(
+    course: Course,
+    link: CourseClassLink | None,
+    subgroup_label: str | None,
+) -> list[Teacher]:
+    candidates: list[Teacher] = []
+    seen: set[int] = set()
+
+    def _register(teacher: Teacher | None) -> None:
+        if teacher is None:
+            return
+        identifier = teacher.id if teacher.id is not None else id(teacher)
+        if identifier in seen:
+            return
+        seen.add(identifier)
+        candidates.append(teacher)
+
+    if link is not None:
+        for teacher in link.preferred_teachers(subgroup_label):
+            _register(teacher)
+        if not candidates:
+            for teacher in link.assigned_teachers():
+                _register(teacher)
+
+    if not candidates:
+        for teacher in getattr(course, "teachers", []):
+            _register(teacher)
+
+    if candidates:
+        return candidates
+
+    # Aucun enseignant spécifiquement associé : on considère l'ensemble du vivier.
+    for teacher in Teacher.query.order_by(Teacher.name.asc()).all():
+        _register(teacher)
+    return candidates
+
+
+def _teacher_is_available(teacher: Teacher, start: datetime, end: datetime) -> bool:
+    if not teacher.is_available_during(start, end):
+        return False
+    for session in teacher.sessions:
+        if overlaps(session.start_time, session.end_time, start, end):
+            return False
+    return True
+
+
+def _candidate_rooms_for_course(course: Course, required_capacity: int) -> list[Room]:
+    rooms = Room.query.order_by(Room.capacity.asc(), Room.name.asc()).all()
+    required_posts = course.required_computer_posts()
+    required_equipment_ids = {equipment.id for equipment in course.equipments}
+    candidates: list[Room] = []
+    for room in rooms:
+        if room.capacity < required_capacity:
+            continue
+        if required_posts and (room.computers or 0) < required_posts:
+            continue
+        room_equipment_ids = {equipment.id for equipment in room.equipments}
+        if required_equipment_ids.difference(room_equipment_ids):
+            continue
+        candidates.append(room)
+    return candidates
+
+
+def _room_is_available(
+    room: Room,
+    start: datetime,
+    end: datetime,
+    pending_sessions: Iterable[Session],
+) -> bool:
+    for session in room.sessions:
+        if overlaps(session.start_time, session.end_time, start, end):
+            return False
+    for session in pending_sessions:
+        session_room_id = session.room_id or getattr(session.room, "id", None)
+        if session_room_id != room.id:
+            continue
+        if overlaps(session.start_time, session.end_time, start, end):
+            return False
+    return True
+
+
+def _availability_intersection_hours(
+    *,
+    course: Course,
+    link: CourseClassLink,
+    class_group: ClassGroup,
+    subgroup_label: str | None,
+    schedule_start: date,
+    schedule_end: date,
+    allowed_days: set[date] | None,
+) -> float:
+    desired_hours = max(int(course.session_length_hours), 1)
+    required_capacity = course.capacity_needed_for(class_group)
+    teacher_candidates = _teacher_candidates_for_link(course, link, subgroup_label)
+    if not teacher_candidates:
+        return 0.0
+
+    room_candidates = _candidate_rooms_for_course(course, required_capacity)
+    if not room_candidates:
+        return 0.0
+
+    pending_sessions = [
+        obj
+        for obj in db.session.new
+        if isinstance(obj, Session) and obj.start_time is not None
+    ]
+
+    total = 0.0
+    for day in daterange(schedule_start, schedule_end):
+        if day.weekday() >= 5:
+            continue
+        if allowed_days is not None and day not in allowed_days:
+            continue
+        if not class_group.is_available_on(day):
+            continue
+        for slot_start, _ in SCHEDULE_SLOTS:
+            start_dt = datetime.combine(day, slot_start)
+            end_dt = start_dt + timedelta(hours=desired_hours)
+            if not fits_in_windows(start_dt.time(), end_dt.time()):
+                continue
+            if not class_group.is_available_during(
+                start_dt, end_dt, subgroup_label=subgroup_label
+            ):
+                continue
+            if not any(
+                _teacher_is_available(teacher, start_dt, end_dt)
+                for teacher in teacher_candidates
+            ):
+                continue
+            if not any(
+                _room_is_available(room, start_dt, end_dt, pending_sessions)
+                for room in room_candidates
+            ):
+                continue
+            total += desired_hours
+    return total
+
+
 def _format_session_label(session: Session) -> str:
     start_label = session.start_time.strftime("%d/%m %H:%M")
     end_label = session.end_time.strftime("%H:%M")
@@ -3316,6 +3454,7 @@ def generate_schedule(
                 total_hours_needed += max(amount, 0)
         progress.initialise(total_hours_needed)
         plan_week_reference = current_week or schedule_start
+        group_entries: list[dict[str, object]] = []
         placeholder_rows: list[dict[str, object]] = []
         for link in links:
             _abort_if_cancelled(progress)
@@ -3327,498 +3466,533 @@ def generate_schedule(
                     or subgroup_label
                     or ""
                 )
-                hours_needed = hours_needed_map.get(
-                    (class_group.id, subgroup_label or None), 0
-                )
-                if hours_needed <= 0:
-                    continue
-                session_length = max(slot_length_hours, 1)
-                session_count = int(math.ceil(hours_needed / session_length))
-                for _ in range(session_count):
-                    placeholder_rows.append(
-                        {
-                            "course": course.name,
-                            "type": course.course_type,
-                            "class_label": display_label,
-                            "subgroup": subgroup_display or "",
-                            "teacher": "—",
-                            "time": "À planifier",
-                            "target_key": week_tracker.target_key(
-                                class_group, subgroup_label
-                            ),
-                        }
+                key = (class_group.id, subgroup_label or None)
+                hours_needed = hours_needed_map.get(key, 0)
+                if hours_needed > 0:
+                    availability_score = _availability_intersection_hours(
+                        course=course,
+                        link=link,
+                        class_group=class_group,
+                        subgroup_label=subgroup_label,
+                        schedule_start=schedule_start,
+                        schedule_end=schedule_end,
+                        allowed_days=allowed_days,
                     )
+                else:
+                    availability_score = 0.0
+                entry = {
+                    "link": link,
+                    "class_group": class_group,
+                    "display_label": display_label,
+                    "subgroup_label": subgroup_label,
+                    "subgroup_display": subgroup_display or "",
+                    "hours_needed": hours_needed,
+                    "availability": availability_score,
+                }
+                group_entries.append(entry)
+
+        group_entries.sort(
+            key=lambda entry: (
+                float(entry.get("availability") or 0.0),
+                (entry.get("display_label") or "").lower(),
+                (entry.get("subgroup_display") or "").lower(),
+            )
+        )
+
+        for entry in group_entries:
+            hours_needed = float(entry.get("hours_needed", 0))
+            if hours_needed <= 0:
+                continue
+            session_length = max(slot_length_hours, 1)
+            session_count = int(math.ceil(hours_needed / session_length))
+            class_group = entry["class_group"]
+            subgroup_label = entry["subgroup_label"]
+            for _ in range(session_count):
+                placeholder_rows.append(
+                    {
+                        "course": course.name,
+                        "type": course.course_type,
+                        "class_label": entry["display_label"],
+                        "subgroup": entry["subgroup_display"],
+                        "teacher": "—",
+                        "time": "À planifier",
+                        "target_key": week_tracker.target_key(
+                            class_group, subgroup_label
+                        ),
+                    }
+                )
         if plan_week_reference is not None or placeholder_rows:
             week_tracker.prepare_week(plan_week_reference, placeholder_rows)
 
-        for link in links:
+        for entry in group_entries:
             _abort_if_cancelled(progress)
-            class_group = link.class_group
-            for subgroup_label in course.group_labels_for(class_group):
-                _abort_if_cancelled(progress)
-                hours_needed = hours_needed_map.get((class_group.id, subgroup_label or None), 0)
-                if hours_needed == 0:
-                    continue
-                available_days = [
-                    day
-                    for day in sorted(daterange(schedule_start, schedule_end))
-                    if day.weekday() < 5
-                    and class_group.is_available_on(day)
-                    and (allowed_days is None or day in allowed_days)
-                ]
-                last_failure_reason: str | None = None
-                if not available_days:
-                    message = (
-                        f"Aucune journée disponible pour {class_group.name} sur la période"
-                    )
-                    reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
-                    placement_failures.append(message)
-                    last_failure_reason = message
-                    week_tracker.register_failure(
-                        week_tracker.target_key(class_group, subgroup_label),
-                        message,
-                    )
-                    continue
+            link = entry["link"]
+            class_group = entry["class_group"]
+            subgroup_label = entry["subgroup_label"]
+            _abort_if_cancelled(progress)
+            hours_needed = hours_needed_map.get((class_group.id, subgroup_label or None), 0)
+            if hours_needed == 0:
+                continue
+            available_days = [
+                day
+                for day in sorted(daterange(schedule_start, schedule_end))
+                if day.weekday() < 5
+                and class_group.is_available_on(day)
+                and (allowed_days is None or day in allowed_days)
+            ]
+            last_failure_reason: str | None = None
+            if not available_days:
+                message = (
+                    f"Aucune journée disponible pour {class_group.name} sur la période"
+                )
+                reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
+                placement_failures.append(message)
+                last_failure_reason = message
+                week_tracker.register_failure(
+                    week_tracker.target_key(class_group, subgroup_label),
+                    message,
+                )
+                continue
 
-                existing_day_hours = _existing_hours_by_day(course, class_group, subgroup_label)
-                day_indices = {day: index for index, day in enumerate(available_days)}
-                per_day_hours = {
-                    day: existing_day_hours.get(day, 0) for day in available_days
-                }
-                weekday_frequencies = _weekday_frequency_for_groups(
+            existing_day_hours = _existing_hours_by_day(course, class_group, subgroup_label)
+            day_indices = {day: index for index, day in enumerate(available_days)}
+            per_day_hours = {
+                day: existing_day_hours.get(day, 0) for day in available_days
+            }
+            weekday_frequencies = _weekday_frequency_for_groups(
+                course,
+                [class_group],
+                pending_sessions=created_sessions,
+                subgroup_label=subgroup_label,
+            )
+            block_index = 0
+            hours_remaining = hours_needed
+            relocation_weeks: set[date] = set()
+            canonical_week_reference = (
+                _week_start_for(plan_week_reference)
+                if plan_week_reference is not None
+                else None
+            )
+            week_relocation_attempted = False
+
+            while hours_remaining > 0:
+                _abort_if_cancelled(progress)
+                blocks_total = max(
+                    (hours_remaining + slot_length_hours - 1) // slot_length_hours,
+                    1,
+                )
+                desired_hours = min(slot_length_hours, hours_remaining)
+                if len(available_days) == 1:
+                    anchor_index = 0
+                elif blocks_total == 1:
+                    anchor_index = len(available_days) // 2
+                else:
+                    anchor_position = (
+                        block_index / (blocks_total - 1)
+                    ) * (len(available_days) - 1)
+                    anchor_index = round(anchor_position)
+                anchor_index = max(0, min(anchor_index, len(available_days) - 1))
+
+                matching_sessions = _matching_sessions_for_groups(
                     course,
                     [class_group],
                     pending_sessions=created_sessions,
                     subgroup_label=subgroup_label,
                 )
-                block_index = 0
-                hours_remaining = hours_needed
-                relocation_weeks: set[date] = set()
-                canonical_week_reference = (
-                    _week_start_for(plan_week_reference)
-                    if plan_week_reference is not None
-                    else None
+                base_session = matching_sessions[0] if matching_sessions else None
+                continuity_weekday = (
+                    base_session.start_time.weekday() if base_session is not None else None
                 )
-                week_relocation_attempted = False
+                continuity_slot_index: int | None = None
+                if base_session is not None:
+                    try:
+                        continuity_slot_index = START_TIMES.index(
+                            base_session.start_time.time()
+                        )
+                    except ValueError:
+                        continuity_slot_index = None
+                continuity_target_date: date | None = None
+                if base_session is not None:
+                    base_date = base_session.start_time.date()
+                    week_offsets = [
+                        max(0, (session.start_time.date() - base_date).days // 7)
+                        for session in matching_sessions
+                        if session.start_time.date() >= base_date
+                    ]
+                    next_offset = max(week_offsets, default=0) + 1
+                    continuity_target_date = base_date + timedelta(days=7 * next_offset)
 
-                while hours_remaining > 0:
-                    _abort_if_cancelled(progress)
-                    blocks_total = max(
-                        (hours_remaining + slot_length_hours - 1) // slot_length_hours,
-                        1,
+                def _day_sort_key(d: date) -> tuple[int, int, int, int, int, int, int]:
+                    anchor_distance = abs(day_indices[d] - anchor_index)
+                    continuity_flag = 1
+                    future_bias = 0
+                    continuity_distance = anchor_distance
+                    if continuity_weekday is not None and d.weekday() == continuity_weekday:
+                        continuity_flag = 0
+                        if continuity_target_date is not None:
+                            future_bias = 0 if d >= continuity_target_date else 1
+                            continuity_distance = abs((d - continuity_target_date).days)
+                        else:
+                            continuity_distance = 0
+                    return (
+                        continuity_flag,
+                        future_bias,
+                        day_indices[d],
+                        continuity_distance,
+                        -weekday_frequencies.get(d.weekday(), 0),
+                        per_day_hours[d],
+                        anchor_distance,
                     )
-                    desired_hours = min(slot_length_hours, hours_remaining)
-                    if len(available_days) == 1:
-                        anchor_index = 0
-                    elif blocks_total == 1:
-                        anchor_index = len(available_days) // 2
-                    else:
-                        anchor_position = (
-                            block_index / (blocks_total - 1)
-                        ) * (len(available_days) - 1)
-                        anchor_index = round(anchor_position)
-                    anchor_index = max(0, min(anchor_index, len(available_days) - 1))
 
-                    matching_sessions = _matching_sessions_for_groups(
+                ordered_days = sorted(available_days, key=_day_sort_key)
+
+                chronology_weeks: set[date] = set()
+                weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
+
+                def _candidate_base_offsets(day: date) -> list[int]:
+                    offsets: list[int] = []
+                    if (
+                        continuity_slot_index is not None
+                        and continuity_weekday is not None
+                        and day.weekday() == continuity_weekday
+                    ):
+                        offsets.append(continuity_slot_index)
+                    if desired_hours == 1:
+                        adjacency_offsets = _one_hour_adjacency_offsets(
+                            [class_group],
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=subgroup_label,
+                        )
+                        for offset in adjacency_offsets:
+                            if offset not in offsets:
+                                offsets.append(offset)
+                    preferred_slot = _preferred_slot_index_for_groups(
                         course,
                         [class_group],
+                        day,
                         pending_sessions=created_sessions,
                         subgroup_label=subgroup_label,
                     )
-                    base_session = matching_sessions[0] if matching_sessions else None
-                    continuity_weekday = (
-                        base_session.start_time.weekday() if base_session is not None else None
+                    if preferred_slot is not None and preferred_slot not in offsets:
+                        offsets.append(preferred_slot)
+                    for offset in _slot_priority_indices(course, desired_hours):
+                        if offset not in offsets:
+                            offsets.append(offset)
+                    fallback_offset = int(per_day_hours[day])
+                    if fallback_offset not in offsets:
+                        offsets.append(fallback_offset)
+                    return offsets
+
+                def _attempt_day(day: date) -> bool:
+                    nonlocal hours_remaining, block_index, last_failure_reason
+                    _abort_if_cancelled(progress)
+                    week_start, _ = _week_bounds(day)
+                    if has_weekly_course_conflict(
+                        course,
+                        class_group,
+                        day,
+                        subgroup_label=subgroup_label,
+                        pending_sessions=created_sessions,
+                        additional_hours=desired_hours,
+                    ):
+                        label = format_class_label(
+                            class_group, link=link, subgroup_label=subgroup_label
+                        )
+                        weekly_limit_weeks[label].add(week_start)
+                        last_failure_reason = (
+                            f"Quota hebdomadaire déjà atteint pour {label}."
+                        )
+                        return False
+                    if not _day_respects_chronology(
+                        course,
+                        class_group,
+                        day,
+                        created_sessions,
+                        subgroup_label=subgroup_label,
+                    ):
+                        chronology_weeks.add(week_start)
+                        last_failure_reason = (
+                            "Chronologie CM → TD → TP impossible à respecter cette semaine."
+                        )
+                        return False
+                    preferred_offsets: list[int] = []
+                    if (
+                        continuity_slot_index is not None
+                        and continuity_weekday is not None
+                        and day.weekday() == continuity_weekday
+                    ):
+                        preferred_offsets.append(continuity_slot_index)
+                    if desired_hours == 1:
+                        adjacency_offsets = _one_hour_adjacency_offsets(
+                            [class_group],
+                            day,
+                            pending_sessions=created_sessions,
+                            subgroup_label=subgroup_label,
+                        )
+                        for offset in adjacency_offsets:
+                            if offset not in preferred_offsets:
+                                preferred_offsets.append(offset)
+                    preferred_slot = _preferred_slot_index_for_groups(
+                        course,
+                        [class_group],
+                        day,
+                        pending_sessions=created_sessions,
+                        subgroup_label=subgroup_label,
                     )
-                    continuity_slot_index: int | None = None
-                    if base_session is not None:
-                        try:
-                            continuity_slot_index = START_TIMES.index(
-                                base_session.start_time.time()
-                            )
-                        except ValueError:
-                            continuity_slot_index = None
-                    continuity_target_date: date | None = None
-                    if base_session is not None:
-                        base_date = base_session.start_time.date()
-                        week_offsets = [
-                            max(0, (session.start_time.date() - base_date).days // 7)
-                            for session in matching_sessions
-                            if session.start_time.date() >= base_date
-                        ]
-                        next_offset = max(week_offsets, default=0) + 1
-                        continuity_target_date = base_date + timedelta(days=7 * next_offset)
+                    if preferred_slot is not None and preferred_slot not in preferred_offsets:
+                        preferred_offsets.append(preferred_slot)
+                    fallback_offset = int(per_day_hours[day])
+                    if fallback_offset not in preferred_offsets:
+                        preferred_offsets.append(fallback_offset)
 
-                    def _day_sort_key(d: date) -> tuple[int, int, int, int, int, int, int]:
-                        anchor_distance = abs(day_indices[d] - anchor_index)
-                        continuity_flag = 1
-                        future_bias = 0
-                        continuity_distance = anchor_distance
-                        if continuity_weekday is not None and d.weekday() == continuity_weekday:
-                            continuity_flag = 0
-                            if continuity_target_date is not None:
-                                future_bias = 0 if d >= continuity_target_date else 1
-                                continuity_distance = abs((d - continuity_target_date).days)
-                            else:
-                                continuity_distance = 0
-                        return (
-                            continuity_flag,
-                            future_bias,
-                            day_indices[d],
-                            continuity_distance,
-                            -weekday_frequencies.get(d.weekday(), 0),
-                            per_day_hours[d],
-                            anchor_distance,
+                    for base_offset in _candidate_base_offsets(day):
+                        block_sessions, attempt_diagnostics = _schedule_block_for_day(
+                            course=course,
+                            class_group=class_group,
+                            link=link,
+                            subgroup_label=subgroup_label,
+                            day=day,
+                            desired_hours=desired_hours,
+                            base_offset=base_offset,
+                            pending_sessions=created_sessions,
+                            reporter=reporter,
                         )
+                        if not block_sessions:
+                            last_failure_reason = attempt_diagnostics.failure_summary(
+                                default="Aucune option compatible trouvée."
+                            )
+                            continue
+                        _register_created_sessions(
+                            course, block_sessions, created_sessions
+                        )
+                        block_hours = sum(
+                            session.duration_hours for session in block_sessions
+                        )
+                        if block_hours > 0:
+                            progress.record(block_hours, sessions=len(block_sessions))
+                            week_tracker.record_sessions(block_sessions)
+                        for session in block_sessions:
+                            reporter.session_created(session)
+                            weekday_frequencies[session.start_time.weekday()] += 1
+                        per_day_hours[day] += block_hours
+                        hours_remaining = max(hours_remaining - block_hours, 0)
+                        block_index += 1
+                        last_failure_reason = None
+                        return True
+                    return False
 
-                    ordered_days = sorted(available_days, key=_day_sort_key)
+                placed = False
+                if (
+                    continuity_target_date is not None
+                    and continuity_target_date in available_days
+                ):
+                    placed = _attempt_day(continuity_target_date)
 
-                    chronology_weeks: set[date] = set()
-                    weekly_limit_weeks: dict[str, set[date]] = defaultdict(set)
-
-                    def _candidate_base_offsets(day: date) -> list[int]:
-                        offsets: list[int] = []
+                if not placed:
+                    for day in ordered_days:
                         if (
-                            continuity_slot_index is not None
-                            and continuity_weekday is not None
-                            and day.weekday() == continuity_weekday
+                            continuity_target_date is not None
+                            and day == continuity_target_date
                         ):
-                            offsets.append(continuity_slot_index)
-                        if desired_hours == 1:
-                            adjacency_offsets = _one_hour_adjacency_offsets(
-                                [class_group],
-                                day,
-                                pending_sessions=created_sessions,
-                                subgroup_label=subgroup_label,
-                            )
-                            for offset in adjacency_offsets:
-                                if offset not in offsets:
-                                    offsets.append(offset)
-                        preferred_slot = _preferred_slot_index_for_groups(
-                            course,
-                            [class_group],
-                            day,
-                            pending_sessions=created_sessions,
-                            subgroup_label=subgroup_label,
-                        )
-                        if preferred_slot is not None and preferred_slot not in offsets:
-                            offsets.append(preferred_slot)
-                        for offset in _slot_priority_indices(course, desired_hours):
-                            if offset not in offsets:
-                                offsets.append(offset)
-                        fallback_offset = int(per_day_hours[day])
-                        if fallback_offset not in offsets:
-                            offsets.append(fallback_offset)
-                        return offsets
+                            continue
+                        if _attempt_day(day):
+                            placed = True
+                            break
 
-                    def _attempt_day(day: date) -> bool:
-                        nonlocal hours_remaining, block_index, last_failure_reason
-                        _abort_if_cancelled(progress)
-                        week_start, _ = _week_bounds(day)
-                        if has_weekly_course_conflict(
-                            course,
-                            class_group,
-                            day,
+                if not placed:
+                    successful_relocation_plan: (
+                        tuple[bool, date, int] | None
+                    ) = None
+
+                    def _simulate_relocation_attempt() -> bool:
+                        nonlocal successful_relocation_plan
+                        if not allow_week_rollover:
+                            return False
+                        backup_created = list(created_sessions)
+                        backup_day_hours = dict(per_day_hours)
+                        backup_weekdays = Counter(weekday_frequencies)
+
+                        def _attempt(require_exact: bool) -> bool:
+                            nested = db.session.begin_nested()
+                            try:
+                                simulated_attempted = set(relocation_weeks)
+                                relocated = _relocate_sessions_for_groups(
+                                    course=course,
+                                    class_groups=[class_group],
+                                    created_sessions=created_sessions,
+                                    per_day_hours=per_day_hours,
+                                    weekday_frequencies=weekday_frequencies,
+                                    reporter=None,
+                                    attempted_weeks=simulated_attempted,
+                                    subgroup_label=subgroup_label,
+                                    context_label=format_class_label(
+                                        class_group,
+                                        link=link,
+                                        subgroup_label=subgroup_label,
+                                    ),
+                                    require_exact_attendees=require_exact,
+                                )
+                                if not relocated:
+                                    return False
+                                candidate_days: list[date] = []
+                                if (
+                                    continuity_target_date is not None
+                                    and continuity_target_date in available_days
+                                ):
+                                    candidate_days.append(continuity_target_date)
+                                for candidate_day in ordered_days:
+                                    if (
+                                        continuity_target_date is not None
+                                        and candidate_day == continuity_target_date
+                                    ):
+                                        continue
+                                    candidate_days.append(candidate_day)
+                                for candidate_day in candidate_days:
+                                    for base_offset in _candidate_base_offsets(candidate_day):
+                                        placement, _ = _schedule_block_for_day(
+                                            course=course,
+                                            class_group=class_group,
+                                            link=link,
+                                            subgroup_label=subgroup_label,
+                                            day=candidate_day,
+                                            desired_hours=desired_hours,
+                                            base_offset=base_offset,
+                                            pending_sessions=created_sessions,
+                                            reporter=None,
+                                        )
+                                        if placement:
+                                            successful_relocation_plan = (
+                                                require_exact,
+                                                candidate_day,
+                                                base_offset,
+                                            )
+                                            return True
+                                return False
+                            finally:
+                                nested.rollback()
+                                created_sessions[:] = backup_created
+                                per_day_hours.clear()
+                                per_day_hours.update(backup_day_hours)
+                                weekday_frequencies.clear()
+                                weekday_frequencies.update(backup_weekdays)
+
+                        for require_exact in (True, False):
+                            if _attempt(require_exact):
+                                return True
+                        return False
+
+                    if (
+                        allow_week_rollover
+                        and _simulate_relocation_attempt()
+                        and successful_relocation_plan
+                    ):
+                        require_exact, candidate_day, base_offset = (
+                            successful_relocation_plan
+                        )
+                        relocated_hours = _relocate_sessions_for_groups(
+                            course=course,
+                            class_groups=[class_group],
+                            created_sessions=created_sessions,
+                            per_day_hours=per_day_hours,
+                            weekday_frequencies=weekday_frequencies,
+                            reporter=reporter,
+                            attempted_weeks=relocation_weeks,
                             subgroup_label=subgroup_label,
-                            pending_sessions=created_sessions,
-                            additional_hours=desired_hours,
-                        ):
-                            label = format_class_label(
+                            context_label=format_class_label(
                                 class_group, link=link, subgroup_label=subgroup_label
-                            )
-                            weekly_limit_weeks[label].add(week_start)
-                            last_failure_reason = (
-                                f"Quota hebdomadaire déjà atteint pour {label}."
-                            )
-                            return False
-                        if not _day_respects_chronology(
-                            course,
-                            class_group,
-                            day,
-                            created_sessions,
-                            subgroup_label=subgroup_label,
-                        ):
-                            chronology_weeks.add(week_start)
-                            last_failure_reason = (
-                                "Chronologie CM → TD → TP impossible à respecter cette semaine."
-                            )
-                            return False
-                        preferred_offsets: list[int] = []
-                        if (
-                            continuity_slot_index is not None
-                            and continuity_weekday is not None
-                            and day.weekday() == continuity_weekday
-                        ):
-                            preferred_offsets.append(continuity_slot_index)
-                        if desired_hours == 1:
-                            adjacency_offsets = _one_hour_adjacency_offsets(
-                                [class_group],
-                                day,
-                                pending_sessions=created_sessions,
-                                subgroup_label=subgroup_label,
-                            )
-                            for offset in adjacency_offsets:
-                                if offset not in preferred_offsets:
-                                    preferred_offsets.append(offset)
-                        preferred_slot = _preferred_slot_index_for_groups(
-                            course,
-                            [class_group],
-                            day,
-                            pending_sessions=created_sessions,
-                            subgroup_label=subgroup_label,
+                            ),
+                            require_exact_attendees=require_exact,
                         )
-                        if preferred_slot is not None and preferred_slot not in preferred_offsets:
-                            preferred_offsets.append(preferred_slot)
-                        fallback_offset = int(per_day_hours[day])
-                        if fallback_offset not in preferred_offsets:
-                            preferred_offsets.append(fallback_offset)
-
-                        for base_offset in _candidate_base_offsets(day):
+                        if relocated_hours:
+                            hours_remaining += relocated_hours
+                            block_index = max(block_index - 1, 0)
                             block_sessions, attempt_diagnostics = _schedule_block_for_day(
                                 course=course,
                                 class_group=class_group,
                                 link=link,
                                 subgroup_label=subgroup_label,
-                                day=day,
+                                day=candidate_day,
                                 desired_hours=desired_hours,
                                 base_offset=base_offset,
                                 pending_sessions=created_sessions,
                                 reporter=reporter,
                             )
-                            if not block_sessions:
-                                last_failure_reason = attempt_diagnostics.failure_summary(
-                                    default="Aucune option compatible trouvée."
+                            if block_sessions:
+                                _register_created_sessions(
+                                    course, block_sessions, created_sessions
                                 )
+                                block_hours = sum(
+                                    session.duration_hours for session in block_sessions
+                                )
+                                if block_hours > 0:
+                                    progress.record(
+                                        block_hours, sessions=len(block_sessions)
+                                    )
+                                    week_tracker.record_sessions(block_sessions)
+                                for session in block_sessions:
+                                    reporter.session_created(session)
+                                    weekday_frequencies[
+                                        session.start_time.weekday()
+                                    ] += 1
+                                per_day_hours.setdefault(candidate_day, 0)
+                                per_day_hours[candidate_day] += block_hours
+                                hours_remaining = max(hours_remaining - block_hours, 0)
+                                block_index += 1
+                                last_failure_reason = None
                                 continue
-                            _register_created_sessions(
-                                course, block_sessions, created_sessions
+                            last_failure_reason = attempt_diagnostics.failure_summary(
+                                default="Aucune option compatible trouvée."
                             )
-                            block_hours = sum(
-                                session.duration_hours for session in block_sessions
-                            )
-                            if block_hours > 0:
-                                progress.record(block_hours, sessions=len(block_sessions))
-                                week_tracker.record_sessions(block_sessions)
-                            for session in block_sessions:
-                                reporter.session_created(session)
-                                weekday_frequencies[session.start_time.weekday()] += 1
-                            per_day_hours[day] += block_hours
-                            hours_remaining = max(hours_remaining - block_hours, 0)
-                            block_index += 1
-                            last_failure_reason = None
-                            return True
-                        return False
-
-                    placed = False
                     if (
-                        continuity_target_date is not None
-                        and continuity_target_date in available_days
+                        allow_week_rollover
+                        and not week_relocation_attempted
+                        and canonical_week_reference is not None
+                        and (course.course_type or "").upper() in {"TD", "TP"}
                     ):
-                        placed = _attempt_day(continuity_target_date)
+                        fallback_hours = _relocate_sessions_for_groups(
+                            course=course,
+                            class_groups=[class_group],
+                            created_sessions=created_sessions,
+                            per_day_hours=per_day_hours,
+                            weekday_frequencies=weekday_frequencies,
+                            reporter=reporter,
+                            attempted_weeks=set(),
+                            subgroup_label=subgroup_label,
+                            context_label=format_class_label(
+                                class_group, link=link, subgroup_label=subgroup_label
+                            ),
+                            require_exact_attendees=(course.course_type or "").upper()
+                            == "TP",
+                            target_week=canonical_week_reference,
+                        )
+                        if fallback_hours:
+                            hours_remaining += fallback_hours
+                            relocation_weeks.clear()
+                            week_relocation_attempted = True
+                            block_index = max(block_index - 1, 0)
+                            continue
 
-                    if not placed:
-                        for day in ordered_days:
-                            if (
-                                continuity_target_date is not None
-                                and day == continuity_target_date
-                            ):
-                                continue
-                            if _attempt_day(day):
-                                placed = True
-                                break
+                    _warn_weekly_limit(reporter, weekly_limit_weeks)
+                    for week_start in sorted(chronology_weeks):
+                        reporter.warning(
+                            f"Chronologie CM → TD → TP impossible pour {class_group.name} "
+                            f"sur la semaine du {week_start.strftime('%d/%m/%Y')}"
+                        )
+                    break
 
-                    if not placed:
-                        successful_relocation_plan: (
-                            tuple[bool, date, int] | None
-                        ) = None
-
-                        def _simulate_relocation_attempt() -> bool:
-                            nonlocal successful_relocation_plan
-                            if not allow_week_rollover:
-                                return False
-                            backup_created = list(created_sessions)
-                            backup_day_hours = dict(per_day_hours)
-                            backup_weekdays = Counter(weekday_frequencies)
-
-                            def _attempt(require_exact: bool) -> bool:
-                                nested = db.session.begin_nested()
-                                try:
-                                    simulated_attempted = set(relocation_weeks)
-                                    relocated = _relocate_sessions_for_groups(
-                                        course=course,
-                                        class_groups=[class_group],
-                                        created_sessions=created_sessions,
-                                        per_day_hours=per_day_hours,
-                                        weekday_frequencies=weekday_frequencies,
-                                        reporter=None,
-                                        attempted_weeks=simulated_attempted,
-                                        subgroup_label=subgroup_label,
-                                        context_label=format_class_label(
-                                            class_group,
-                                            link=link,
-                                            subgroup_label=subgroup_label,
-                                        ),
-                                        require_exact_attendees=require_exact,
-                                    )
-                                    if not relocated:
-                                        return False
-                                    candidate_days: list[date] = []
-                                    if (
-                                        continuity_target_date is not None
-                                        and continuity_target_date in available_days
-                                    ):
-                                        candidate_days.append(continuity_target_date)
-                                    for candidate_day in ordered_days:
-                                        if (
-                                            continuity_target_date is not None
-                                            and candidate_day == continuity_target_date
-                                        ):
-                                            continue
-                                        candidate_days.append(candidate_day)
-                                    for candidate_day in candidate_days:
-                                        for base_offset in _candidate_base_offsets(candidate_day):
-                                            placement, _ = _schedule_block_for_day(
-                                                course=course,
-                                                class_group=class_group,
-                                                link=link,
-                                                subgroup_label=subgroup_label,
-                                                day=candidate_day,
-                                                desired_hours=desired_hours,
-                                                base_offset=base_offset,
-                                                pending_sessions=created_sessions,
-                                                reporter=None,
-                                            )
-                                            if placement:
-                                                successful_relocation_plan = (
-                                                    require_exact,
-                                                    candidate_day,
-                                                    base_offset,
-                                                )
-                                                return True
-                                    return False
-                                finally:
-                                    nested.rollback()
-                                    created_sessions[:] = backup_created
-                                    per_day_hours.clear()
-                                    per_day_hours.update(backup_day_hours)
-                                    weekday_frequencies.clear()
-                                    weekday_frequencies.update(backup_weekdays)
-
-                            for require_exact in (True, False):
-                                if _attempt(require_exact):
-                                    return True
-                            return False
-
-                        if (
-                            allow_week_rollover
-                            and _simulate_relocation_attempt()
-                            and successful_relocation_plan
-                        ):
-                            require_exact, candidate_day, base_offset = (
-                                successful_relocation_plan
-                            )
-                            relocated_hours = _relocate_sessions_for_groups(
-                                course=course,
-                                class_groups=[class_group],
-                                created_sessions=created_sessions,
-                                per_day_hours=per_day_hours,
-                                weekday_frequencies=weekday_frequencies,
-                                reporter=reporter,
-                                attempted_weeks=relocation_weeks,
-                                subgroup_label=subgroup_label,
-                                context_label=format_class_label(
-                                    class_group, link=link, subgroup_label=subgroup_label
-                                ),
-                                require_exact_attendees=require_exact,
-                            )
-                            if relocated_hours:
-                                hours_remaining += relocated_hours
-                                block_index = max(block_index - 1, 0)
-                                block_sessions, attempt_diagnostics = _schedule_block_for_day(
-                                    course=course,
-                                    class_group=class_group,
-                                    link=link,
-                                    subgroup_label=subgroup_label,
-                                    day=candidate_day,
-                                    desired_hours=desired_hours,
-                                    base_offset=base_offset,
-                                    pending_sessions=created_sessions,
-                                    reporter=reporter,
-                                )
-                                if block_sessions:
-                                    _register_created_sessions(
-                                        course, block_sessions, created_sessions
-                                    )
-                                    block_hours = sum(
-                                        session.duration_hours for session in block_sessions
-                                    )
-                                    if block_hours > 0:
-                                        progress.record(
-                                            block_hours, sessions=len(block_sessions)
-                                        )
-                                        week_tracker.record_sessions(block_sessions)
-                                    for session in block_sessions:
-                                        reporter.session_created(session)
-                                        weekday_frequencies[
-                                            session.start_time.weekday()
-                                        ] += 1
-                                    per_day_hours.setdefault(candidate_day, 0)
-                                    per_day_hours[candidate_day] += block_hours
-                                    hours_remaining = max(hours_remaining - block_hours, 0)
-                                    block_index += 1
-                                    last_failure_reason = None
-                                    continue
-                                last_failure_reason = attempt_diagnostics.failure_summary(
-                                    default="Aucune option compatible trouvée."
-                                )
-                        if (
-                            allow_week_rollover
-                            and not week_relocation_attempted
-                            and canonical_week_reference is not None
-                            and (course.course_type or "").upper() in {"TD", "TP"}
-                        ):
-                            fallback_hours = _relocate_sessions_for_groups(
-                                course=course,
-                                class_groups=[class_group],
-                                created_sessions=created_sessions,
-                                per_day_hours=per_day_hours,
-                                weekday_frequencies=weekday_frequencies,
-                                reporter=reporter,
-                                attempted_weeks=set(),
-                                subgroup_label=subgroup_label,
-                                context_label=format_class_label(
-                                    class_group, link=link, subgroup_label=subgroup_label
-                                ),
-                                require_exact_attendees=(course.course_type or "").upper()
-                                == "TP",
-                                target_week=canonical_week_reference,
-                            )
-                            if fallback_hours:
-                                hours_remaining += fallback_hours
-                                relocation_weeks.clear()
-                                week_relocation_attempted = True
-                                block_index = max(block_index - 1, 0)
-                                continue
-
-                        _warn_weekly_limit(reporter, weekly_limit_weeks)
-                        for week_start in sorted(chronology_weeks):
-                            reporter.warning(
-                                f"Chronologie CM → TD → TP impossible pour {class_group.name} "
-                                f"sur la semaine du {week_start.strftime('%d/%m/%Y')}"
-                            )
-                        break
-
-                if hours_remaining > 0:
-                    message = (
-                        f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
-                    )
-                    if last_failure_reason:
-                        message = f"{message} : {last_failure_reason}"
-                    reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
-                    placement_failures.append(message)
-                    week_tracker.register_failure(
-                        week_tracker.target_key(class_group, subgroup_label),
-                        message,
-                    )
+            if hours_remaining > 0:
+                message = (
+                    f"Impossible de planifier {hours_remaining} heure(s) pour {class_group.name}"
+                )
+                if last_failure_reason:
+                    message = f"{message} : {last_failure_reason}"
+                reporter.error(message, suggestions=suggest_schedule_recovery(message, course))
+                placement_failures.append(message)
+                week_tracker.register_failure(
+                    week_tracker.target_key(class_group, subgroup_label),
+                    message,
+                )
         if not placement_failures:
             for link in links:
                 class_group = link.class_group
