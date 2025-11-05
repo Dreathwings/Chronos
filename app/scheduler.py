@@ -960,12 +960,38 @@ def _teacher_candidates_for_link(
     return candidates
 
 
-def _teacher_is_available(teacher: Teacher, start: datetime, end: datetime) -> bool:
+def _teacher_is_available(
+    teacher: Teacher,
+    start: datetime,
+    end: datetime,
+    *,
+    course: Course | None = None,
+    class_group: ClassGroup | None = None,
+    subgroup_label: str | None = None,
+    target_class_ids: Set[int] | None = None,
+) -> bool:
     if not teacher.is_available_during(start, end):
         return False
     for session in teacher.sessions:
         if overlaps(session.start_time, session.end_time, start, end):
             return False
+    allocation_state = _get_allocation_state(course) if course is not None else None
+    if allocation_state is None:
+        return True
+    teacher_id = teacher.id
+    if teacher_id is None:
+        return False
+    duration_hours = max((end - start).total_seconds() / 3600.0, 0.0)
+    if not allocation_state.can_allocate(teacher_id, duration_hours):
+        return False
+    if not allocation_state.can_allocate_weekly_group(
+        teacher_id,
+        start,
+        class_group_id=class_group.id if class_group is not None else None,
+        subgroup_label=subgroup_label,
+        target_class_ids=target_class_ids,
+    ):
+        return False
     return True
 
 
@@ -1024,6 +1050,10 @@ def _availability_intersection_hours(
     if not room_candidates:
         return 0.0
 
+    target_class_ids: Set[int] | None = None
+    if class_group.id is not None:
+        target_class_ids = {int(class_group.id)}
+
     pending_sessions = [
         obj
         for obj in db.session.new
@@ -1048,7 +1078,15 @@ def _availability_intersection_hours(
             ):
                 continue
             if not any(
-                _teacher_is_available(teacher, start_dt, end_dt)
+                _teacher_is_available(
+                    teacher,
+                    start_dt,
+                    end_dt,
+                    course=course,
+                    class_group=class_group,
+                    subgroup_label=subgroup_label,
+                    target_class_ids=target_class_ids,
+                )
                 for teacher in teacher_candidates
             ):
                 continue

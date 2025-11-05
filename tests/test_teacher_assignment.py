@@ -30,6 +30,7 @@ from app.routes import _validate_session_constraints
 from app.scheduler import (
     ScheduleReporter,
     TeacherAllocationState,
+    _availability_intersection_hours,
     _clear_allocation_state,
     _set_allocation_state,
     generate_schedule,
@@ -1896,6 +1897,112 @@ class ScheduleOrderingTestCase(DatabaseTestCase):
         self.assertEqual(len(created), 2)
         self.assertEqual(created[0].class_group_id, limited_group.id)
         self.assertEqual(created[1].class_group_id, flexible_group.id)
+
+    def test_availability_score_honours_teacher_allocation_limits(self) -> None:
+        base_name = CourseName(name="Algèbre")
+        limited_group = ClassGroup(name="Groupe restreint", size=24)
+        flexible_group = ClassGroup(name="Groupe large", size=24)
+        course = Course(
+            name=Course.compose_name("TD", base_name.name, "S1"),
+            course_type="TD",
+            session_length_hours=2,
+            sessions_required=2,
+            semester="S1",
+            configured_name=base_name,
+        )
+        link_limited = CourseClassLink(class_group=limited_group, group_count=1)
+        link_flexible = CourseClassLink(class_group=flexible_group, group_count=1)
+        course.class_links.extend([link_limited, link_flexible])
+
+        teacher_limited = Teacher(name="Alice")
+        teacher_flexible = Teacher(name="Bernard")
+        room = Room(name="B401", capacity=40)
+
+        db.session.add_all(
+            [
+                base_name,
+                course,
+                limited_group,
+                flexible_group,
+                teacher_limited,
+                teacher_flexible,
+                room,
+            ]
+        )
+        db.session.commit()
+
+        link_limited.teacher_a = teacher_limited
+        link_flexible.teacher_a = teacher_flexible
+        course.teachers.extend([teacher_limited, teacher_flexible])
+        course.teacher_allocations.extend(
+            [
+                CourseTeacherAllocation(teacher=teacher_limited, target_hours=2),
+                CourseTeacherAllocation(teacher=teacher_flexible, target_hours=8),
+            ]
+        )
+        db.session.commit()
+
+        limited_availability = TeacherAvailability(
+            teacher=teacher_limited,
+            weekday=0,
+            start_time=time(8, 0),
+            end_time=time(10, 0),
+        )
+        flexible_availabilities = [
+            TeacherAvailability(
+                teacher=teacher_flexible,
+                weekday=weekday,
+                start_time=time(8, 0),
+                end_time=time(18, 0),
+            )
+            for weekday in range(5)
+        ]
+        db.session.add(limited_availability)
+        db.session.add_all(flexible_availabilities)
+        db.session.commit()
+
+        existing_start = datetime(2024, 9, 2, 8, 0, 0)
+        existing_end = existing_start + timedelta(hours=2)
+        existing_session = Session(
+            course=course,
+            teacher=teacher_limited,
+            room=room,
+            class_group=limited_group,
+            start_time=existing_start,
+            end_time=existing_end,
+        )
+        existing_session.attendees = [limited_group]
+        db.session.add(existing_session)
+        db.session.commit()
+
+        allocation_state = TeacherAllocationState(course)
+        _set_allocation_state(course, allocation_state)
+        try:
+            window_start = date(2024, 9, 2)
+            window_end = date(2024, 9, 30)
+            limited_score = _availability_intersection_hours(
+                course=course,
+                link=link_limited,
+                class_group=limited_group,
+                subgroup_label=None,
+                schedule_start=window_start,
+                schedule_end=window_end,
+                allowed_days=None,
+            )
+            flexible_score = _availability_intersection_hours(
+                course=course,
+                link=link_flexible,
+                class_group=flexible_group,
+                subgroup_label=None,
+                schedule_start=window_start,
+                schedule_end=window_end,
+                allowed_days=None,
+            )
+        finally:
+            _clear_allocation_state(course)
+
+        self.assertEqual(limited_score, 0.0)
+        self.assertGreater(flexible_score, 0.0)
 
 
 class ScheduleGenerationFailureTestCase(DatabaseTestCase):
