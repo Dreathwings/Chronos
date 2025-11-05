@@ -48,6 +48,14 @@ def test_room_capacity_validation():
         build_model(validated, DEFAULT_CONFIG)
 
 
+def test_session_priority_uses_availability_intersection():
+    data = load_example("input_small.json")
+    validated = validate_input(data)
+    model = build_model(validated, DEFAULT_CONFIG)
+
+    assert model.session_priority == ["C2#0", "C1#0"]
+    assert model.session_options["C2#0"][0].slot_ids != model.session_options["C1#0"][0].slot_ids
+
 def test_medium_schedule_all_sessions():
     data = load_example("input_medium.json")
     result = generate_schedule(data)

@@ -46,6 +46,7 @@ class SchedulerModel:
     courses: Dict[str, Course]
     global_rules: GlobalRules
     session_options: Dict[str, List[SessionOption]]
+    session_priority: List[str]
     variables: Dict[str, Dict]
 
 
@@ -59,6 +60,8 @@ class ModelBuilder:
         self.sessions: List[Session] = []
         self.session_options: Dict[str, List[SessionOption]] = {}
         self.variables: Dict[str, Dict] = defaultdict(dict)
+        self.session_flexibility: Dict[str, int] = {}
+        self.session_priority: List[str] = []
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -73,12 +76,13 @@ class ModelBuilder:
 
         self._create_sessions(courses)
         self._create_session_options(time_slots, courses, global_rules)
-        self._create_assignment_variables(teachers, rooms, groups, courses)
+        self._create_assignment_variables(time_slots, teachers, rooms, groups, courses)
         self._add_teacher_constraints(teachers)
         self._add_group_constraints(groups)
         self._add_room_constraints(rooms)
         self._add_precedence_constraints(courses)
         self._add_calendar_constraints(teachers, groups, global_rules)
+        self._add_session_priority_strategy()
 
         return SchedulerModel(
             model=self.model,
@@ -90,6 +94,7 @@ class ModelBuilder:
             courses=courses,
             global_rules=global_rules,
             session_options=self.session_options,
+            session_priority=self.session_priority,
             variables=self.variables,
         )
 
@@ -252,11 +257,79 @@ class ModelBuilder:
                 break
         return []
 
+    def _compute_session_flexibility(
+        self,
+        options: List[SessionOption],
+        teacher_vars: Dict[str, cp_model.IntVar],
+        room_vars: Dict[str, cp_model.IntVar],
+        teachers: Dict[str, Teacher],
+        time_slots: Dict[str, TimeSlot],
+    ) -> int:
+        """Measure the total minutes of feasible intersections for a session."""
+
+        if not teacher_vars or not room_vars:
+            return 0
+
+        feasible_slots: set[str] = set()
+        for option in options:
+            if not self._option_has_teacher(option, teacher_vars, teachers):
+                continue
+            feasible_slots.update(option.slot_ids)
+
+        total_minutes = 0
+        for slot_id in feasible_slots:
+            slot = time_slots[slot_id]
+            total_minutes += minutes_between(slot.start, slot.end)
+        return total_minutes
+
+    def _option_has_teacher(
+        self,
+        option: SessionOption,
+        teacher_vars: Dict[str, cp_model.IntVar],
+        teachers: Dict[str, Teacher],
+    ) -> bool:
+        """Return True if some teacher can cover all slots for an option."""
+
+        for teacher_id in teacher_vars:
+            teacher = teachers[teacher_id]
+            if all(
+                slot_id in teacher.availability and slot_id not in teacher.hard_unavailability
+                for slot_id in option.slot_ids
+            ):
+                return True
+        return False
+
+    def _add_session_priority_strategy(self) -> None:
+        """Order session decisions by increasing availability intersections."""
+
+        if "session_option" not in self.variables:
+            return
+
+        ordered_sessions = sorted(
+            self.sessions,
+            key=lambda session: (
+                self.session_flexibility.get(session.session_id, 0),
+                session.session_id,
+            ),
+        )
+        self.session_priority = [session.session_id for session in ordered_sessions]
+
+        for session in ordered_sessions:
+            option_vars = list(self.variables["session_option"][session.session_id].values())
+            if not option_vars:
+                continue
+            self.model.AddDecisionStrategy(
+                option_vars,
+                cp_model.CHOOSE_FIRST,
+                cp_model.SELECT_MAX_VALUE,
+            )
+
     # ------------------------------------------------------------------
     # Variable creation
     # ------------------------------------------------------------------
     def _create_assignment_variables(
         self,
+        time_slots: Dict[str, TimeSlot],
         teachers: Dict[str, Teacher],
         rooms: Dict[str, Room],
         groups: Dict[str, Group],
@@ -337,6 +410,17 @@ class ModelBuilder:
                 end_var
                 == sum(slot_index[option.slot_ids[-1]] * option_vars[option.option_id] for option in options)
             ).WithName(f"end_index[{session.session_id}]")
+
+            flexibility_minutes = self._compute_session_flexibility(
+                options,
+                teacher_vars,
+                room_vars,
+                teachers,
+                time_slots,
+            )
+            if flexibility_minutes <= 0:
+                raise ValueError(f"No feasible placement for session {session.session_id}")
+            self.session_flexibility[session.session_id] = flexibility_minutes
 
     # ------------------------------------------------------------------
     # Hard constraints
