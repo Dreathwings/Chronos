@@ -16,6 +16,8 @@ def _normalise_prefix(raw_prefix: str) -> str:
 class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key")
 
+    DEBUG = os.environ.get("CHRONOS_DEBUG", "1") not in {"0", "false", "False"}
+
     URL_PREFIX = _normalise_prefix(os.environ.get("CHRONOS_URL_PREFIX", "/chronos"))
 
     _default_sqlite = BASE_DIR / "chronos.sqlite3"

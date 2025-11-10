@@ -10,7 +10,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG = Config()
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", CONFIG.SECRET_KEY)
-DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
+_env_debug = os.environ.get("DJANGO_DEBUG")
+if _env_debug is None:
+    DEBUG = CONFIG.DEBUG
+else:
+    DEBUG = _env_debug not in {"0", "false", "False"}
 ALLOWED_HOSTS: list[str] = [host for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",") if host]
 
 INSTALLED_APPS = [
