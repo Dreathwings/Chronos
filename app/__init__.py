@@ -201,9 +201,19 @@ def _ensure_session_class_group_column() -> None:
             )
 
 
-# Remaining helper functions unchanged from the Flask implementation.
-# They continue to rely on ``current_app`` for logging and ``db`` for database
-# access, both of which are provided by the compatibility layer.
+def _ensure_course_class_group_count_column() -> None:
+    engine = db.engine
+    inspector = inspect(engine)
+    if "course_class" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("course_class")}
+    if "group_count" in existing_columns:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
                 text("ALTER TABLE course_class ADD COLUMN group_count INTEGER DEFAULT 1")
             )
     except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
@@ -524,7 +534,6 @@ def _ensure_course_type_column() -> None:
                 text(
                     "ALTER TABLE course ADD COLUMN course_type VARCHAR(3) NOT NULL DEFAULT 'CM'"
                 )
-            )
             )
             connection.execute(
                 text("UPDATE course SET course_type = 'CM' WHERE course_type IS NULL")
