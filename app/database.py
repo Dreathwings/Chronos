@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 import re
 
+import sqlalchemy as sa
 from sqlalchemy import create_engine
 from sqlalchemy.orm import (
     DeclarativeMeta,
@@ -58,6 +59,7 @@ class SQLAlchemy:
         self.Model = Model
         self._engine = None
         self.session = None
+        self.engine = None
 
     def init_app(self, app: Any) -> None:
         uri = app.config.get("SQLALCHEMY_DATABASE_URI")
@@ -81,3 +83,13 @@ class SQLAlchemy:
         if self._engine is None:
             raise RuntimeError("Database engine has not been initialised.")
         self.Model.metadata.drop_all(self._engine)
+
+    def __getattr__(self, name: str) -> Any:
+        """Proxy attribute access to :mod:`sqlalchemy` for column helpers."""
+
+        try:
+            value = getattr(sa, name)
+        except AttributeError as exc:  # pragma: no cover - mirrors Flask-SQLAlchemy
+            raise AttributeError(name) from exc
+        setattr(self, name, value)
+        return value
