@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, List, Optional, Set
 
-from flask import current_app
+from chronos_web.flask_compat import current_app
 
 from . import db
 from .models import (

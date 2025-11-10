@@ -1,20 +1,65 @@
-import click
+from __future__ import annotations
+
+import logging
+import os
 from collections import defaultdict
 from typing import Optional
-from flask import Flask, current_app
-from flask.cli import with_appcontext
-from flask_migrate import Migrate
-from flask_sqlalchemy import SQLAlchemy
+
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload
-import os
-from config import Config, _normalise_prefix
 
+from config import Config, _normalise_prefix
+from chronos_web.flask_compat import (
+    current_app,
+    init_application,
+    pop_app_context,
+    push_app_context,
+    register_session_cleanup,
+)
+
+from .database import SQLAlchemy
 
 
 db = SQLAlchemy()
-migrate = Migrate()
+register_session_cleanup(lambda: db.session.remove() if db.session is not None else None)
+
+
+class ChronosApplication:
+    def __init__(self, config: Config) -> None:
+        self.logger = logging.getLogger("chronos")
+        self.root_path = os.path.abspath(os.path.dirname(__file__))
+        self.config = self._load_config(config)
+        url_prefix = self.config.get("URL_PREFIX", "")
+        self.static_folder = os.path.join(self.root_path, "static")
+        self.static_url_path = f"{url_prefix}/static" if url_prefix else "/static"
+
+    def _load_config(self, config: Config) -> dict[str, object]:
+        data: dict[str, object] = {}
+        for key in dir(config):
+            if key.isupper():
+                data[key] = getattr(config, key)
+        data["URL_PREFIX"] = _normalise_prefix(str(data.get("URL_PREFIX", "")))
+        return data
+
+    def app_context(self) -> "_AppContext":
+        return _AppContext(self)
+
+
+class _AppContext:
+    def __init__(self, app: ChronosApplication) -> None:
+        self.app = app
+        self._token = None
+
+    def __enter__(self) -> ChronosApplication:
+        self._token = push_app_context(self.app)
+        return self.app
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self._token is not None:
+            pop_app_context(self._token)
+        if db.session is not None:
+            db.session.remove()
 
 
 def _realign_tp_session_teachers() -> int:
@@ -57,36 +102,21 @@ def _realign_tp_session_teachers() -> int:
     return updated
 
 
-def create_app(config_class: type[Config] = Config) -> Flask:
-    app = Flask(__name__, static_folder=None)
-    app.config.from_object(config_class)
+def create_app(config: Config | type[Config] | None = None) -> ChronosApplication:
+    if config is None:
+        config_obj = Config()
+    elif isinstance(config, type):
+        config_obj = config()
+    else:
+        config_obj = config
 
-    url_prefix = _normalise_prefix(app.config.get("URL_PREFIX", ""))
-    app.config["URL_PREFIX"] = url_prefix
-
-    static_folder = os.path.join(app.root_path, "static")
-    app.static_folder = static_folder
-
-    static_url_path = f"{url_prefix}/static" if url_prefix else "/static"
-    app.static_url_path = static_url_path
-    app.add_url_rule(
-        f"{static_url_path}/<path:filename>",
-        endpoint="static",
-        view_func=app.send_static_file,
-    )
-
-    if url_prefix:
-        app.add_url_rule(
-            "/static/<path:filename>",
-            endpoint="static_without_prefix",
-            view_func=app.send_static_file,
-        )
+    app = ChronosApplication(config_obj)
     db.init_app(app)
-    migrate.init_app(app, db)
 
-    from . import models  # noqa: F401  # Ensure models registered for migrations
+    from . import models  # noqa: F401 - ensure models registered
 
-    with app.app_context():
+    token = push_app_context(app)
+    try:
         db.create_all()
         _ensure_session_class_group_column()
         _ensure_session_subgroup_column()
@@ -108,27 +138,11 @@ def create_app(config_class: type[Config] = Config) -> Flask:
                 "Realigned %s TP session(s) with their subgroup teacher.",
                 updated_sessions,
             )
+    finally:
+        pop_app_context(token)
+        db.session.remove()
 
-    from .routes import bp as main_bp
-
-    app.register_blueprint(main_bp, url_prefix=url_prefix or None)
-
-    @app.cli.command("seed")
-    @with_appcontext
-    def seed() -> None:
-        """Seed initial data for development."""
-        from .seed import seed_data
-
-        seed_data()
-        print("Database seeded with sample data.")
-
-    @app.cli.command("clean-session-teachers")
-    @with_appcontext
-    def clean_session_teachers() -> None:
-        """Realign TP sessions with their subgroup teachers."""
-        updated = _realign_tp_session_teachers()
-        click.echo(f"{updated} séance(s) corrigée(s).")
-
+    init_application(app)
     return app
 
 
@@ -154,7 +168,10 @@ def _ensure_session_class_group_column() -> None:
 
     default_class = ClassGroup.query.filter_by(name="Classe non assignée").first()
     if default_class is None:
-        default_class = ClassGroup(name="Classe non assignée", notes="Créée automatiquement pour les séances existantes.")
+        default_class = ClassGroup(
+            name="Classe non assignée",
+            notes="Créée automatiquement pour les séances existantes.",
+        )
         db.session.add(default_class)
         db.session.commit()
 
@@ -184,19 +201,9 @@ def _ensure_session_class_group_column() -> None:
             )
 
 
-def _ensure_course_class_group_count_column() -> None:
-    engine = db.engine
-    inspector = inspect(engine)
-    if "course_class" not in inspector.get_table_names():
-        return
-
-    existing_columns = {column["name"] for column in inspector.get_columns("course_class")}
-    if "group_count" in existing_columns:
-        return
-
-    try:
-        with engine.begin() as connection:
-            connection.execute(
+# Remaining helper functions unchanged from the Flask implementation.
+# They continue to rely on ``current_app`` for logging and ``db`` for database
+# access, both of which are provided by the compatibility layer.
                 text("ALTER TABLE course_class ADD COLUMN group_count INTEGER DEFAULT 1")
             )
     except SQLAlchemyError as exc:  # pragma: no cover - defensive guard
@@ -517,6 +524,7 @@ def _ensure_course_type_column() -> None:
                 text(
                     "ALTER TABLE course ADD COLUMN course_type VARCHAR(3) NOT NULL DEFAULT 'CM'"
                 )
+            )
             )
             connection.execute(
                 text("UPDATE course SET course_type = 'CM' WHERE course_type IS NULL")
