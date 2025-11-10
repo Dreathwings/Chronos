@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import (
     DeclarativeMeta,
     Query,
-    declarative_base,
+    as_declarative,
     scoped_session,
     sessionmaker,
 )
@@ -48,13 +48,14 @@ class BaseQuery(Query):
         return instance
 
 
-class Model(metaclass=_ModelMeta):
+@as_declarative(metaclass=_ModelMeta)
+class Model:
     __abstract__ = True
 
 
 class SQLAlchemy:
     def __init__(self) -> None:
-        self.Model = declarative_base(cls=Model)
+        self.Model = Model
         self._engine = None
         self.session = None
 
