@@ -1,11 +1,37 @@
 from __future__ import annotations
 
 from typing import Any
+import re
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Query, scoped_session, sessionmaker
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import (
+    DeclarativeMeta,
+    Query,
+    declarative_base,
+    scoped_session,
+    sessionmaker,
+)
 from django.http import Http404
+
+
+def _camel_to_snake(name: str) -> str:
+    """Convert ``CamelCase`` to ``snake_case`` for implicit table names."""
+
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+class _ModelMeta(DeclarativeMeta):
+    """Declarative metaclass that mimics Flask-SQLAlchemy defaults."""
+
+    def __init__(cls, name, bases, dct, **kwargs):  # type: ignore[override]
+        if not dct.get("__abstract__"):
+            has_explicit_table = "__tablename__" in dct or "__table__" in dct
+            inherits_table = any(
+                getattr(base, "__mapper__", None) is not None for base in bases
+            )
+            if not has_explicit_table and not inherits_table:
+                cls.__tablename__ = _camel_to_snake(name)
+        super().__init__(name, bases, dct, **kwargs)
 
 
 class BaseQuery(Query):
@@ -22,9 +48,13 @@ class BaseQuery(Query):
         return instance
 
 
+class Model(metaclass=_ModelMeta):
+    __abstract__ = True
+
+
 class SQLAlchemy:
     def __init__(self) -> None:
-        self.Model = declarative_base()
+        self.Model = declarative_base(cls=Model)
         self._engine = None
         self.session = None
 
