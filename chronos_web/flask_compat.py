@@ -363,6 +363,7 @@ def _build_view(blueprint: Blueprint, route: RouteDefinition) -> Callable[[HttpR
             raise RuntimeError("Chronos application has not been initialised.")
         token_app = push_app_context(_application)
         token_blueprint = push_blueprint_context(blueprint)
+        token_request = push_request_context(django_request)
         try:
             result = route.view_func(**kwargs)
             response = _convert_result(result)
@@ -371,6 +372,7 @@ def _build_view(blueprint: Blueprint, route: RouteDefinition) -> Callable[[HttpR
         finally:
             if _session_cleanup is not None:
                 _session_cleanup()
+            pop_request_context(token_request)
             pop_blueprint_context(token_blueprint)
             pop_app_context(token_app)
         return response
