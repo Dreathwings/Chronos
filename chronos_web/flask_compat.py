@@ -14,9 +14,10 @@ from django.http import (  # type: ignore
     HttpResponseRedirect,
     JsonResponse,
 )
-from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods
+
+from .jinja import get_environment
 
 
 _current_app: ContextVar[Any | None] = ContextVar("chronos_current_app", default=None)
@@ -312,7 +313,14 @@ def render_template(template_name: str, **context: Any) -> HttpResponse:
         for processor in blueprint.context_processors:
             combined.update(processor())
     combined.update(context)
-    return render(req.django_request, template_name, combined)
+    env = get_environment()
+    env.globals.setdefault("url_for", url_for)
+    env.globals.setdefault("get_flashed_messages", get_flashed_messages)
+    if _application is not None:
+        env.globals.setdefault("config", getattr(_application, "config", {}))
+    template = env.get_template(template_name)
+    rendered = template.render(combined)
+    return HttpResponse(rendered)
 
 
 def redirect(location: str) -> HttpResponseRedirect:
