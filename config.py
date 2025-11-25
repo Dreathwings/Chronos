@@ -1,4 +1,8 @@
 import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+
 
 def _normalise_prefix(raw_prefix: str) -> str:
     raw_prefix = raw_prefix.strip()
@@ -12,19 +16,15 @@ def _normalise_prefix(raw_prefix: str) -> str:
 class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key")
 
-    URL_PREFIX = _normalise_prefix(os.environ.get("FLASK_URL_PREFIX", "/chronos"))
+    DEBUG = os.environ.get("CHRONOS_DEBUG", "1") not in {"0", "false", "False"}
 
-    _db_user = os.environ.get("DATABASE_USER", "warren")
-    _db_password = os.environ.get("DATABASE_PASSWORD", "EPKdVcgcaBYh2l*b")
-    _db_host = os.environ.get("DATABASE_HOST", "localhost")
-    _db_port = os.environ.get("DATABASE_PORT", "3306")
-    _db_name = os.environ.get("DATABASE_NAME", "chronos")
+    URL_PREFIX = _normalise_prefix(os.environ.get("CHRONOS_URL_PREFIX", "/chronos"))
 
-    _default_uri = (
-        f"mysql+pymysql://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{_db_name}"
+    _default_sqlite = BASE_DIR / "chronos.sqlite3"
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        "DATABASE_URL", f"sqlite:///{_default_sqlite}"
     )
 
-    SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL", _default_uri)
 
 class TestConfig(Config):
     TESTING = True

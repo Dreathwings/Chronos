@@ -29,6 +29,62 @@
           data-bs-parent="#courseDetailsAccordion"
         >
           <div class="accordion-body">
+            <div class="course-optimization-card mb-3">
+              <div class="d-flex align-items-start gap-2 mb-2">
+                <div class="badge bg-primary rounded-pill">Guide</div>
+                <div>
+                  <div class="fw-semibold">Checklist pour optimiser la génération</div>
+                  <div class="text-muted small">Complétez ces éléments pour aider l'algorithme à proposer un planning pertinent.</div>
+                </div>
+              </div>
+              <ul class="list-unstyled mb-0 small">
+                <li class="d-flex align-items-start gap-2 mb-2">
+                  <span class="badge rounded-pill {% if course.configured_name %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                    {% if course.configured_name %}OK{% else %}À renseigner{% endif %}
+                  </span>
+                  <div>
+                    <div class="fw-semibold">Nom standardisé</div>
+                    <div class="text-muted">Associez un libellé configuré pour harmoniser les regroupements par matière.</div>
+                  </div>
+                </li>
+                <li class="d-flex align-items-start gap-2 mb-2">
+                  <span class="badge rounded-pill {% if course.teachers %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                    {% if course.teachers %}OK{% else %}À renseigner{% endif %}
+                  </span>
+                  <div>
+                    <div class="fw-semibold">Enseignants et volume d'heures</div>
+                    <div class="text-muted">Sélectionnez les enseignants et ajustez les heures ciblées pour répartir automatiquement la charge.</div>
+                  </div>
+                </li>
+                <li class="d-flex align-items-start gap-2 mb-2">
+                  <span class="badge rounded-pill {% if course.class_links %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                    {% if course.class_links %}OK{% else %}À renseigner{% endif %}
+                  </span>
+                  <div>
+                    <div class="fw-semibold">Classes et sous-groupes</div>
+                    <div class="text-muted">Associez les classes concernées ; pour les TP, les demi-groupes seront générés automatiquement.</div>
+                  </div>
+                </li>
+                <li class="d-flex align-items-start gap-2 mb-2">
+                  <span class="badge rounded-pill {% if selected_course_week_values %}bg-success{% else %}bg-info{% endif %}">
+                    {% if selected_course_week_values %}Ciblé{% else %}Optionnel{% endif %}
+                  </span>
+                  <div>
+                    <div class="fw-semibold">Semaines autorisées</div>
+                    <div class="text-muted">Cochez les semaines pertinentes pour réduire les conflits avec les autres cours.</div>
+                  </div>
+                </li>
+                <li class="d-flex align-items-start gap-2">
+                  <span class="badge rounded-pill {% if course.equipments or course.softwares or course.requires_computers %}bg-success{% else %}bg-info{% endif %}">
+                    {% if course.equipments or course.softwares or course.requires_computers %}Ciblé{% else %}Optionnel{% endif %}
+                  </span>
+                  <div>
+                    <div class="fw-semibold">Contraintes matérielles</div>
+                    <div class="text-muted">Indiquez ordinateurs, équipements et logiciels requis pour filtrer les salles compatibles.</div>
+                  </div>
+                </li>
+              </ul>
+            </div>
             <form method="post" class="vstack gap-3">
               <input type="hidden" name="form" value="update">
               <div>

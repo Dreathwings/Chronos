@@ -72,6 +72,23 @@
   margin-top: 0.25rem;
 }
 
+.course-detail-layout .course-optimization-card {
+  background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%);
+  border: 1px solid rgba(79, 70, 229, 0.12);
+  border-radius: 0.85rem;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 0.25rem 1rem rgba(15, 23, 42, 0.05);
+}
+
+.course-detail-layout .course-optimization-card .badge {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.course-detail-layout .course-optimization-card .fw-semibold {
+  letter-spacing: 0.01em;
+}
+
 .table > tbody:nth-child(2) > tr > td:nth-child(1){
   width: 12.5%;
 }

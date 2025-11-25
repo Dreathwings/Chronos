@@ -7,7 +7,7 @@ from collections import OrderedDict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, List, MutableSequence
 
-from flask import (
+from chronos_web.flask_compat import (
     Blueprint,
     current_app,
     flash,
