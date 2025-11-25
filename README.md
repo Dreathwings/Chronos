@@ -89,12 +89,21 @@ Pour utiliser la génération automatique depuis la fiche d'un cours (`/matiere/
 1. **Le cours est correctement paramétré** :
    - Renseignez les dates de début et de fin, le nombre de séances requises et la durée d'une séance dans le formulaire « Contraintes du cours ».
    - Associez au moins une classe au cours, ainsi que les enseignants susceptibles d'intervenir, les équipements/logiciels requis et le besoin éventuel en ordinateurs.
+   - Donnez un intitulé clair (ex. « Algo — TD groupe A ») et, si besoin, un commentaire descriptif pour préciser l'organisation des séances (groupes parallèles, alternance CM/TD/TP, etc.).
 2. **Les ressources sont prêtes** :
    - Pour chaque enseignant sélectionné, configurez ses disponibilités hebdomadaires et sa charge maximale dans l'onglet enseignant afin que l'algorithme puisse vérifier la disponibilité et le volume horaire.
    - Vérifiez que les salles disposent de capacités, d'ordinateurs, de matériels et de logiciels conformes aux contraintes du cours.
    - Saisissez les indisponibilités ponctuelles des classes si nécessaire afin d'éviter des conflits.
 3. **Lancez la génération** :
    - Depuis la fiche du cours, cliquez sur **« Générer automatiquement »**. L'application créera autant de séances que nécessaire en respectant les fenêtres horaires de travail (08h-18h avec pauses définies) et en cherchant un créneau compatible pour la classe, un enseignant disponible et une salle adaptée.
+
+### Astuces pour décrire un cours de façon optimale
+
+- **Séparer les variantes** : créez des cours distincts pour chaque modalité (CM, TD, TP) ou groupe parallèle afin que le générateur puisse répartir indépendamment les séances et éviter les conflits entre groupes.
+- **Contraintes temporelles explicites** : utilisez des dates de début/fin réalistes et adaptez le nombre de séances à la durée cible pour éviter que l'algorithme ne concentre tout sur quelques jours.
+- **Ressources bien typées** : ajoutez uniquement les équipements/logiciels vraiment indispensables et cochez « nécessite des ordinateurs » seulement si c'est bloquant. Moins de contraintes superflues = plus de placements possibles.
+- **Capacité des classes** : renseignez l'effectif de chaque classe et associez les groupes concernés pour guider le choix de salles adaptées.
+- **Précisions libres** : utilisez le champ de commentaire du cours pour noter les exigences pédagogiques (enseignant préférentiel, salles interdites, alternance hebdomadaire). Ces informations facilitent les ajustements manuels après la génération.
 
 En cas d'échec (séances restantes), un avertissement est consigné dans les logs et vous pouvez compléter la planification manuellement à l'aide du formulaire « Ajouter une séance manuelle ».
 
