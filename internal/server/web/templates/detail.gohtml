@@ -1,0 +1,77 @@
+{{define "detail"}}
+{{template "base_start" .}}
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="lg:col-span-2 space-y-6">
+      <div class="card">
+        <div class="relative">
+          {{if .Recipe.Summary.Image}}<img src="{{.Recipe.Summary.Image}}" alt="{{.Recipe.Summary.Title}}" class="w-full rounded-xl object-cover">{{end}}
+          <div class="absolute top-3 right-3 flex gap-2">
+            {{if .Recipe.Summary.HelloFreshURL}}<a href="{{.Recipe.Summary.HelloFreshURL}}" class="icon-btn" target="_blank" rel="noopener">Voir HelloFresh</a>{{end}}
+            <a href="{{.Recipe.Summary.HfreshURL}}" class="icon-btn" target="_blank" rel="noopener">hfresh.info</a>
+          </div>
+        </div>
+        <div class="mt-4 flex items-start justify-between gap-3">
+          <div>
+            <p class="text-sm uppercase tracking-wide text-lime-600 font-semibold">Recette HelloFresh</p>
+            <h1 class="text-3xl font-semibold">{{.Recipe.Summary.Title}}</h1>
+            {{if .Recipe.Summary.Tagline}}<p class="text-zinc-600 dark:text-zinc-300 mt-2">{{.Recipe.Summary.Tagline}}</p>{{end}}
+          </div>
+          {{if .Recipe.Summary.Difficulty}}<span class="badge neutral">{{.Recipe.Summary.Difficulty}}</span>{{end}}
+        </div>
+        <div class="flex flex-wrap items-center gap-4 py-3 text-sm text-zinc-600 dark:text-zinc-300 border-b border-zinc-200 dark:border-zinc-700">
+          {{if .Recipe.Summary.PrepTime}}<span>⏱️ {{.Recipe.Summary.PrepTime}}</span>{{end}}
+          {{if .Recipe.Summary.Cuisine}}<span>🌍 {{.Recipe.Summary.Cuisine}}</span>{{end}}
+        </div>
+        <div class="flex flex-wrap gap-2 mt-3">
+          {{range .Recipe.Tags}}<span class="badge">{{.}}</span>{{end}}
+        </div>
+        <form method="POST" action="/shopping-list/add" class="mt-4 flex gap-2 items-center">
+          <input type="hidden" name="slug" value="{{.Recipe.Summary.Slug}}">
+          <label class="text-sm text-zinc-500">Personnes</label>
+          <input type="number" name="servings" min="1" value="{{if gt .Recipe.BaseServings 0}}{{.Recipe.BaseServings}}{{else}}2{{end}}" class="field w-24">
+          <button type="submit" class="btn-primary">Ajouter à la liste de courses</button>
+        </form>
+      </div>
+
+      <section>
+        <h2 class="section-title">Préparation</h2>
+        <div class="space-y-4">
+          {{range .Recipe.Steps}}
+            <div class="card">
+              <div class="flex gap-4">
+                <div class="h-10 w-10 rounded-full bg-lime-500 text-white font-semibold flex items-center justify-center">{{.Number}}</div>
+                <div class="flex-1 space-y-2">
+                  {{if .Image}}<img src="{{.Image}}" alt="Étape {{.Number}}" class="h-40 rounded-lg object-cover w-full md:w-auto">{{end}}
+                  <p class="text-zinc-700 dark:text-zinc-200">{{.Description}}</p>
+                </div>
+              </div>
+            </div>
+          {{end}}
+        </div>
+      </section>
+    </div>
+
+    <aside class="space-y-6">
+      <div class="card sticky top-24">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold">Ingrédients</h2>
+          {{if .Recipe.YieldOptions}}
+            <span class="text-sm text-zinc-500">Base: {{.Recipe.BaseServings}} pers.</span>
+          {{end}}
+        </div>
+        <div class="space-y-3">
+          {{range .Recipe.Ingredients}}
+            <div class="flex items-center gap-3">
+              {{if .Image}}<img src="{{.Image}}" alt="{{.Name}}" class="h-12 w-12 rounded object-cover">{{end}}
+              <div class="flex-1">
+                <p class="font-medium">{{.Name}}</p>
+                <p class="text-sm text-zinc-500">{{.Quantity}}</p>
+              </div>
+            </div>
+          {{end}}
+        </div>
+      </div>
+    </aside>
+  </div>
+{{template "base_end" .}}
+{{end}}

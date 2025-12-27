@@ -109,6 +109,34 @@ L'algorithme de génération automatique est centralisé dans [`app/scheduler.py
 
 Après toute modification, relancez la commande `flask --app app run --debug` afin de recharger le serveur, puis effectuez une génération automatique sur un cours test pour valider le nouveau comportement.
 
+## Clone HelloFresh (scraping) — serveur Go (port 3044)
+
+Une nouvelle application Go permet de cloner l'interface de [hfresh.info](https://hfresh.info/fr-FR) : liste exhaustive des recettes, menu de la semaine, fiches recettes détaillées et liste de courses avec choix du nombre de personnes.
+
+### Lancer le serveur
+
+```bash
+go run ./cmd/hfresh
+```
+
+Le serveur écoute sur le port `3044` par défaut.
+
+### Configuration
+
+- `HFRESH_SOURCE` (défaut : `https://hfresh.info`) : URL source à scraper.
+- `PORT` (défaut : `3044`) : port HTTP local.
+- `SCRAPER_MAX_PAGES` (défaut : `25`) : nombre maximum de pages de recettes à aspirer lors d'un rafraîchissement (utilisez `0` ou la valeur spéciale `pages=all` sur l'endpoint `/refresh` pour parcourir toutes les pages de hfresh.info).
+
+### Usage
+
+- `/` : toutes les recettes avec recherche, filtres, ajout rapide à la liste de courses.
+- `/menus` : recettes de la semaine en cours (filtres identiques).
+- `/recipes/<slug>` : détail d'une recette (ingrédients, étapes, badges).
+- `/shopping-list` : liste de courses, agrégation des ingrédients et gestion des quantités par personne.
+- `/refresh` (POST) : rafraîchit le catalogue en scrapant hfresh.info selon la limite `SCRAPER_MAX_PAGES`.
+
+Les données sont mises en cache dans `data/recipes.json` pour accélérer les lancements suivants et éviter des scrapes complets à chaque démarrage. Lorsque vous ajoutez une recette à la liste de courses, les ingrédients sont automatiquement redimensionnés selon le nombre de personnes saisi.
+
 ## Licence
 
 MIT

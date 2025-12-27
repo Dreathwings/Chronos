@@ -167,6 +167,15 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Go build artifacts
+bin/
+*.test
+*.exe
+*.out
+
+# Scraper cache
+data/*.json
+
 # Ruff stuff:
 .ruff_cache/
 

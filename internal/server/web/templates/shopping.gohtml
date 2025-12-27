@@ -1,0 +1,58 @@
+{{define "shopping"}}
+{{template "base_start" .}}
+  <div class="flex flex-col gap-4">
+    <div class="flex items-start justify-between">
+      <div>
+        <h1 class="text-3xl font-semibold">Liste de courses</h1>
+        <p class="text-zinc-600 dark:text-zinc-300">Ajoutez des recettes avec le nombre de personnes pour générer automatiquement vos courses.</p>
+      </div>
+      <a href="/" class="btn-secondary">Ajouter des recettes</a>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <section class="lg:col-span-2 card">
+        <h2 class="text-lg font-semibold mb-4">Recettes sélectionnées</h2>
+        {{if .Entries}}
+          <div class="space-y-3">
+            {{range $index, $entry := .Entries}}
+              <form method="POST" action="/shopping-list/remove" class="flex items-center gap-3 border border-zinc-100 dark:border-zinc-700 rounded-lg p-3">
+                <input type="hidden" name="index" value="{{$index}}">
+                <div class="flex-1">
+                  {{with (index $.Recipes $entry.RecipeSlug)}}
+                    <p class="font-semibold">{{.Title}}</p>
+                  {{else}}
+                    <p class="font-semibold">{{$entry.RecipeSlug}}</p>
+                  {{end}}
+                  <p class="text-sm text-zinc-500">Pour {{$entry.Servings}} personne(s)</p>
+                </div>
+                <button type="submit" class="icon-btn" title="Retirer">✕</button>
+              </form>
+            {{end}}
+          </div>
+        {{else}}
+          <p class="text-zinc-500">Aucune recette dans votre liste.</p>
+        {{end}}
+      </section>
+
+      <section class="card">
+        <h2 class="text-lg font-semibold mb-4">Synthèse des ingrédients</h2>
+        {{if .Ingredients}}
+          <div class="space-y-3">
+            {{range .Ingredients}}
+              <div class="border border-zinc-100 dark:border-zinc-700 rounded-lg p-3">
+                <div class="flex justify-between items-start">
+                  <p class="font-semibold">{{.Name}}</p>
+                  {{if .Quantity}}<span class="badge neutral">{{.Quantity}}</span>{{end}}
+                </div>
+                <p class="text-xs text-zinc-500 mt-1">Recettes: {{join .Recipes ", "}}</p>
+              </div>
+            {{end}}
+          </div>
+        {{else}}
+          <p class="text-zinc-500">Ajoutez des recettes pour construire la liste.</p>
+        {{end}}
+      </section>
+    </div>
+  </div>
+{{template "base_end" .}}
+{{end}}
