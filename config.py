@@ -25,6 +25,13 @@ class Config:
     )
 
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL", _default_uri)
+    SCHEDULE_SEARCH_TIME_LIMIT = float(os.environ.get("SCHEDULE_SEARCH_TIME_LIMIT", "5.0"))
+    SCHEDULE_SEARCH_ITERATION_LIMIT = int(
+        os.environ.get("SCHEDULE_SEARCH_ITERATION_LIMIT", "20000")
+    )
+    SCHEDULE_ALLOW_PARTIAL_COMMIT = (
+        os.environ.get("SCHEDULE_ALLOW_PARTIAL_COMMIT", "0").lower() in {"1", "true", "yes"}
+    )
 
 class TestConfig(Config):
     TESTING = True
